@@ -51,5 +51,28 @@ if [ "${DRY_RUN}" = "1" ]; then
   exit 0
 fi
 
-# State dir + symlink + hooks come in tasks 11–13.
-ok "preflight passed (state dir/symlink/hooks land in subsequent tasks)"
+init_paths
+
+create_state_dir() {
+  mkdir -p \
+    "${BROWSER_SKILL_HOME}" \
+    "${SITES_DIR}" \
+    "${SESSIONS_DIR}" \
+    "${CREDENTIALS_DIR}" \
+    "${CAPTURES_DIR}" \
+    "${FLOWS_DIR}"
+  chmod 700 \
+    "${BROWSER_SKILL_HOME}" \
+    "${SITES_DIR}" \
+    "${SESSIONS_DIR}" \
+    "${CREDENTIALS_DIR}" \
+    "${CAPTURES_DIR}" \
+    "${FLOWS_DIR}"
+  # Defense in depth: if this dir ever ends up inside a git repo, ignore it.
+  printf '*\n' > "${BROWSER_SKILL_HOME}/.gitignore"
+  # Schema version marker.
+  printf '1\n' > "${BROWSER_SKILL_HOME}/version"
+  ok "state dir ready: ${BROWSER_SKILL_HOME}"
+}
+
+create_state_dir
