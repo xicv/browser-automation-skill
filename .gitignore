@@ -1,0 +1,9 @@
+# Editor/OS detritus (full credential rules added in Task 14)
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.log
+node_modules/
