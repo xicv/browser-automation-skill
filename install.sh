@@ -76,3 +76,24 @@ create_state_dir() {
 }
 
 create_state_dir
+
+install_symlink() {
+  local skills_dir="${HOME}/.claude/skills"
+  local link="${skills_dir}/browser-automation-skill"
+  mkdir -p "${skills_dir}"
+
+  if [ -L "${link}" ]; then
+    ln -sfn "${REPO_ROOT}" "${link}"
+    ok "updated existing symlink: ${link} -> ${REPO_ROOT}"
+  elif [ -e "${link}" ]; then
+    die "${EXIT_PREFLIGHT_FAILED}" "${link} exists and is not a symlink; refusing to overwrite. Move it aside and re-run."
+  else
+    ln -s "${REPO_ROOT}" "${link}"
+    ok "created symlink: ${link} -> ${REPO_ROOT}"
+  fi
+}
+
+install_symlink
+ok "install complete; next steps:"
+ok "  1. /browser doctor       (verify in Claude Code)"
+ok "  2. /browser add-site     (register your first site, lands in phase 2)"

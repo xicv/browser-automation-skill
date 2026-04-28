@@ -70,3 +70,23 @@ load helpers
   [ -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
   teardown_temp_home
 }
+
+@test "install.sh: creates symlink ~/.claude/skills/browser-automation-skill -> repo" {
+  setup_temp_home
+  run bash "${REPO_ROOT}/install.sh" --user
+  assert_status 0
+  local link="${HOME}/.claude/skills/browser-automation-skill"
+  [ -L "${link}" ]
+  [ "$(readlink "${link}")" = "${REPO_ROOT}" ]
+  teardown_temp_home
+}
+
+@test "install.sh: refuses to overwrite a non-symlink at the target path" {
+  setup_temp_home
+  mkdir -p "${HOME}/.claude/skills"
+  echo "hand-written content" > "${HOME}/.claude/skills/browser-automation-skill"
+  run bash "${REPO_ROOT}/install.sh" --user
+  assert_status "${EXIT_PREFLIGHT_FAILED:-20}"
+  assert_output_contains "not a symlink"
+  teardown_temp_home
+}
