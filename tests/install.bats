@@ -110,3 +110,16 @@ load helpers
   teardown_temp_home
   [ "${result}" = ".githooks" ]
 }
+
+@test "SKILL.md: exists and has frontmatter with required fields" {
+  [ -f "${REPO_ROOT}/SKILL.md" ]
+  head -20 "${REPO_ROOT}/SKILL.md" | grep -q '^name: browser-automation-skill$'
+  head -20 "${REPO_ROOT}/SKILL.md" | grep -q '^description:'
+  head -20 "${REPO_ROOT}/SKILL.md" | grep -q '^allowed-tools:'
+}
+
+@test "README.md: has install + first-flow sections" {
+  grep -q '^## Install' "${REPO_ROOT}/README.md"
+  grep -q '^### Personal' "${REPO_ROOT}/README.md"
+  grep -q '/browser doctor' "${REPO_ROOT}/README.md"
+}
