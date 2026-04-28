@@ -147,3 +147,35 @@ summary_json() {
   done
   jq -nc "${args[@]}" "${jq_filter}"
 }
+
+# --- Timeout wrapper ---
+# with_timeout SECONDS COMMAND ARGS...
+# Wraps `timeout` (GNU) or `gtimeout` (macOS coreutils) or a hand-rolled fallback.
+# On timeout: kills the child, returns EXIT_TOOL_TIMEOUT (43).
+# On success: returns the child's exit code.
+with_timeout() {
+  local secs="$1"
+  shift
+  local rc=0
+
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --preserve-status -k 2 "${secs}" "$@" || rc=$?
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout --preserve-status -k 2 "${secs}" "$@" || rc=$?
+  else
+    # Fallback: spawn child + watcher in subshell.
+    "$@" &
+    local child=$!
+    ( sleep "${secs}"; kill -TERM "${child}" 2>/dev/null; sleep 2; kill -KILL "${child}" 2>/dev/null ) &
+    local watcher=$!
+    wait "${child}" 2>/dev/null || rc=$?
+    kill "${watcher}" 2>/dev/null || true
+  fi
+
+  # 124 = GNU timeout's "timed out" code; 137 = SIGKILL; 143 = SIGTERM (fallback).
+  # Map any of these timeout signals to our 43.
+  if [ "${rc}" = "124" ] || [ "${rc}" = "137" ] || [ "${rc}" = "143" ]; then
+    return "${EXIT_TOOL_TIMEOUT}"
+  fi
+  return "${rc}"
+}

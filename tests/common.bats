@@ -96,3 +96,19 @@ load helpers
   run bash -c "source '${LIB_DIR}/common.sh'; summary_json verb=doctor lonely_key status=ok"
   assert_status "${EXIT_USAGE_ERROR:-2}"
 }
+
+@test "common.sh: with_timeout returns command's exit code on success" {
+  run bash -c "source '${LIB_DIR}/common.sh'; with_timeout 5 true"
+  assert_status 0
+}
+
+@test "common.sh: with_timeout kills slow command and returns 43 (TOOL_TIMEOUT)" {
+  run bash -c "source '${LIB_DIR}/common.sh'; with_timeout 1 sleep 10"
+  assert_status "${EXIT_TOOL_TIMEOUT:-43}"
+}
+
+@test "common.sh: with_timeout passes args through correctly" {
+  run bash -c "source '${LIB_DIR}/common.sh'; with_timeout 5 printf '%s|%s|%s\n' a b c"
+  assert_status 0
+  [ "${output}" = "a|b|c" ]
+}
