@@ -53,3 +53,31 @@ teardown() {
     assert_status 1   # not ignored
   done
 }
+
+@test "pre-commit: blocks staged plaintext password JSON" {
+  cp -r "${REPO_ROOT}/.githooks" .githooks
+  git config core.hooksPath .githooks
+  printf '%s\n' '{"password":"hunter2"}' > leak.json
+  git add -f leak.json
+  run git commit -m "should fail" --no-gpg-sign
+  assert_status 1
+  assert_output_contains "rejected"
+}
+
+@test "pre-commit: blocks staged .pem file" {
+  cp -r "${REPO_ROOT}/.githooks" .githooks
+  git config core.hooksPath .githooks
+  printf -- '-----BEGIN PRIVATE KEY-----\nfake\n' > my.pem
+  git add -f my.pem
+  run git commit -m "should fail" --no-gpg-sign
+  assert_status 1
+}
+
+@test "pre-commit: allows clean commits" {
+  cp -r "${REPO_ROOT}/.githooks" .githooks
+  git config core.hooksPath .githooks
+  echo "hello world" > README.md
+  git add README.md
+  run git commit -m "ok" --no-gpg-sign
+  assert_status 0
+}

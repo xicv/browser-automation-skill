@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Credential-leak blocker. Refuses to commit files matching credential patterns
+# OR diffs containing password-shaped strings.
+set -euo pipefail
+
+red()    { printf '\033[0;31m%s\033[0m\n' "$*" >&2; }
+yellow() { printf '\033[0;33m%s\033[0m\n' "$*" >&2; }
+
+# 1. File-name patterns. Reject if any staged file matches.
+banned_patterns=(
+  '*.pem' '*.key' '*.crt' '*.p12' '*.pfx' '*.keystore' '*.jks' '*.asc' '*.gpg'
+  '*.creds.json' '*.session.json'
+  '*.har'
+  'id_rsa' 'id_ed25519' 'id_ecdsa'
+  '.env' '.env.*'
+  'secrets.json' 'secrets.yaml' 'secrets.yml'
+  'credentials.json' 'credentials.yaml'
+)
+
+leaked=()
+while IFS= read -r f; do
+  [ -z "${f}" ] && continue
+  for pat in "${banned_patterns[@]}"; do
+    case "${f}" in
+      ${pat}|*/${pat})
+        leaked+=("${f}")
+        ;;
+    esac
+  done
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
+if [ "${#leaked[@]}" -gt 0 ]; then
+  red "rejected: staged files match credential-shaped patterns:"
+  for f in "${leaked[@]}"; do red "  - ${f}"; done
+  yellow "  remediation: move credentials to ~/.browser-skill/, add patterns to .gitignore,"
+  yellow "  or pass --no-verify if you are 100% sure (NOT RECOMMENDED)."
+  exit 1
+fi
+
+# 2. Diff content scan: password-shaped strings.
+suspicious="$(git diff --cached -U0 \
+  | grep -E '^\+' \
+  | grep -E '"password"[[:space:]]*:[[:space:]]*"[^"]{3,}"' \
+  | grep -viE 'mask|example|placeholder|redacted|\*\*\*|hunter2.*test' \
+  || true)"
+
+if [ -n "${suspicious}" ]; then
+  red "rejected: diff contains password-shaped string:"
+  printf '%s\n' "${suspicious}" | sed 's/^/  /' >&2
+  yellow "  remediation: remove the literal value before committing."
+  exit 1
+fi
+
+exit 0
