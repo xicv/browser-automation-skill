@@ -31,3 +31,23 @@ load helpers
   last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
   printf '%s' "${last_json}" | jq -e '.verb == "doctor"' >/dev/null
 }
+
+@test "doctor: warns when ~/.browser-skill missing" {
+  setup_temp_home
+  # Don't create BROWSER_SKILL_HOME — should be flagged.
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status "${EXIT_PREFLIGHT_FAILED:-20}"
+  assert_output_contains "does not exist"
+}
+
+@test "doctor: warns when ~/.browser-skill mode is not 0700" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 0755 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status "${EXIT_PREFLIGHT_FAILED:-20}"
+  assert_output_contains "mode 755"
+  assert_output_contains "expected 700"
+}

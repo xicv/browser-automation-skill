@@ -44,12 +44,31 @@ check_bash_version() {
   fi
 }
 
+check_home() {
+  if [ ! -d "${BROWSER_SKILL_HOME}" ]; then
+    warn "${BROWSER_SKILL_HOME} does not exist"
+    warn "  remediation: run ./install.sh from the repo root"
+    problems=$((problems + 1))
+    return 0
+  fi
+  local mode
+  mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}" 2>/dev/null || stat -c '%a' "${BROWSER_SKILL_HOME}" 2>/dev/null || echo "?")"
+  if [ "${mode}" != "700" ]; then
+    warn "${BROWSER_SKILL_HOME} has mode ${mode}, expected 700"
+    warn "  remediation: chmod 700 ${BROWSER_SKILL_HOME}"
+    problems=$((problems + 1))
+  else
+    ok "${BROWSER_SKILL_HOME} mode 700"
+  fi
+}
+
 ok "browser-skill home: ${BROWSER_SKILL_HOME}"
 ok "browser-skill doctor"
 
 check_cmd jq "brew install jq (macOS) or apt install jq (Debian)"
 check_cmd python3 "brew install python3 (macOS) or apt install python3"
 check_bash_version
+check_home
 # Tools below are recommended but not required in Phase 1; later phases will
 # elevate these to required and add version-pinning logic.
 check_cmd node "(optional in phase 1) brew install node (>=20)"
