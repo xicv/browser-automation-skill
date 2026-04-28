@@ -1,0 +1,31 @@
+# .github/workflows/test.yml
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y bats jq
+
+      - name: Install bats (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install bats-core jq
+
+      - name: Run unit suite
+        run: bash tests/run.sh
