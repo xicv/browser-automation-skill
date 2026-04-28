@@ -32,3 +32,42 @@ readonly EXIT_SCHEMA_MIGRATION_REQUIRED=33
 readonly EXIT_TOOL_UNSUPPORTED_OP=41
 readonly EXIT_TOOL_CRASHED=42
 readonly EXIT_TOOL_TIMEOUT=43
+
+# --- Logging ---
+# All logging goes to stderr. stdout is reserved for streaming JSON + summary.
+# Honors NO_COLOR=1 (https://no-color.org) and FORCE_COLOR=1.
+
+_browser_skill_color() {
+  if [ "${NO_COLOR:-0}" = "1" ]; then
+    printf ''
+    return
+  fi
+  if [ "${FORCE_COLOR:-0}" = "1" ] || [ -t 2 ]; then
+    printf '%s' "$1"
+    return
+  fi
+  printf ''
+}
+
+ok() {
+  local prefix
+  prefix="$(_browser_skill_color $'\033[0;32m')ok:$(_browser_skill_color $'\033[0m')"
+  printf '%s %s\n' "${prefix}" "$*" >&2
+}
+
+warn() {
+  local prefix
+  prefix="$(_browser_skill_color $'\033[0;33m')warn:$(_browser_skill_color $'\033[0m')"
+  printf '%s %s\n' "${prefix}" "$*" >&2
+}
+
+# die EXIT_CODE MESSAGE...
+# Prints to stderr in red, returns the given code (caller should call exit if needed).
+die() {
+  local code="$1"
+  shift
+  local prefix
+  prefix="$(_browser_skill_color $'\033[0;31m')error:$(_browser_skill_color $'\033[0m')"
+  printf '%s %s\n' "${prefix}" "$*" >&2
+  return "${code}"
+}
