@@ -73,6 +73,36 @@ check_home
 # elevate these to required and add version-pinning logic.
 check_cmd node "(optional in phase 1) brew install node (>=20)"
 
+check_disk_encryption() {
+  case "$(uname -s)" in
+    Darwin)
+      if command -v fdesetup >/dev/null 2>&1; then
+        local status
+        status="$(fdesetup status 2>/dev/null || true)"
+        case "${status}" in
+          *"FileVault is On"*)  ok "disk encryption: FileVault on" ;;
+          *"FileVault is Off"*) warn "disk encryption: FileVault OFF (advisory — 0600 modes are paper without disk encryption)" ;;
+          *)                    warn "disk encryption: status unknown (fdesetup said: ${status:-empty})" ;;
+        esac
+      else
+        warn "disk encryption: fdesetup not found (cannot verify)"
+      fi
+      ;;
+    Linux)
+      if command -v lsblk >/dev/null 2>&1 && lsblk -o NAME,FSTYPE 2>/dev/null | grep -q crypto_LUKS; then
+        ok "disk encryption: LUKS-backed volume detected"
+      else
+        warn "disk encryption: no LUKS volume found (advisory)"
+      fi
+      ;;
+    *)
+      warn "disk encryption: unknown OS — please verify manually"
+      ;;
+  esac
+}
+
+check_disk_encryption
+
 duration_ms=$(( $(_ms_now) - started_at_ms ))
 
 if [ "${problems}" -eq 0 ]; then

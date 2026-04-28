@@ -51,3 +51,14 @@ load helpers
   assert_output_contains "mode 755"
   assert_output_contains "expected 700"
 }
+
+@test "doctor: prints disk-encryption status (advisory, never fails)" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  # disk-encryption status is advisory: doctor MUST mention it but MUST NOT fail on it.
+  assert_status 0
+  assert_output_contains "disk encryption"
+}
