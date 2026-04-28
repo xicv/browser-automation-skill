@@ -90,3 +90,12 @@ load helpers
   assert_output_contains "not a symlink"
   teardown_temp_home
 }
+
+@test "install.sh: runs doctor at the end and reports its result" {
+  setup_temp_home
+  run bash "${REPO_ROOT}/install.sh" --user
+  assert_status 0
+  assert_output_contains "running doctor"
+  assert_output_contains "all checks passed"
+  teardown_temp_home
+}

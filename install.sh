@@ -94,6 +94,14 @@ install_symlink() {
 }
 
 install_symlink
+
+ok "running doctor..."
+doctor_rc=0
+bash "${REPO_ROOT}/scripts/browser-doctor.sh" || doctor_rc=$?
+
 ok "install complete; next steps:"
 ok "  1. /browser doctor       (verify in Claude Code)"
 ok "  2. /browser add-site     (register your first site, lands in phase 2)"
+if [ "${doctor_rc}" -ne 0 ]; then
+  warn "doctor reported issues (exit ${doctor_rc}); run 'bash scripts/browser-doctor.sh' to review"
+fi
