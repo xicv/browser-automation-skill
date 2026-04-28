@@ -41,3 +41,32 @@ load helpers
   run bash -c "source '${LIB_DIR}/common.sh'; NO_COLOR=1 ok 'plain' 2>&1"
   assert_output_not_contains "$(printf '\033')"
 }
+
+@test "common.sh: resolve_browser_skill_home — explicit env var wins" {
+  setup_temp_home
+  BROWSER_SKILL_HOME="/tmp/explicit-override-xyz" \
+    run bash -c "source '${LIB_DIR}/common.sh'; resolve_browser_skill_home"
+  teardown_temp_home
+  assert_status 0
+  [ "${output}" = "/tmp/explicit-override-xyz" ]
+}
+
+@test "common.sh: resolve_browser_skill_home — walks up to find .browser-skill/" {
+  setup_temp_home
+  mkdir -p "${TEST_HOME}/proj/sub/deeper"
+  mkdir "${TEST_HOME}/proj/.browser-skill"
+  unset BROWSER_SKILL_HOME
+  run bash -c "cd '${TEST_HOME}/proj/sub/deeper'; source '${LIB_DIR}/common.sh'; resolve_browser_skill_home"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "/proj/.browser-skill"
+}
+
+@test "common.sh: resolve_browser_skill_home — falls back to user-level" {
+  setup_temp_home
+  unset BROWSER_SKILL_HOME
+  run bash -c "cd '${TEST_HOME}'; source '${LIB_DIR}/common.sh'; resolve_browser_skill_home"
+  teardown_temp_home
+  assert_status 0
+  [ "${output}" = "${HOME}/.browser-skill" ]
+}

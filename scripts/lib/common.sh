@@ -71,3 +71,38 @@ die() {
   printf '%s %s\n' "${prefix}" "$*" >&2
   exit "${code}"
 }
+
+# --- Path resolution ---
+# resolve_browser_skill_home echoes the canonical state-home path.
+# Resolution order:
+#   1. $BROWSER_SKILL_HOME (explicit override)
+#   2. Walk up from $PWD looking for .browser-skill/ (project-scoped mode)
+#   3. ~/.browser-skill/ (user-level fallback)
+resolve_browser_skill_home() {
+  if [ -n "${BROWSER_SKILL_HOME:-}" ]; then
+    printf '%s\n' "${BROWSER_SKILL_HOME}"
+    return 0
+  fi
+  local dir="${PWD}"
+  while [ "${dir}" != "/" ]; do
+    if [ -d "${dir}/.browser-skill" ]; then
+      printf '%s\n' "${dir}/.browser-skill"
+      return 0
+    fi
+    dir="$(dirname "${dir}")"
+  done
+  printf '%s\n' "${HOME}/.browser-skill"
+}
+
+# Convenience: export the resolved home + canonical subdirs once per invocation.
+# Verbs source common.sh and call this immediately.
+init_paths() {
+  BROWSER_SKILL_HOME="$(resolve_browser_skill_home)"
+  export BROWSER_SKILL_HOME
+  export SITES_DIR="${BROWSER_SKILL_HOME}/sites"
+  export SESSIONS_DIR="${BROWSER_SKILL_HOME}/sessions"
+  export CREDENTIALS_DIR="${BROWSER_SKILL_HOME}/credentials"
+  export CAPTURES_DIR="${BROWSER_SKILL_HOME}/captures"
+  export FLOWS_DIR="${BROWSER_SKILL_HOME}/flows"
+  export CURRENT_FILE="${BROWSER_SKILL_HOME}/current"
+}
