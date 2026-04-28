@@ -112,3 +112,17 @@ load helpers
   assert_status 0
   [ "${output}" = "a|b|c" ]
 }
+
+@test "common.sh: now_ms returns a positive integer of millisecond magnitude" {
+  run bash -c "source '${LIB_DIR}/common.sh'; now_ms"
+  assert_status 0
+  [[ "${output}" =~ ^[0-9]+$ ]]
+  # At least 13 digits = year 2001 epoch ms or later. We're well past that.
+  [ "${#output}" -ge 13 ]
+}
+
+@test "common.sh: now_ms output never contains 'N' (BSD %3N quirk caught)" {
+  run bash -c "source '${LIB_DIR}/common.sh'; now_ms"
+  assert_status 0
+  assert_output_not_contains "N"
+}

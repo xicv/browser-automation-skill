@@ -148,6 +148,19 @@ summary_json() {
   jq -nc "${args[@]}" "${jq_filter}"
 }
 
+# --- Millisecond timestamp ---
+# now_ms echoes the current epoch time in milliseconds as a positive integer.
+# Verbs use this to compute duration_ms for their JSON summary.
+# Portable across GNU date (%3N) and BSD date (no %3N — falls through to python3).
+now_ms() {
+  local t
+  t="$(date +%s%3N 2>/dev/null)"
+  case "${t}" in
+    *N) python3 -c 'import time; print(int(time.time()*1000))' ;;
+    *)  printf '%s\n' "${t}" ;;
+  esac
+}
+
 # --- Timeout wrapper ---
 # with_timeout SECONDS COMMAND ARGS...
 # Wraps `timeout` (GNU) or `gtimeout` (macOS coreutils) or a hand-rolled fallback.

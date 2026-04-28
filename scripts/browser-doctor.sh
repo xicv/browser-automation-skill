@@ -9,19 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 init_paths
 
-# BSD date (macOS) does not support %3N; use python3 as portable fallback.
-_ms_now() {
-  local t
-  t="$(date +%s%3N 2>/dev/null)"
-  # If the result ends with 'N' then %3N is unsupported — fall back to python3.
-  case "${t}" in
-    *N) python3 -c 'import time; print(int(time.time()*1000))' ;;
-    *)  printf '%s\n' "${t}" ;;
-  esac
-}
-started_at_ms="$(_ms_now)"
+started_at_ms="$(now_ms)"
 problems=0
 
+# Required check: increments problems on miss. Doctor will exit non-zero.
 check_cmd() {
   local cmd="$1" hint="$2"
   if command -v "${cmd}" >/dev/null 2>&1; then
@@ -30,6 +21,19 @@ check_cmd() {
     warn "${cmd} NOT FOUND"
     warn "  remediation: ${hint}"
     problems=$((problems + 1))
+  fi
+}
+
+# Advisory check: prints status but does NOT increment problems. Use for tools
+# that are required by later phases but optional in the current phase, OR for
+# tools that the user will install when they actually need them.
+check_cmd_advisory() {
+  local cmd="$1" hint="$2"
+  if command -v "${cmd}" >/dev/null 2>&1; then
+    ok "${cmd} found: $(command -v "${cmd}")"
+  else
+    warn "${cmd} NOT FOUND (advisory only — does not fail doctor)"
+    warn "  remediation: ${hint}"
   fi
 }
 
@@ -71,7 +75,7 @@ check_bash_version
 check_home
 # Tools below are recommended but not required in Phase 1; later phases will
 # elevate these to required and add version-pinning logic.
-check_cmd node "(optional in phase 1) brew install node (>=20)"
+check_cmd_advisory node "brew install node (>=20) — required from Phase 3 onward"
 
 check_disk_encryption() {
   case "$(uname -s)" in
@@ -103,7 +107,7 @@ check_disk_encryption() {
 
 check_disk_encryption
 
-duration_ms=$(( $(_ms_now) - started_at_ms ))
+duration_ms=$(( $(now_ms) - started_at_ms ))
 
 if [ "${problems}" -eq 0 ]; then
   ok "all checks passed"

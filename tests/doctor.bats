@@ -62,3 +62,24 @@ load helpers
   assert_status 0
   assert_output_contains "disk encryption"
 }
+
+@test "doctor: missing node is advisory only (still exits 0)" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  # Build a stub bin dir with bash + jq + python3 symlinked from real locations.
+  # Crucially: NO `node` symlink. We restrict PATH to the stub so node lookup fails
+  # while bash 4+ (required) and the doctor's other deps still work.
+  local stub="${TEST_HOME}/bin"
+  mkdir -p "${stub}"
+  ln -s "$(command -v bash)" "${stub}/bash"
+  ln -s "$(command -v jq)" "${stub}/jq"
+  ln -s "$(command -v python3)" "${stub}/python3"
+  # /usr/sbin needed for fdesetup (disk encryption check).
+  PATH="${stub}:/usr/sbin:/bin:/usr/bin" run "${stub}/bash" "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  # node is missing but it's advisory — doctor must still exit 0.
+  assert_status 0
+  assert_output_contains "node NOT FOUND"
+  assert_output_contains "advisory"
+}
