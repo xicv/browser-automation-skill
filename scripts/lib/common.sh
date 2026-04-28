@@ -106,3 +106,44 @@ init_paths() {
   export FLOWS_DIR="${BROWSER_SKILL_HOME}/flows"
   export CURRENT_FILE="${BROWSER_SKILL_HOME}/current"
 }
+
+# --- JSON summary writer ---
+# Usage: summary_json key=value key=value ...
+# Emits one valid JSON object per line on stdout. Uses jq for safe escaping —
+# never let bash interpolation construct JSON strings (quote bugs = leaks).
+# Numeric values (duration_ms, console_errors, etc.) stay as JSON numbers.
+summary_json() {
+  if [ "$#" -eq 0 ]; then
+    die "${EXIT_USAGE_ERROR}" "summary_json: no key=value pairs supplied"
+  fi
+
+  local args=()
+  local pair key value
+  for pair in "$@"; do
+    case "${pair}" in
+      *=*)
+        key="${pair%%=*}"
+        value="${pair#*=}"
+        # Numeric? Pass as --argjson; else --arg (string).
+        if [[ "${value}" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+          args+=(--argjson "${key}" "${value}")
+        elif [ "${value}" = "true" ] || [ "${value}" = "false" ] || [ "${value}" = "null" ]; then
+          args+=(--argjson "${key}" "${value}")
+        else
+          args+=(--arg "${key}" "${value}")
+        fi
+        ;;
+      *)
+        die "${EXIT_USAGE_ERROR}" "summary_json: bad pair '${pair}' (expected key=value)"
+        ;;
+    esac
+  done
+
+  # Build the object dynamically: jq -n accepts our --arg/--argjson names.
+  local jq_filter='. = {}'
+  for pair in "$@"; do
+    key="${pair%%=*}"
+    jq_filter="${jq_filter} | .${key} = \$${key}"
+  done
+  jq -nc "${args[@]}" "${jq_filter}"
+}

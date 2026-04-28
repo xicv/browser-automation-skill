@@ -70,3 +70,29 @@ load helpers
   assert_status 0
   [ "${output}" = "${HOME}/.browser-skill" ]
 }
+
+@test "common.sh: summary_json emits valid single-line JSON with required keys" {
+  run bash -c "source '${LIB_DIR}/common.sh'; summary_json verb=doctor tool=none why=health-check status=ok duration_ms=42"
+  assert_status 0
+  # Must be a single line.
+  [ "${#lines[@]}" -eq 1 ]
+  # Must be valid JSON.
+  printf '%s' "${output}" | jq -e . >/dev/null
+  # Must have all keys.
+  [ "$(printf '%s' "${output}" | jq -r .verb)" = "doctor" ]
+  [ "$(printf '%s' "${output}" | jq -r .tool)" = "none" ]
+  [ "$(printf '%s' "${output}" | jq -r .status)" = "ok" ]
+  [ "$(printf '%s' "${output}" | jq -r .duration_ms)" = "42" ]
+}
+
+@test "common.sh: summary_json escapes embedded quotes in values" {
+  run bash -c "source '${LIB_DIR}/common.sh'; summary_json verb=test why='quote\"inside' status=ok"
+  assert_status 0
+  printf '%s' "${output}" | jq -e . >/dev/null
+  [ "$(printf '%s' "${output}" | jq -r .why)" = 'quote"inside' ]
+}
+
+@test "common.sh: summary_json rejects key without =value" {
+  run bash -c "source '${LIB_DIR}/common.sh'; summary_json verb=doctor lonely_key status=ok"
+  assert_status "${EXIT_USAGE_ERROR:-2}"
+}
