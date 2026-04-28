@@ -95,6 +95,10 @@ install_symlink() {
 
 install_symlink
 
+if [ "${WITH_HOOKS}" = "1" ]; then
+  bash "${REPO_ROOT}/scripts/install-git-hooks.sh"
+fi
+
 ok "running doctor..."
 doctor_rc=0
 bash "${REPO_ROOT}/scripts/browser-doctor.sh" || doctor_rc=$?

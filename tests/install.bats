@@ -99,3 +99,14 @@ load helpers
   assert_output_contains "all checks passed"
   teardown_temp_home
 }
+
+@test "install.sh --with-hooks wires core.hooksPath" {
+  setup_temp_home
+  # The repo we're testing IS a git repo; just verify hookspath gets set.
+  cd "${REPO_ROOT}"
+  bash "${REPO_ROOT}/install.sh" --user --with-hooks >/dev/null
+  local result
+  result="$(git -C "${REPO_ROOT}" config --get core.hooksPath || true)"
+  teardown_temp_home
+  [ "${result}" = ".githooks" ]
+}
