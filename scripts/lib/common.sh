@@ -62,12 +62,12 @@ warn() {
 }
 
 # die EXIT_CODE MESSAGE...
-# Prints to stderr in red, returns the given code (caller should call exit if needed).
+# Prints to stderr in red, exits with the given code.
 die() {
   local code="$1"
   shift
   local prefix
   prefix="$(_browser_skill_color $'\033[0;31m')error:$(_browser_skill_color $'\033[0m')"
   printf '%s %s\n' "${prefix}" "$*" >&2
-  return "${code}"
+  exit "${code}"
 }

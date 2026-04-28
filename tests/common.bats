@@ -31,9 +31,10 @@ load helpers
 }
 
 @test "common.sh: die() prints to stderr and exits with given code" {
-  run bash -c "source '${LIB_DIR}/common.sh'; die 23 'site not found' || echo \"exit=\$?\""
+  run bash -c "source '${LIB_DIR}/common.sh'; die 23 'site not found'; echo 'after-die-should-not-print'"
+  assert_status 23
   assert_output_contains "site not found"
-  assert_output_contains "exit=23"
+  assert_output_not_contains "after-die-should-not-print"
 }
 
 @test "common.sh: NO_COLOR=1 suppresses ANSI escapes" {
