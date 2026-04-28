@@ -1,9 +1,76 @@
-# Editor/OS detritus (full credential rules added in Task 14)
+# browser-automation-skill .gitignore
+#
+# Security-first: credentials, sessions, captures must NEVER land in git.
+# Canonical storage is $HOME/.browser-skill/ — outside this tree — but these
+# patterns stop accidents (`git add .` from a parent dir, symlinks, fixtures).
+#
+# Companion: .githooks/pre-commit enforces the same rules at commit time.
+# Run scripts/install-git-hooks.sh (or pass --with-hooks to install.sh).
+
+# --- Credential / session / capture state (any location in tree) ---
+.browser-skill/sessions/
+.browser-skill/credentials/
+.browser-skill/captures/
+.browser-skill/current
+sessions/
+credentials/
+captures/
+*.creds.json
+*.session.json
+
+# --- TLS / key material ---
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.p12
+*.pfx
+*.keystore
+*.jks
+*.asc
+*.gpg
+id_rsa
+id_ed25519
+id_ecdsa
+
+# --- Env files ---
+.env
+.env.*
+!.env.example
+secrets.yaml
+secrets.yml
+secrets.json
+credentials.json
+credentials.yaml
+
+# --- Browser-specific artifacts ---
+*.har
+trace.zip
+lighthouse.json
+*.png.diff
+
+# --- Test temp artifacts ---
+tests/tmp/
+tests/.bats/
+tests/fixtures/tmp/
+
+# --- Editor / OS detritus ---
 .DS_Store
+Thumbs.db
 *.swp
 *.swo
 *~
 .idea/
 .vscode/
+*.bak
+*.orig
+
+# --- Misc leak sources ---
 *.log
+npm-debug.log*
+yarn-debug.log*
+core
+core.*
+*.pid
 node_modules/
