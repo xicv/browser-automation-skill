@@ -76,3 +76,24 @@ teardown() { teardown_temp_home; }
   # but never a half-written .tmp.* sitting around.
   ! ls "${BROWSER_SKILL_HOME}/sites/"*.tmp.* 2>/dev/null
 }
+
+@test "site.sh: site_load echoes the profile JSON as written" {
+  local profile_json='{"name":"prod-app","url":"https://app.example.com","schema_version":1}'
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save prod-app '${profile_json}' '{\"name\":\"prod-app\"}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_load prod-app | jq -r .name"
+  assert_status 0
+  [ "${output}" = "prod-app" ]
+}
+
+@test "site.sh: site_load fails (exit 23) when site missing" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_load nope"
+  assert_status "$EXIT_SITE_NOT_FOUND"
+  assert_output_contains "site not found"
+}
+
+@test "site.sh: site_meta_load echoes the meta JSON" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save prod-app '{\"name\":\"prod-app\"}' '{\"name\":\"prod-app\",\"created_at\":\"2026-04-29T15:42:00Z\"}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_meta_load prod-app | jq -r .created_at"
+  assert_status 0
+  [ "${output}" = "2026-04-29T15:42:00Z" ]
+}

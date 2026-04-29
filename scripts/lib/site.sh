@@ -52,3 +52,25 @@ site_save() {
   mv "${profile_tmp}" "${profile_path}"
   mv "${meta_tmp}" "${meta_path}"
 }
+
+# site_load NAME → echoes the profile JSON (un-jq'd, exactly as on disk).
+site_load() {
+  local name="$1"
+  local path
+  path="$(_site_path "${name}")"
+  if [ ! -f "${path}" ]; then
+    die "${EXIT_SITE_NOT_FOUND}" "site not found: ${name}"
+  fi
+  cat "${path}"
+}
+
+# site_meta_load NAME → echoes the meta JSON.
+site_meta_load() {
+  local name="$1"
+  local path
+  path="$(_site_meta_path "${name}")"
+  if [ ! -f "${path}" ]; then
+    die "${EXIT_SITE_NOT_FOUND}" "site meta not found: ${name}"
+  fi
+  cat "${path}"
+}
