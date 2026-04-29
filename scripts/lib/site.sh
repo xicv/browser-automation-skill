@@ -99,3 +99,26 @@ site_delete() {
     fi
   fi
 }
+
+# current_get → echo current site name (empty string if unset).
+current_get() {
+  if [ -f "${CURRENT_FILE}" ]; then
+    tr -d '[:space:]' < "${CURRENT_FILE}"
+  fi
+}
+
+# current_set NAME → set CURRENT_FILE to NAME (must be a registered site).
+current_set() {
+  local name="$1"
+  if ! site_exists "${name}"; then
+    die "${EXIT_SITE_NOT_FOUND}" "cannot set current: site not found: ${name}"
+  fi
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  ( umask 077; printf '%s\n' "${name}" > "${CURRENT_FILE}" )
+  chmod 600 "${CURRENT_FILE}"
+}
+
+# current_clear → rm -f CURRENT_FILE (idempotent).
+current_clear() {
+  rm -f "${CURRENT_FILE}"
+}

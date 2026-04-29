@@ -161,6 +161,12 @@ now_ms() {
   esac
 }
 
+# now_iso echoes the current UTC time as RFC-3339 / ISO-8601, second precision,
+# trailing Z. Portable across GNU date (-u +%FT%TZ) and BSD date.
+now_iso() {
+  date -u +%Y-%m-%dT%H:%M:%SZ
+}
+
 # --- Timeout wrapper ---
 # with_timeout SECONDS COMMAND ARGS...
 # Wraps `timeout` (GNU) or `gtimeout` (macOS coreutils) or a hand-rolled fallback.

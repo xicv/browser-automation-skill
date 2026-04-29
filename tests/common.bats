@@ -126,3 +126,9 @@ load helpers
   assert_status 0
   assert_output_not_contains "N"
 }
+
+@test "common.sh: now_iso emits a UTC timestamp matching YYYY-MM-DDTHH:MM:SSZ" {
+  run bash -c "source '${LIB_DIR}/common.sh'; now_iso"
+  assert_status 0
+  printf '%s' "${output}" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+}

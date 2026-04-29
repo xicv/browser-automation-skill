@@ -140,3 +140,32 @@ teardown() { teardown_temp_home; }
   [ -f "${BROWSER_SKILL_HOME}/current" ]
   [ "$(cat "${BROWSER_SKILL_HOME}/current")" = "b" ]
 }
+
+@test "site.sh: current_get echoes empty when CURRENT_FILE missing" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; current_get"
+  assert_status 0
+  [ -z "${output}" ]
+}
+
+@test "site.sh: current_set writes name to CURRENT_FILE at mode 0600" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save prod '{\"name\":\"prod\"}' '{\"name\":\"prod\"}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; current_set prod"
+  assert_status 0
+  [ "$(cat "${BROWSER_SKILL_HOME}/current")" = "prod" ]
+  local mode
+  mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}/current" 2>/dev/null \
+       || stat -c '%a' "${BROWSER_SKILL_HOME}/current" 2>/dev/null)"
+  [ "${mode}" = "600" ]
+}
+
+@test "site.sh: current_set refuses an unknown site (exit 23)" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; current_set ghost"
+  assert_status "$EXIT_SITE_NOT_FOUND"
+}
+
+@test "site.sh: current_clear removes CURRENT_FILE" {
+  printf 'x\n' > "${BROWSER_SKILL_HOME}/current"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; current_clear"
+  assert_status 0
+  [ ! -f "${BROWSER_SKILL_HOME}/current" ]
+}
