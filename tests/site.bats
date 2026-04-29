@@ -267,3 +267,23 @@ teardown() { teardown_temp_home; }
   [ "$(printf '%s' "${last_json}" | jq -r '.sites[0].label')" = "App A" ]
   [ "$(printf '%s' "${last_json}" | jq -r '.sites[1].name')"  = "b" ]
 }
+
+@test "show-site: prints profile JSON and a JSON summary" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test --label "Prod" >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-show-site.sh" --name prod
+  assert_status 0
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  printf '%s' "${last_json}" | jq -e '.verb == "show-site" and .status == "ok" and .site == "prod"' >/dev/null
+  [ "$(printf '%s' "${last_json}" | jq -r '.profile.url')" = "https://x.test" ]
+}
+
+@test "show-site: missing site exits 23 (SITE_NOT_FOUND)" {
+  run bash "${SCRIPTS_DIR}/browser-show-site.sh" --name nope
+  assert_status "$EXIT_SITE_NOT_FOUND"
+}
+
+@test "show-site: requires --name (exit 2)" {
+  run bash "${SCRIPTS_DIR}/browser-show-site.sh"
+  assert_status "$EXIT_USAGE_ERROR"
+}
