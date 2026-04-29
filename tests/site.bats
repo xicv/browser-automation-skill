@@ -169,3 +169,79 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ ! -f "${BROWSER_SKILL_HOME}/current" ]
 }
+
+@test "add-site: minimal --name + --url succeeds and writes default profile" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod-app --url https://app.example.com
+  assert_status 0
+  local profile="${BROWSER_SKILL_HOME}/sites/prod-app.json"
+  [ -f "${profile}" ]
+  [ "$(jq -r .name "${profile}")" = "prod-app" ]
+  [ "$(jq -r .url "${profile}")" = "https://app.example.com" ]
+  [ "$(jq -r .viewport.width "${profile}")" = "1280" ]
+  [ "$(jq -r .viewport.height "${profile}")" = "800" ]
+  [ "$(jq -r .schema_version "${profile}")" = "1" ]
+  # Final line is the JSON summary.
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  printf '%s' "${last_json}" | jq -e '.verb == "add-site" and .status == "ok"' >/dev/null
+}
+
+@test "add-site: --viewport WxH overrides default" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name x --url https://x.test --viewport 1920x1080
+  assert_status 0
+  [ "$(jq -r .viewport.width  "${BROWSER_SKILL_HOME}/sites/x.json")" = "1920" ]
+  [ "$(jq -r .viewport.height "${BROWSER_SKILL_HOME}/sites/x.json")" = "1080" ]
+}
+
+@test "add-site: --label, --default-session, --default-tool stored verbatim" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" \
+    --name prod-app --url https://app.example.com \
+    --label "Production app" --default-session prod-app--admin --default-tool playwright-cli
+  assert_status 0
+  local profile="${BROWSER_SKILL_HOME}/sites/prod-app.json"
+  [ "$(jq -r .label             "${profile}")" = "Production app" ]
+  [ "$(jq -r .default_session   "${profile}")" = "prod-app--admin" ]
+  [ "$(jq -r .default_tool      "${profile}")" = "playwright-cli" ]
+}
+
+@test "add-site: rejects an existing site without --force (exit 2)" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://other.test
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "already exists"
+}
+
+@test "add-site: --force overwrites" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://other.test --force
+  assert_status 0
+  [ "$(jq -r .url "${BROWSER_SKILL_HOME}/sites/prod.json")" = "https://other.test" ]
+}
+
+@test "add-site: --dry-run writes nothing and reports planned action" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test --dry-run
+  assert_status 0
+  [ ! -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  printf '%s' "${last_json}" | jq -e '.would_run == true' >/dev/null
+}
+
+@test "add-site: rejects URL without scheme:// (exit 2)" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name x --url example.com
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "url must start with"
+}
+
+@test "add-site: rejects bad --viewport format (exit 2)" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name x --url https://x.test --viewport 1280
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "viewport"
+}
+
+@test "add-site: missing --name or --url is a usage error" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --url https://x.test
+  assert_status "$EXIT_USAGE_ERROR"
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name x
+  assert_status "$EXIT_USAGE_ERROR"
+}
