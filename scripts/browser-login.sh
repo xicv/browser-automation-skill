@@ -76,6 +76,15 @@ if ! ss_json="$(jq -c . "${ss_file}" 2>/dev/null)"; then
   die "${EXIT_USAGE_ERROR}" "storage-state-file is not valid JSON: ${ss_file}"
 fi
 
+# Origin-binding (spec §5.5): every storageState.origins[] must match site_origin.
+# Empty origins[] is allowed (storageState may carry only cookies).
+mismatched="$(printf '%s' "${ss_json}" | jq -r --arg target "${site_origin}" '
+  [.origins[]? | select(.origin != $target) | .origin] | join(",")')"
+if [ -n "${mismatched}" ]; then
+  die "${EXIT_SESSION_EXPIRED}" \
+    "origin mismatch: storage-state-file origins=[${mismatched}], site origin=${site_origin}"
+fi
+
 ok "site=${site} session=${as} origin=${site_origin}"
 
 if [ "${dry_run}" -eq 1 ]; then

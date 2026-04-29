@@ -1,0 +1,6 @@
+{
+  "cookies": [],
+  "origins": [
+    {"origin": "https://evil.example.com", "localStorage": []}
+  ]
+}

@@ -64,3 +64,21 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ ! -f "${BROWSER_SKILL_HOME}/sessions/prod-app--admin.json" ]
 }
+
+@test "login: refuses storageState whose origins do not match the site (exit 22)" {
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod-app --as prod-app--admin \
+    --storage-state-file "${REPO_ROOT}/tests/fixtures/storage-state-bad-origin.json"
+  assert_status "$EXIT_SESSION_EXPIRED"
+  assert_output_contains "origin mismatch"
+  [ ! -f "${BROWSER_SKILL_HOME}/sessions/prod-app--admin.json" ]
+}
+
+@test "login: empty origins[] is allowed (cookie-only storageState)" {
+  local fixture="${TEST_HOME}/empty-origins.json"
+  printf '{"cookies":[{"name":"x","value":"y","domain":"app.example.com","path":"/","expires":-1,"httpOnly":true,"secure":true,"sameSite":"Lax"}],"origins":[]}' > "${fixture}"
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod-app --as p \
+    --storage-state-file "${fixture}"
+  assert_status 0
+}
