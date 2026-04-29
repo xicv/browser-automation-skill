@@ -50,3 +50,26 @@ session_save() {
   mv "${ss_tmp}" "${ss_path}"
   mv "${meta_tmp}" "${meta_path}"
 }
+
+# session_load NAME → echoes the storageState JSON (Playwright shape).
+# Missing session → exit 22 (SESSION_EXPIRED) per spec §5.5; the caller
+# can decide whether to relogin (Phase 5) or surface to the user.
+session_load() {
+  local name="$1"
+  local path
+  path="$(_session_path "${name}")"
+  if [ ! -f "${path}" ]; then
+    die "${EXIT_SESSION_EXPIRED}" "session not found: ${name}"
+  fi
+  cat "${path}"
+}
+
+session_meta_load() {
+  local name="$1"
+  local path
+  path="$(_session_meta_path "${name}")"
+  if [ ! -f "${path}" ]; then
+    die "${EXIT_SESSION_EXPIRED}" "session meta not found: ${name}"
+  fi
+  cat "${path}"
+}

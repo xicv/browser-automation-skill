@@ -63,3 +63,25 @@ teardown() { teardown_temp_home; }
   assert_status "$EXIT_USAGE_ERROR"
   assert_output_contains "cookies"
 }
+
+@test "session.sh: session_load echoes the storageState JSON" {
+  local ss='{"cookies":[],"origins":[{"origin":"https://app.example.com","localStorage":[]}]}'
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '${ss}' '{\"name\":\"x\",\"site\":\"y\",\"origin\":\"https://app.example.com\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_load x | jq -r '.origins[0].origin'"
+  assert_status 0
+  [ "${output}" = "https://app.example.com" ]
+}
+
+@test "session.sh: session_load fails (exit 22) when missing" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_load nope"
+  assert_status "$EXIT_SESSION_EXPIRED"
+  assert_output_contains "session not found"
+}
+
+@test "session.sh: session_meta_load echoes the meta JSON" {
+  local ss='{"cookies":[],"origins":[]}'
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '${ss}' '{\"name\":\"x\",\"origin\":\"https://x.test\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_meta_load x | jq -r .origin"
+  assert_status 0
+  [ "${output}" = "https://x.test" ]
+}
