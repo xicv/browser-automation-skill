@@ -320,3 +320,40 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
 }
+
+@test "use: --show prints empty when no current site set" {
+  run bash "${SCRIPTS_DIR}/browser-use.sh" --show
+  assert_status 0
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  printf '%s' "${last_json}" | jq -e '.verb == "use" and .status == "ok" and .current == null' >/dev/null
+}
+
+@test "use: --set NAME persists, --show then reports it" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-use.sh" --set prod
+  assert_status 0
+  [ "$(cat "${BROWSER_SKILL_HOME}/current")" = "prod" ]
+  run bash "${SCRIPTS_DIR}/browser-use.sh" --show
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  [ "$(printf '%s' "${last_json}" | jq -r '.current')" = "prod" ]
+}
+
+@test "use: --set rejects an unknown site (exit 23)" {
+  run bash "${SCRIPTS_DIR}/browser-use.sh" --set ghost
+  assert_status "$EXIT_SITE_NOT_FOUND"
+}
+
+@test "use: --clear removes CURRENT_FILE" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  bash "${SCRIPTS_DIR}/browser-use.sh" --set prod >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-use.sh" --clear
+  assert_status 0
+  [ ! -f "${BROWSER_SKILL_HOME}/current" ]
+}
+
+@test "use: requires exactly one of --set/--show/--clear (exit 2)" {
+  run bash "${SCRIPTS_DIR}/browser-use.sh"
+  assert_status "$EXIT_USAGE_ERROR"
+}
