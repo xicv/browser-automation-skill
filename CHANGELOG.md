@@ -13,6 +13,18 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 2 — Site & session core
+
+- [feat] `add-site` / `list-sites` / `show-site` / `remove-site` verbs ship (typed-name confirm on remove)
+- [feat] `use` verb: get / set / clear current site
+- [feat] `login` verb (Phase 2 stub): consumes a hand-edited Playwright storageState file, validates origins against the site URL, writes session + meta sidecar
+- [feat] `lib/site.sh`: site profile CRUD with atomic write, mode 0600, schema_version=1
+- [feat] `lib/session.sh`: storageState read/write, `session_origin_check` (spec §5.5), `session_expiry_summary`
+- [feat] `common.sh`: `now_iso` helper added (UTC, second precision)
+- [security] sessions inherit the same gitignored / 0600-files invariant as Phase 1
+- [internal] `tests/helpers.bash` now sources `lib/common.sh`; `${EXIT_*:-N}` fallback pattern dropped from all `.bats` files
+- [docs] SKILL.md verb table reflects new verbs; mode wording corrected to "0700 dir, 0600 files"; `CLAUDE_SKILL_DIR` explainer added
+
 ### Phase 1 — Foundation
 
 - [feat] `install.sh --user --with-hooks --dry-run` ships

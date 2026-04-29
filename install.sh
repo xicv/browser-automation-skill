@@ -47,7 +47,8 @@ ok "browser-automation-skill installer (mode=${MODE} dry-run=${DRY_RUN})"
 preflight
 
 if [ "${DRY_RUN}" = "1" ]; then
-  ok "dry-run: would create ~/.browser-skill/ and symlink to ~/.claude/skills/browser-automation-skill"
+  init_paths
+  ok "dry-run: would create ${BROWSER_SKILL_HOME} and symlink to ${HOME}/.claude/skills/browser-automation-skill"
   exit 0
 fi
 

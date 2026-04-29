@@ -15,7 +15,9 @@ usage() {
   cat <<'USAGE'
 Usage: ./uninstall.sh [options]
 
-  --keep-state     don't ask about deleting ~/.browser-skill/ (the default is to ask)
+  --keep-state     do not delete ~/.browser-skill/ (default; today the script
+                   never deletes state — a future release may add an opt-in
+                   --delete-state flag)
   --dry-run        print what would happen, change nothing
   -h, --help
 USAGE
