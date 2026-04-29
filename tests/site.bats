@@ -287,3 +287,36 @@ teardown() { teardown_temp_home; }
   run bash "${SCRIPTS_DIR}/browser-show-site.sh"
   assert_status "$EXIT_USAGE_ERROR"
 }
+
+@test "remove-site: removes a registered site (typed-name confirmation via stdin)" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  run bash -c "printf 'prod\n' | '${SCRIPTS_DIR}/browser-remove-site.sh' --name prod"
+  assert_status 0
+  [ ! -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
+}
+
+@test "remove-site: refuses on confirmation mismatch" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  run bash -c "printf 'wrong\n' | '${SCRIPTS_DIR}/browser-remove-site.sh' --name prod"
+  assert_status "$EXIT_USAGE_ERROR"
+  [ -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
+}
+
+@test "remove-site: --yes-i-know skips the prompt" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-remove-site.sh" --name prod --yes-i-know
+  assert_status 0
+  [ ! -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
+}
+
+@test "remove-site: missing site exits 23" {
+  run bash "${SCRIPTS_DIR}/browser-remove-site.sh" --name ghost --yes-i-know
+  assert_status "$EXIT_SITE_NOT_FOUND"
+}
+
+@test "remove-site: --dry-run prints planned action and writes nothing" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name prod --url https://x.test >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-remove-site.sh" --name prod --dry-run
+  assert_status 0
+  [ -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
+}
