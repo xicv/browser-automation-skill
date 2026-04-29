@@ -26,7 +26,7 @@ load helpers
   mkdir -p "${stub_dir}"
   PATH="${stub_dir}:/usr/bin:/bin" run bash "${REPO_ROOT}/install.sh" --dry-run
   teardown_temp_home
-  assert_status "${EXIT_PREFLIGHT_FAILED:-20}"
+  assert_status "$EXIT_PREFLIGHT_FAILED"
   assert_output_contains "jq"
 }
 
@@ -86,7 +86,7 @@ load helpers
   mkdir -p "${HOME}/.claude/skills"
   echo "hand-written content" > "${HOME}/.claude/skills/browser-automation-skill"
   run bash "${REPO_ROOT}/install.sh" --user
-  assert_status "${EXIT_PREFLIGHT_FAILED:-20}"
+  assert_status "$EXIT_PREFLIGHT_FAILED"
   assert_output_contains "not a symlink"
   teardown_temp_home
 }

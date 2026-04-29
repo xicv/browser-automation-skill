@@ -37,7 +37,7 @@ load helpers
   # Don't create BROWSER_SKILL_HOME — should be flagged.
   run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
-  assert_status "${EXIT_PREFLIGHT_FAILED:-20}"
+  assert_status "$EXIT_PREFLIGHT_FAILED"
   assert_output_contains "does not exist"
 }
 
@@ -47,7 +47,7 @@ load helpers
   chmod 0755 "${BROWSER_SKILL_HOME}"
   run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
-  assert_status "${EXIT_PREFLIGHT_FAILED:-20}"
+  assert_status "$EXIT_PREFLIGHT_FAILED"
   assert_output_contains "mode 755"
   assert_output_contains "expected 700"
 }

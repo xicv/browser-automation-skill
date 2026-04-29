@@ -7,6 +7,13 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LIB_DIR="${REPO_ROOT}/scripts/lib"
 SCRIPTS_DIR="${REPO_ROOT}/scripts"
 
+# Make EXIT_* and other constants from common.sh available to every test.
+# This means tests can reference $EXIT_PREFLIGHT_FAILED directly without the
+# `${EXIT_*:-N}` fallback pattern.
+# shellcheck source=../scripts/lib/common.sh
+# shellcheck disable=SC1091
+source "${LIB_DIR}/common.sh"
+
 # Per-test isolated home. Set in setup(); torn down in teardown().
 setup_temp_home() {
   TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/browser-skill-test.XXXXXX")"
