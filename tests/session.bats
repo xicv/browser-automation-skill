@@ -110,3 +110,17 @@ teardown() { teardown_temp_home; }
   run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_origin_check x https://app.example.com/"
   assert_status "$EXIT_SESSION_EXPIRED"
 }
+
+@test "session.sh: session_expiry_summary emits expires_in_hours from meta" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://x.test\",\"captured_at\":\"2026-04-29T15:42:00Z\",\"expires_in_hours\":168,\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_expiry_summary x"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.session == "x" and .expires_in_hours == 168 and .captured_at == "2026-04-29T15:42:00Z"' >/dev/null
+}
+
+@test "session.sh: session_expiry_summary defaults expires_in_hours to null when meta omits it" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://x.test\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_expiry_summary x"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.expires_in_hours == null' >/dev/null
+}

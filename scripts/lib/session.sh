@@ -115,3 +115,18 @@ session_origin_check() {
       "origin mismatch: session origin=${meta_origin}, target origin=${target_origin}"
   fi
 }
+
+# session_expiry_summary NAME → emits a single-line JSON object:
+#   {"session": NAME, "captured_at": ..., "expires_in_hours": ..., "origin": ...}
+# Used by login + later phases' relogin / doctor to surface session staleness.
+session_expiry_summary() {
+  local name="$1"
+  local meta
+  meta="$(session_meta_load "${name}")"
+  jq -c --arg n "${name}" '{
+    session:          $n,
+    origin:           (.origin // null),
+    captured_at:      (.captured_at // null),
+    expires_in_hours: (.expires_in_hours // null)
+  }' <<< "${meta}"
+}
