@@ -82,3 +82,24 @@ teardown() { teardown_temp_home; }
     --storage-state-file "${fixture}"
   assert_status 0
 }
+
+@test "login: --as falls back to site.default_session when omitted" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" \
+    --name prod-app --url https://app.example.com \
+    --default-session prod-app--admin --force >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod-app \
+    --storage-state-file "${REPO_ROOT}/tests/fixtures/storage-state-good.json"
+  assert_status 0
+  [ -f "${BROWSER_SKILL_HOME}/sessions/prod-app--admin.json" ]
+}
+
+@test "login: missing --as AND missing site.default_session is a usage error" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" \
+    --name no-default --url https://x.test --force >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site no-default \
+    --storage-state-file "${REPO_ROOT}/tests/fixtures/storage-state-good.json"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "default_session"
+}

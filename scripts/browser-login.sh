@@ -60,7 +60,15 @@ if [ "${auto}" -eq 1 ]; then
   die "${EXIT_USAGE_ERROR}" "--auto is reserved for Phase 5 auto-relogin; refused in Phase 2"
 fi
 [ -n "${site}" ]    || { usage; die "${EXIT_USAGE_ERROR}" "--site is required"; }
-[ -n "${as}" ]      || { usage; die "${EXIT_USAGE_ERROR}" "--as is required"; }
+# --as defaults to site.default_session if the site sets one.
+if [ -z "${as}" ]; then
+  default_session_from_site="$(site_load "${site}" | jq -r '.default_session // ""')"
+  if [ -n "${default_session_from_site}" ]; then
+    as="${default_session_from_site}"
+  else
+    die "${EXIT_USAGE_ERROR}" "--as is required (site ${site} has no default_session set)"
+  fi
+fi
 [ -n "${ss_file}" ] || { usage; die "${EXIT_USAGE_ERROR}" "--storage-state-file is required (Phase 2 is stub-only)"; }
 [ -f "${ss_file}" ] || die "${EXIT_USAGE_ERROR}" "storage-state-file not found: ${ss_file}"
 
