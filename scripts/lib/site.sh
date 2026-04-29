@@ -20,3 +20,35 @@ _site_meta_path() {
 site_exists() {
   [ -f "$(_site_path "$1")" ]
 }
+
+# site_save NAME PROFILE_JSON META_JSON
+# Validates both JSON blobs, writes atomically (tmp + mv), mode 0600.
+# Caller is responsible for shape — site.sh only validates "is it JSON".
+site_save() {
+  local name="$1" profile_json="$2" meta_json="$3"
+
+  if ! printf '%s' "${profile_json}" | jq -e . >/dev/null 2>&1; then
+    die "${EXIT_USAGE_ERROR}" "site_save: profile JSON is not valid"
+  fi
+  if ! printf '%s' "${meta_json}" | jq -e . >/dev/null 2>&1; then
+    die "${EXIT_USAGE_ERROR}" "site_save: meta JSON is not valid"
+  fi
+
+  mkdir -p "${SITES_DIR}"
+  chmod 700 "${SITES_DIR}"
+
+  local profile_path meta_path profile_tmp meta_tmp
+  profile_path="$(_site_path "${name}")"
+  meta_path="$(_site_meta_path "${name}")"
+  profile_tmp="${profile_path}.tmp.$$"
+  meta_tmp="${meta_path}.tmp.$$"
+
+  (
+    umask 077
+    printf '%s\n' "${profile_json}" | jq . > "${profile_tmp}"
+    printf '%s\n' "${meta_json}"    | jq . > "${meta_tmp}"
+  )
+  chmod 600 "${profile_tmp}" "${meta_tmp}"
+  mv "${profile_tmp}" "${profile_path}"
+  mv "${meta_tmp}" "${meta_path}"
+}
