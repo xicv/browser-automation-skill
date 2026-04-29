@@ -73,3 +73,45 @@ session_meta_load() {
   fi
   cat "${path}"
 }
+
+# url_origin URL → echoes scheme://host[:port] from a URL string.
+# Bash-only, no python3 dep. Examples:
+#   https://app.example.com/x      -> https://app.example.com
+#   https://app.example.com:8443/  -> https://app.example.com:8443
+#   http://localhost               -> http://localhost
+url_origin() {
+  local url="$1"
+  case "${url}" in
+    http://*)  ;;
+    https://*) ;;
+    *) die "${EXIT_USAGE_ERROR}" "url must start with http:// or https:// (got: ${url})" ;;
+  esac
+  # Strip the path/query/fragment after the host[:port].
+  printf '%s' "${url}" | awk '
+    {
+      n = index($0, "://")
+      scheme = substr($0, 1, n + 2)
+      rest   = substr($0, n + 3)
+      slash  = index(rest, "/")
+      if (slash > 0) rest = substr(rest, 1, slash - 1)
+      q = index(rest, "?")
+      if (q > 0) rest = substr(rest, 1, q - 1)
+      h = index(rest, "#")
+      if (h > 0) rest = substr(rest, 1, h - 1)
+      printf "%s%s", scheme, rest
+    }'
+}
+
+# session_origin_check NAME TARGET_URL
+# Compares the session's stored origin (from meta sidecar) against the URL's
+# origin. Exits EXIT_SESSION_EXPIRED on mismatch (spec §5.5).
+session_origin_check() {
+  local name="$1" target_url="$2"
+  local meta_origin target_origin
+  meta_origin="$(session_meta_load "${name}" | jq -r .origin)"
+  target_origin="$(url_origin "${target_url}")"
+  if [ "${meta_origin}" != "${target_origin}" ]; then
+    die "${EXIT_SESSION_EXPIRED}" \
+      "origin mismatch: session origin=${meta_origin}, target origin=${target_origin}"
+  fi
+}

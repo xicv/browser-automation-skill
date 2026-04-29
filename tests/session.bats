@@ -85,3 +85,28 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ "${output}" = "https://x.test" ]
 }
+
+@test "session.sh: session_origin_check passes when origins match exactly" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://app.example.com\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_origin_check x https://app.example.com/dashboard"
+  assert_status 0
+}
+
+@test "session.sh: session_origin_check fails (exit 22) on host mismatch" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://app.example.com\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_origin_check x https://evil.example.com/"
+  assert_status "$EXIT_SESSION_EXPIRED"
+  assert_output_contains "origin mismatch"
+}
+
+@test "session.sh: session_origin_check fails on scheme mismatch" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://app.example.com\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_origin_check x http://app.example.com/"
+  assert_status "$EXIT_SESSION_EXPIRED"
+}
+
+@test "session.sh: session_origin_check fails on port mismatch when port is part of origin" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://app.example.com:8443\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_origin_check x https://app.example.com/"
+  assert_status "$EXIT_SESSION_EXPIRED"
+}
