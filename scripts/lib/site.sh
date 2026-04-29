@@ -74,3 +74,13 @@ site_meta_load() {
   fi
   cat "${path}"
 }
+
+# site_list_names → echoes each registered site name on its own line, sorted.
+# Excludes *.meta.json files; an empty SITES_DIR (or missing) prints nothing.
+site_list_names() {
+  if [ ! -d "${SITES_DIR}" ]; then
+    return 0
+  fi
+  find "${SITES_DIR}" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' \
+    -exec basename {} .json \; 2>/dev/null | sort
+}

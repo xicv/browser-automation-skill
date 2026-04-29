@@ -97,3 +97,21 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ "${output}" = "2026-04-29T15:42:00Z" ]
 }
+
+@test "site.sh: site_list_names lists profiles only (excludes .meta.json) sorted" {
+  for n in zeta alpha mid; do
+    bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save '${n}' '{\"name\":\"${n}\"}' '{\"name\":\"${n}\"}'"
+  done
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_list_names"
+  assert_status 0
+  [ "${lines[0]}" = "alpha" ]
+  [ "${lines[1]}" = "mid" ]
+  [ "${lines[2]}" = "zeta" ]
+  [ "${#lines[@]}" -eq 3 ]
+}
+
+@test "site.sh: site_list_names returns empty when no sites registered" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_list_names"
+  assert_status 0
+  [ -z "${output}" ]
+}
