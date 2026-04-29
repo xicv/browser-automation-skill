@@ -246,6 +246,19 @@ teardown() { teardown_temp_home; }
   assert_status "$EXIT_USAGE_ERROR"
 }
 
+@test "add-site: rejects path-traversal in --name (security)" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name '../evil' --url https://x.test
+  assert_status "$EXIT_USAGE_ERROR"
+  # Ensure no file landed outside SITES_DIR.
+  [ ! -e "${BROWSER_SKILL_HOME}/sites/../evil.json" ]
+  [ ! -e "${BROWSER_SKILL_HOME}/sites/.json" ]
+}
+
+@test "add-site: rejects path-traversal in --default-session" {
+  run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name x --url https://x.test --default-session '../evil'
+  assert_status "$EXIT_USAGE_ERROR"
+}
+
 @test "list-sites: empty directory → status=ok and zero rows" {
   run bash "${SCRIPTS_DIR}/browser-list-sites.sh"
   assert_status 0

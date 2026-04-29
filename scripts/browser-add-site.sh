@@ -60,6 +60,9 @@ case "${url}" in
 esac
 [[ "${viewport}" =~ ^[0-9]+x[0-9]+$ ]] \
   || die "${EXIT_USAGE_ERROR}" "viewport must be WIDTHxHEIGHT (got: ${viewport})"
+# Defense in depth: validate name fields the script is about to embed in paths.
+assert_safe_name "${name}" "site-name"
+[ -z "${default_session}" ] || assert_safe_name "${default_session}" "default-session"
 vw="${viewport%x*}"; vh="${viewport#*x}"
 
 started_at_ms="$(now_ms)"

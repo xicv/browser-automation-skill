@@ -103,3 +103,10 @@ teardown() { teardown_temp_home; }
   assert_status "$EXIT_USAGE_ERROR"
   assert_output_contains "default_session"
 }
+
+@test "login: rejects path-traversal in --as" {
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod-app --as '../evil' \
+    --storage-state-file "${REPO_ROOT}/tests/fixtures/storage-state-good.json"
+  assert_status "$EXIT_USAGE_ERROR"
+}

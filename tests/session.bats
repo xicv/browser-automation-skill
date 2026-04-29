@@ -124,3 +124,8 @@ teardown() { teardown_temp_home; }
   assert_status 0
   printf '%s' "${output}" | jq -e '.expires_in_hours == null' >/dev/null
 }
+
+@test "session.sh: session_save rejects path-traversal in NAME (security)" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save '../evil' '{\"cookies\":[],\"origins\":[]}' '{}'"
+  assert_status "$EXIT_USAGE_ERROR"
+}

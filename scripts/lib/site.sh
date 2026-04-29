@@ -26,6 +26,7 @@ site_exists() {
 # Caller is responsible for shape — site.sh only validates "is it JSON".
 site_save() {
   local name="$1" profile_json="$2" meta_json="$3"
+  assert_safe_name "${name}" "site-name"
 
   if ! printf '%s' "${profile_json}" | jq -e . >/dev/null 2>&1; then
     die "${EXIT_USAGE_ERROR}" "site_save: profile JSON is not valid"
@@ -110,6 +111,7 @@ current_get() {
 # current_set NAME → set CURRENT_FILE to NAME (must be a registered site).
 current_set() {
   local name="$1"
+  assert_safe_name "${name}" "site-name"
   if ! site_exists "${name}"; then
     die "${EXIT_SITE_NOT_FOUND}" "cannot set current: site not found: ${name}"
   fi

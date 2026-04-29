@@ -18,6 +18,7 @@ session_exists() {
 # (Playwright shape), then writes both files atomically at mode 0600.
 session_save() {
   local name="$1" ss_json="$2" meta_json="$3"
+  assert_safe_name "${name}" "session-name"
 
   if ! printf '%s' "${ss_json}" | jq -e . >/dev/null 2>&1; then
     die "${EXIT_USAGE_ERROR}" "session_save: storageState JSON is not valid"

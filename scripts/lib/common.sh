@@ -167,6 +167,20 @@ now_iso() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
+# --- Name safety ---
+# assert_safe_name NAME [FIELD_LABEL]
+# Refuses names that could escape a state dir or run outside the allowed
+# character set. Allowed chars: A-Z a-z 0-9 dash underscore. Empty rejected.
+# FIELD_LABEL (default "name") shows up in the error so callers can pass
+# "session-name", "default-session", etc. for clearer messages.
+assert_safe_name() {
+  local name="$1"
+  local field="${2:-name}"
+  if [[ ! "${name}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    die "${EXIT_USAGE_ERROR}" "${field} must match ^[A-Za-z0-9_-]+$ (got: ${name})"
+  fi
+}
+
 # --- Timeout wrapper ---
 # with_timeout SECONDS COMMAND ARGS...
 # Wraps `timeout` (GNU) or `gtimeout` (macOS coreutils) or a hand-rolled fallback.

@@ -69,6 +69,8 @@ if [ -z "${as}" ]; then
     die "${EXIT_USAGE_ERROR}" "--as is required (site ${site} has no default_session set)"
   fi
 fi
+# Validate session name before using it as a filename.
+assert_safe_name "${as}" "session-name"
 [ -n "${ss_file}" ] || { usage; die "${EXIT_USAGE_ERROR}" "--storage-state-file is required (Phase 2 is stub-only)"; }
 [ -f "${ss_file}" ] || die "${EXIT_USAGE_ERROR}" "storage-state-file not found: ${ss_file}"
 

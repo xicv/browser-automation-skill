@@ -132,3 +132,25 @@ load helpers
   assert_status 0
   printf '%s' "${output}" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 }
+
+@test "common.sh: assert_safe_name accepts valid names" {
+  run bash -c "source '${LIB_DIR}/common.sh'; assert_safe_name prod-app"
+  assert_status 0
+  run bash -c "source '${LIB_DIR}/common.sh'; assert_safe_name 'prod-app--admin'"
+  assert_status 0
+  run bash -c "source '${LIB_DIR}/common.sh'; assert_safe_name a_b_c"
+  assert_status 0
+}
+
+@test "common.sh: assert_safe_name rejects path-traversal, slashes, dots, empty" {
+  for bad in '../evil' 'a/b' '..' '.' '' 'foo bar' 'foo.bar' 'foo;rm'; do
+    run bash -c "source '${LIB_DIR}/common.sh'; assert_safe_name '${bad}'"
+    [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR for '${bad}', got ${status}"
+  done
+}
+
+@test "common.sh: assert_safe_name uses optional FIELD label in error message" {
+  run bash -c "source '${LIB_DIR}/common.sh'; assert_safe_name '../evil' session-name"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "session-name"
+}
