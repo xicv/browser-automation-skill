@@ -1,0 +1,10 @@
+{
+  "cookies": [
+    {"name": "sid", "value": "phase-2-stub-fixture", "domain": "app.example.com",
+     "path": "/", "expires": -1, "httpOnly": true, "secure": true, "sameSite": "Lax"}
+  ],
+  "origins": [
+    {"origin": "https://app.example.com",
+     "localStorage": [{"name": "demo", "value": "1"}]}
+  ]
+}
