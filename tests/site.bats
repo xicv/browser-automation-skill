@@ -115,3 +115,28 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ -z "${output}" ]
 }
+
+@test "site.sh: site_delete removes profile and meta" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save prod '{\"name\":\"prod\"}' '{\"name\":\"prod\"}'"
+  [ -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_delete prod"
+  assert_status 0
+  [ ! -f "${BROWSER_SKILL_HOME}/sites/prod.json" ]
+  [ ! -f "${BROWSER_SKILL_HOME}/sites/prod.meta.json" ]
+}
+
+@test "site.sh: site_delete clears CURRENT_FILE if it pointed at the deleted site" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save prod '{\"name\":\"prod\"}' '{\"name\":\"prod\"}'"
+  printf 'prod\n' > "${BROWSER_SKILL_HOME}/current"
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_delete prod"
+  [ ! -f "${BROWSER_SKILL_HOME}/current" ]
+}
+
+@test "site.sh: site_delete leaves CURRENT_FILE alone when it points elsewhere" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save a '{\"name\":\"a\"}' '{\"name\":\"a\"}'"
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_save b '{\"name\":\"b\"}' '{\"name\":\"b\"}'"
+  printf 'b\n' > "${BROWSER_SKILL_HOME}/current"
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/site.sh'; site_delete a"
+  [ -f "${BROWSER_SKILL_HOME}/current" ]
+  [ "$(cat "${BROWSER_SKILL_HOME}/current")" = "b" ]
+}

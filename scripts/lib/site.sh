@@ -84,3 +84,18 @@ site_list_names() {
   find "${SITES_DIR}" -maxdepth 1 -type f -name '*.json' ! -name '*.meta.json' \
     -exec basename {} .json \; 2>/dev/null | sort
 }
+
+# site_delete NAME → rm -f the profile + meta. Idempotent.
+# If CURRENT_FILE points at this site, clear it (orphan reference fix).
+site_delete() {
+  local name="$1"
+  rm -f "$(_site_path "${name}")" "$(_site_meta_path "${name}")"
+
+  if [ -f "${CURRENT_FILE}" ]; then
+    local current
+    current="$(tr -d '[:space:]' < "${CURRENT_FILE}" 2>/dev/null || true)"
+    if [ "${current}" = "${name}" ]; then
+      rm -f "${CURRENT_FILE}"
+    fi
+  fi
+}
