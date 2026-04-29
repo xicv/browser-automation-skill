@@ -12,3 +12,41 @@ _session_meta_path() { printf '%s/%s.meta.json' "${SESSIONS_DIR}" "$1"; }
 session_exists() {
   [ -f "$(_session_path "$1")" ]
 }
+
+# session_save NAME STORAGE_STATE_JSON META_JSON
+# Validates that storageState has top-level `cookies` and `origins` arrays
+# (Playwright shape), then writes both files atomically at mode 0600.
+session_save() {
+  local name="$1" ss_json="$2" meta_json="$3"
+
+  if ! printf '%s' "${ss_json}" | jq -e . >/dev/null 2>&1; then
+    die "${EXIT_USAGE_ERROR}" "session_save: storageState JSON is not valid"
+  fi
+  if ! printf '%s' "${ss_json}" | jq -e '.cookies | type == "array"' >/dev/null 2>&1; then
+    die "${EXIT_USAGE_ERROR}" "session_save: storageState missing cookies array"
+  fi
+  if ! printf '%s' "${ss_json}" | jq -e '.origins | type == "array"' >/dev/null 2>&1; then
+    die "${EXIT_USAGE_ERROR}" "session_save: storageState missing origins array"
+  fi
+  if ! printf '%s' "${meta_json}" | jq -e . >/dev/null 2>&1; then
+    die "${EXIT_USAGE_ERROR}" "session_save: meta JSON is not valid"
+  fi
+
+  mkdir -p "${SESSIONS_DIR}"
+  chmod 700 "${SESSIONS_DIR}"
+
+  local ss_path meta_path ss_tmp meta_tmp
+  ss_path="$(_session_path "${name}")"
+  meta_path="$(_session_meta_path "${name}")"
+  ss_tmp="${ss_path}.tmp.$$"
+  meta_tmp="${meta_path}.tmp.$$"
+
+  (
+    umask 077
+    printf '%s\n' "${ss_json}"   | jq . > "${ss_tmp}"
+    printf '%s\n' "${meta_json}" | jq . > "${meta_tmp}"
+  )
+  chmod 600 "${ss_tmp}" "${meta_tmp}"
+  mv "${ss_tmp}" "${ss_path}"
+  mv "${meta_tmp}" "${meta_path}"
+}

@@ -34,3 +34,32 @@ teardown() { teardown_temp_home; }
   run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_exists here"
   assert_status 0
 }
+
+@test "session.sh: session_save writes storageState + meta atomically at mode 0600" {
+  local ss='{"cookies":[{"name":"sid","value":"abc","domain":"app.example.com","path":"/","expires":-1,"httpOnly":true,"secure":true,"sameSite":"Lax"}],"origins":[{"origin":"https://app.example.com","localStorage":[]}]}'
+  local meta='{"name":"prod-app--admin","site":"prod-app","origin":"https://app.example.com","captured_at":"2026-04-29T15:42:00Z","source_user_agent":"phase-2 stub","expires_in_hours":168,"schema_version":1}'
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save prod-app--admin '${ss}' '${meta}'"
+  assert_status 0
+  jq -e '.cookies[0].name == "sid"' "${BROWSER_SKILL_HOME}/sessions/prod-app--admin.json" >/dev/null
+  jq -e '.schema_version == 1' "${BROWSER_SKILL_HOME}/sessions/prod-app--admin.meta.json" >/dev/null
+  for f in prod-app--admin.json prod-app--admin.meta.json; do
+    local mode
+    mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}/sessions/${f}" 2>/dev/null \
+         || stat -c '%a' "${BROWSER_SKILL_HOME}/sessions/${f}" 2>/dev/null)"
+    [ "${mode}" = "600" ] || fail "expected mode 600 on ${f}, got ${mode}"
+  done
+}
+
+@test "session.sh: session_save rejects malformed storageState JSON (exit 2)" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x 'not json' '{}'"
+  assert_status "$EXIT_USAGE_ERROR"
+}
+
+@test "session.sh: session_save rejects storageState missing cookies/origins arrays (exit 2)" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[]}' '{}'"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "origins"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"origins\":[]}' '{}'"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "cookies"
+}
