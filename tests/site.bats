@@ -245,3 +245,25 @@ teardown() { teardown_temp_home; }
   run bash "${SCRIPTS_DIR}/browser-add-site.sh" --name x
   assert_status "$EXIT_USAGE_ERROR"
 }
+
+@test "list-sites: empty directory → status=ok and zero rows" {
+  run bash "${SCRIPTS_DIR}/browser-list-sites.sh"
+  assert_status 0
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  printf '%s' "${last_json}" | jq -e '.verb == "list-sites" and .status == "ok" and .count == 0' >/dev/null
+}
+
+@test "list-sites: lists registered sites with name + label + url" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name a --url https://a.test --label "App A" >/dev/null
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name b --url https://b.test --label "App B" >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-list-sites.sh"
+  assert_status 0
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  [ "$(printf '%s' "${last_json}" | jq -r '.count')" = "2" ]
+  [ "$(printf '%s' "${last_json}" | jq -r '.sites[0].name')"  = "a" ]
+  [ "$(printf '%s' "${last_json}" | jq -r '.sites[0].url')"   = "https://a.test" ]
+  [ "$(printf '%s' "${last_json}" | jq -r '.sites[0].label')" = "App A" ]
+  [ "$(printf '%s' "${last_json}" | jq -r '.sites[1].name')"  = "b" ]
+}
