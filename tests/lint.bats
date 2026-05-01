@@ -98,6 +98,45 @@ EOF
   assert_output_contains "doesn't match filename"
 }
 
+@test "lint: drift tier — passes when generated docs are in sync" {
+  run bash "${BATS_TEST_DIRNAME}/lint.sh" --drift-only
+  assert_status 0
+}
+
+@test "lint: drift tier — fails when references/tool-versions.md is hand-edited" {
+  cp "${REPO_ROOT}/references/tool-versions.md" "${REPO_ROOT}/references/tool-versions.md.bak"
+  printf '\nstale-junk\n' >> "${REPO_ROOT}/references/tool-versions.md"
+  run bash "${BATS_TEST_DIRNAME}/lint.sh" --drift-only
+  drift_status="${status}"
+  mv "${REPO_ROOT}/references/tool-versions.md.bak" "${REPO_ROOT}/references/tool-versions.md"
+  [ "${drift_status}" -ne 0 ] || fail "lint should fail on stale tool-versions.md"
+}
+
+@test "lint: drift tier — output-shape — every adapter sources scripts/lib/output.sh" {
+  run bash "${BATS_TEST_DIRNAME}/lint.sh" --drift-only
+  assert_status 0
+}
+
+@test "lint: drift tier — output-shape — fails when an adapter omits 'source .*output.sh'" {
+  cat > "${REPO_ROOT}/scripts/lib/tool/_drift-test-adapter.sh" <<'EOF'
+tool_metadata()        { printf '{"name":"_drift-test-adapter","abi_version":1}\n'; }
+tool_capabilities()    { printf '{"verbs":{}}\n'; }
+tool_doctor_check()    { printf '{"ok":true}\n'; }
+tool_open()            { printf '{"verb":"open","status":"ok"}\n'; }
+tool_click()           { return 41; }
+tool_fill()            { return 41; }
+tool_snapshot()        { return 41; }
+tool_inspect()         { return 41; }
+tool_audit()           { return 41; }
+tool_extract()         { return 41; }
+tool_eval()            { return 41; }
+EOF
+  run bash "${BATS_TEST_DIRNAME}/lint.sh" --drift-only
+  drift_status="${status}"
+  rm -f "${REPO_ROOT}/scripts/lib/tool/_drift-test-adapter.sh"
+  [ "${drift_status}" -ne 0 ] || fail "lint should fail on adapter missing 'source .*output.sh'"
+}
+
 @test "lint: dynamic tier — fails when adapter abi_version doesn't match framework" {
   fake_dir="${TEST_HOME}/lib/tool"
   mkdir -p "${fake_dir}" "${TEST_HOME}/tests" "${TEST_HOME}/references"

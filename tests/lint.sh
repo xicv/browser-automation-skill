@@ -143,6 +143,57 @@ run_dynamic_tier() {
   return "${total_errors}"
 }
 
+ensure_docs_in_sync() {
+  local errors=0
+  local tmp_versions tmp_skill
+  tmp_versions="$(mktemp)"; tmp_skill="$(mktemp)"
+
+  bash "${REPO_ROOT}/scripts/regenerate-docs.sh" --to-stdout tool-versions > "${tmp_versions}"
+  if ! diff -u "${REPO_ROOT}/references/tool-versions.md" "${tmp_versions}" >&2; then
+    warn_lint "references/tool-versions.md is stale; run scripts/regenerate-docs.sh"
+    errors=$((errors + 1))
+  fi
+
+  bash "${REPO_ROOT}/scripts/regenerate-docs.sh" --to-stdout skill-md > "${tmp_skill}"
+  local actual_skill
+  actual_skill="$(awk '
+    /<!-- BEGIN AUTOGEN: tools-table/ { capture=1 }
+    capture { print }
+    /<!-- END AUTOGEN: tools-table -->/ { capture=0 }
+  ' "${REPO_ROOT}/SKILL.md")"
+  if [ "${actual_skill}" != "$(cat "${tmp_skill}")" ]; then
+    warn_lint "SKILL.md tools-table block is stale; run scripts/regenerate-docs.sh"
+    errors=$((errors + 1))
+  fi
+
+  rm -f "${tmp_versions}" "${tmp_skill}"
+  return "${errors}"
+}
+
+# Per token-efficient-output spec §8: every adapter MUST source-import
+# scripts/lib/output.sh so its verb-dispatch functions emit JSON via
+# emit_summary / emit_event rather than hand-rolled `printf '{...}'` lines.
+ensure_adapters_use_output_helpers() {
+  local errors=0 file
+  shopt -s nullglob
+  for file in "${LIB_TOOL_DIR}"/*.sh; do
+    [ -f "${file}" ] || continue
+    if ! grep -qE '^[[:space:]]*source[[:space:]]+.*output\.sh' "${file}"; then
+      warn_lint "$(basename "${file}") does not source scripts/lib/output.sh; verb output must go through emit_summary / emit_event (spec §8)"
+      errors=$((errors + 1))
+    fi
+  done
+  shopt -u nullglob
+  return "${errors}"
+}
+
+run_drift_tier() {
+  local rc=0
+  ensure_docs_in_sync                 || rc=$((rc + $?))
+  ensure_adapters_use_output_helpers  || rc=$((rc + $?))
+  return "${rc}"
+}
+
 mode="all"
 case "${1:-}" in
   --static-only)  mode="static" ;;
@@ -154,11 +205,13 @@ esac
 
 errors=0
 case "${mode}" in
-  static)        run_static_tier   || errors=$((errors + $?)) ;;
-  dynamic)       run_dynamic_tier  || errors=$((errors + $?)) ;;
+  static)   run_static_tier   || errors=$((errors + $?)) ;;
+  dynamic)  run_dynamic_tier  || errors=$((errors + $?)) ;;
+  drift)    run_drift_tier    || errors=$((errors + $?)) ;;
   all)
     run_static_tier  || errors=$((errors + $?))
     run_dynamic_tier || errors=$((errors + $?))
+    run_drift_tier   || errors=$((errors + $?))
     ;;
 esac
 
