@@ -13,6 +13,13 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 3 part 2 — Real verb scripts
+
+- [feat] `scripts/lib/verb_helpers.sh` — `parse_verb_globals` + `source_picked_adapter` shared boilerplate for all verb scripts.
+- [feat] `scripts/browser-open.sh` — first real verb script: `--site`/`--tool`/`--dry-run`/`--raw` global flags, `--url` required arg, full router → adapter → emit_summary pipeline.
+- [docs] `SKILL.md` verbs table gains `open` row.
+- [internal] `tests/verb_helpers.bats` (5) + `tests/browser-open.bats` (6) — full pipeline coverage via the playwright-cli stub.
+
 ### Phase 3 — Tool adapter extension model + first adapter
 
 #### Added
