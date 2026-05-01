@@ -18,6 +18,7 @@ readonly BROWSER_SKILL_ROUTER_LOADED=1
 # Order matters: top-down, first-match-with-capability-support wins.
 # Adding a tool that's NEVER the default for any verb = ZERO edits to this array.
 ROUTING_RULES=(
+  rule_session_required
   rule_default_navigation
 )
 
@@ -49,6 +50,21 @@ _tool_supports() {
 
 # --- Precedence rules (in order). Each fn echoes "TOOL\tWHY" if it matches.
 # Add a rule = define a function + append its NAME to ROUTING_RULES above.
+
+# Session-loading required: when verb_helpers.sh::resolve_session_storage_state
+# resolved a storageState file (BROWSER_SKILL_STORAGE_STATE non-empty), prefer
+# playwright-lib — the only adapter declaring session_load: true.
+# Reads env var (not argv) because session resolution happens before pick_tool.
+rule_session_required() {
+  local verb="$1"
+  if [ -n "${BROWSER_SKILL_STORAGE_STATE:-}" ]; then
+    case "${verb}" in
+      open|click|fill|snapshot|login)
+        printf 'playwright-lib\t%s\n' "session loading required (BROWSER_SKILL_STORAGE_STATE set)"
+        ;;
+    esac
+  fi
+}
 
 # Default for navigation/inspection verbs — playwright-cli is the cheap,
 # stable, multi-browser default per parent spec Appendix B.
