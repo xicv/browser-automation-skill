@@ -13,11 +13,16 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
-### Phase 4 part 4b — IPC daemon investigation + plan (no implementation in this phase)
+### Phase 4 part 4b — IPC daemon + stateful verbs (snapshot/click/fill) real mode
 
-- [docs] `docs/superpowers/plans/2026-05-01-phase-04-part-4c-ipc-daemon.md` — design for the IPC-daemon architecture stateful verbs need.
-- [internal] Empirical finding documented: `chromium.connect()` clients DO NOT share contexts across connections. State opened in one client process disappears when that client disconnects. Phase 4 part 4a's `attached_to_daemon: true` is therefore a **connect-time optimization** (saves ~1.5s of cold launch), NOT a state-persistence promise. Comment in `runOpen` clarifies the semantics.
-- [internal] Stateful verbs (`snapshot`/`click`/`fill`/`login`) error message updated: "deferred to Phase 4 part 4c (IPC daemon)" — pointing at the new plan.
+- [feat] `daemonChildMain` becomes an IPC server. Holds `(BrowserServer, Browser, current Context, current Page, refMap)` in closure. Listens on TCP loopback (random port — Unix socket sun_path is 104 chars on macOS; bats temp paths exceed it). State file gains `ipc_host` + `ipc_port` fields.
+- [feat] `runSnapshot` / `runClick` / `runFill` route through `ipcCall` — JSON-line protocol over TCP loopback. Daemon executes verbs against held state; clients are thin transports.
+- [feat] `runOpen` ALSO routes through IPC when daemon present; the daemon-held context+page persists for snapshot/click/fill. Falls back to one-shot launch when no daemon.
+- [feat] `--secret-stdin` for fill: client reads stdin, sends text in JSON IPC message, daemon scrubs Playwright error logs (which echo fill args) before replying. Client reply never contains the secret on any path.
+- [feat] Snapshot uses Playwright 1.59's `page.ariaSnapshot()` (replaces dropped `page.accessibility`). Output is YAML; `parseAriaSnapshot()` extracts interactive (role, name) tuples and assigns `eN` ids. Click/fill use `page.getByRole(role, {name}).first()` for stable cross-call locators.
+- [internal] Empirical finding documented: `chromium.connect()` clients DO NOT share contexts across connections — that's why daemon-side dispatch (this design) is necessary. `runOpen`'s `attached_to_daemon: true` field now genuinely reflects state persistence.
+- [internal] `tests/playwright-lib_stateful_e2e.bats` — 4 gated cases covering full chain (start → open → snapshot → click → stop), no-open-page error, ref-not-found error, and the secret-leak guard.
+- [docs] `docs/superpowers/plans/2026-05-01-phase-04-part-4c-ipc-daemon.md` — design doc the implementation followed; kept as historical record.
 
 ### Phase 4 part 4a — Daemon lifecycle + open-via-daemon
 
