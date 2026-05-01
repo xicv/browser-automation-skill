@@ -75,7 +75,7 @@ check_bash_version
 check_home
 # Tools below are recommended but not required in Phase 1; later phases will
 # elevate these to required and add version-pinning logic.
-check_cmd_advisory node "brew install node (>=20) — required from Phase 3 onward"
+check_cmd node "brew install node (>=20) — required by playwright-cli adapter; was advisory in Phase 1-2"
 
 check_disk_encryption() {
   case "$(uname -s)" in
@@ -107,14 +107,61 @@ check_disk_encryption() {
 
 check_disk_encryption
 
+# --- Adapter aggregation (extension model §5.2) ---
+# Walk lib/tool/*.sh in subshells; collect each adapter's tool_doctor_check.
+# Subshell isolation prevents tool_open / tool_click / etc. from colliding.
+adapters_ok=0
+adapters_failed=0
+adapter_files=("${LIB_TOOL_DIR}"/*.sh)
+
+if [ ! -f "${adapter_files[0]}" ]; then
+  warn "no adapters found under ${LIB_TOOL_DIR}"
+else
+  for adapter_file in "${adapter_files[@]}"; do
+    adapter_name="$(basename "${adapter_file}" .sh)"
+    result="$(
+      # shellcheck source=/dev/null
+      source "${adapter_file}" 2>/dev/null
+      tool_doctor_check 2>/dev/null
+    )" || result='{"ok":false,"error":"adapter source failed"}'
+
+    jq -c --arg n "${adapter_name}" '. + {check:"adapter",adapter:$n}' <<<"${result}"
+
+    if [ "$(printf '%s' "${result}" | jq -r .ok 2>/dev/null)" = "true" ]; then
+      adapters_ok=$((adapters_ok + 1))
+      ok "adapter ${adapter_name}: ok"
+    else
+      adapters_failed=$((adapters_failed + 1))
+      warn "adapter ${adapter_name}: $(printf '%s' "${result}" | jq -r '.error // "failed"')"
+    fi
+  done
+fi
+
 duration_ms=$(( $(now_ms) - started_at_ms ))
 
-if [ "${problems}" -eq 0 ]; then
-  ok "all checks passed"
-  summary_json verb=doctor tool=none why=health-check status=ok problems=0 duration_ms="${duration_ms}"
-  exit "${EXIT_OK}"
+# Status semantics (§5.3 of extension-model spec).
+if [ "${problems}" -gt 0 ]; then
+  overall_status="error"
+  exit_code="${EXIT_PREFLIGHT_FAILED}"
+elif [ "${adapters_ok}" -eq 0 ] && [ "${adapters_failed}" -gt 0 ]; then
+  overall_status="error"
+  exit_code="${EXIT_PREFLIGHT_FAILED}"
+elif [ "${adapters_failed}" -gt 0 ]; then
+  overall_status="partial"
+  exit_code="${EXIT_OK}"
 else
-  warn "${problems} problem(s) found"
-  summary_json verb=doctor tool=none why=health-check status=error problems="${problems}" duration_ms="${duration_ms}"
-  exit "${EXIT_PREFLIGHT_FAILED}"
+  overall_status="ok"
+  exit_code="${EXIT_OK}"
 fi
+
+if [ "${overall_status}" = "ok" ]; then
+  ok "all checks passed (${adapters_ok} adapter(s) ok)"
+else
+  warn "${problems} core problem(s); ${adapters_ok} adapter(s) ok, ${adapters_failed} failed"
+fi
+
+summary_json verb=doctor tool=none why=health-check status="${overall_status}" \
+  problems="${problems}" \
+  adapters_ok="${adapters_ok}" adapters_failed="${adapters_failed}" \
+  duration_ms="${duration_ms}"
+exit "${exit_code}"
