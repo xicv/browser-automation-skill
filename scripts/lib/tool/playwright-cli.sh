@@ -23,7 +23,7 @@ readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_LOADED=1
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../output.sh"
 
-readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_BIN="${PLAYWRIGHT_CLI_BIN:-playwright}"
+readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_BIN="${PLAYWRIGHT_CLI_BIN:-playwright-cli}"
 readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_DEFAULT_VIEWPORT="1280x800"
 
 # --- Identity functions (called by framework once or for queries) ---
@@ -57,7 +57,7 @@ tool_doctor_check() {
   if ! command -v "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" >/dev/null 2>&1; then
     cat <<EOF
 { "ok": false, "binary": "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}", "error": "not on PATH",
-  "install_hint": "npm i -g playwright @playwright/test && playwright install chromium" }
+  "install_hint": "npm i -g playwright @playwright/test @playwright/cli && playwright install chromium" }
 EOF
     return 0
   fi
