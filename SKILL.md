@@ -43,6 +43,7 @@ for the rules):
 | Tool | Strengths | Cheatsheet |
 |---|---|---|
 | playwright-cli | declares 4 verbs | [references/playwright-cli-cheatsheet.md](references/playwright-cli-cheatsheet.md) |
+| playwright-lib | declares 5 verbs | [references/playwright-lib-cheatsheet.md](references/playwright-lib-cheatsheet.md) |
 <!-- END AUTOGEN: tools-table -->
 
 ## Before running anything
