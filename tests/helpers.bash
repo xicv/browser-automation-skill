@@ -61,3 +61,22 @@ if ! declare -F fail >/dev/null 2>&1; then
     return 1
   }
 fi
+
+# --- Adapter test helpers (Phase 3 extension model) ---
+export LIB_TOOL_DIR="${SCRIPTS_DIR}/lib/tool"
+export STUBS_DIR="${BATS_TEST_DIRNAME:-tests}/stubs"
+export FIXTURES_DIR="${BATS_TEST_DIRNAME:-tests}/fixtures"
+
+# adapter_source ADAPTER_NAME — sources scripts/lib/tool/<name>.sh in current shell.
+# Use ONLY in subshell-isolated test bodies; otherwise use adapter_run_query.
+adapter_source() {
+  # shellcheck source=/dev/null
+  source "${LIB_TOOL_DIR}/${1}.sh"
+}
+
+# adapter_run_query ADAPTER_NAME FUNCTION — runs FUNCTION in a clean subshell
+# and echoes its stdout. Used to query identity functions without polluting
+# the parent shell's namespace.
+adapter_run_query() {
+  ( source "${LIB_TOOL_DIR}/${1}.sh"; "${2}" )
+}
