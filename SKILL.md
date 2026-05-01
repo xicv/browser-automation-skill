@@ -21,7 +21,9 @@ Real browser launches arrive in Phase 3.
 | `show-site`     | Show one site's profile JSON | `… show-site --name prod` |
 | `remove-site`   | Typed-name confirmed delete | `… remove-site --name prod --yes-i-know` |
 | `use`           | Get / set / clear current site | `… use --set prod` |
-| `login`         | Capture a Playwright storageState into a session | `… login --site prod --as prod--admin --storage-state-file PATH` |
+| `login`         | Capture a Playwright storageState into a session | `… login --site prod --as prod--admin --interactive` |
+| `login` (file)  | Same — but consume a hand-edited storageState file | `… login --site prod --as prod--admin --storage-state-file PATH` |
+| `list-sessions` | List captured sessions (optionally filter by site) | `… list-sessions --site prod` |
 | `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
 | `open` w/ session | Apply a stored storageState before navigating | `… open --site prod --as prod--admin --url …` |
 | `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |

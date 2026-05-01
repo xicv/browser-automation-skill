@@ -23,23 +23,30 @@ source "${SCRIPT_DIR}/lib/site.sh"
 source "${SCRIPT_DIR}/lib/session.sh"
 init_paths
 
-site=""; as=""; ss_file=""; dry_run=0; auto=0; headed=1
+site=""; as=""; ss_file=""; dry_run=0; auto=0; headed=1; interactive=0
 
 usage() {
   cat <<'USAGE'
-Usage: login --site NAME --as SESSION --storage-state-file PATH [--dry-run]
+Usage: login --site NAME --as SESSION (--storage-state-file PATH | --interactive) [--dry-run]
 
-Phase 2 stub adapter — reads a hand-edited Playwright storageState from
-PATH and writes it as sessions/<SESSION>.json. (Phase 3 will replace
---storage-state-file with a real headed browser launch.)
+Capture a Playwright storageState into sessions/<SESSION>.json. Two modes:
+
+  --interactive               Launch a headed Chromium via the playwright-lib
+                              driver. User logs in interactively; press Enter
+                              in this terminal to capture and save the session.
+  --storage-state-file PATH   Skip the browser launch; consume an already-
+                              captured storageState file (legacy hand-edit
+                              path, useful for CI / non-interactive imports).
 
   --site NAME                 site profile to bind the session to (required)
-  --as SESSION                session name (required, used as filename)
-  --storage-state-file PATH   path to a Playwright storageState JSON (required)
+  --as SESSION                session name (required; falls back to site.default_session)
   --dry-run                   validate inputs; write nothing
-  --headed                    accepted (default; Phase 2 is headed-only)
-  --auto                      reserved; refused in Phase 2
+  --headed                    accepted (interactive mode is always headed)
+  --auto                      reserved; Phase 5 auto-relogin
   -h, --help
+
+A site may have many sessions: pass different --as names to capture per-role
+or per-account credentials (e.g. prod--admin, prod--readonly, prod--ci).
 USAGE
 }
 
@@ -48,6 +55,7 @@ while [ $# -gt 0 ]; do
     --site)                 site="$2"; shift 2 ;;
     --as)                   as="$2"; shift 2 ;;
     --storage-state-file)   ss_file="$2"; shift 2 ;;
+    --interactive)          interactive=1; shift ;;
     --dry-run)              dry_run=1; shift ;;
     --headed)               headed=1; shift ;;
     --auto)                 auto=1; shift ;;
@@ -57,7 +65,10 @@ while [ $# -gt 0 ]; do
 done
 
 if [ "${auto}" -eq 1 ]; then
-  die "${EXIT_USAGE_ERROR}" "--auto is reserved for Phase 5 auto-relogin; refused in Phase 2"
+  die "${EXIT_USAGE_ERROR}" "--auto is reserved for Phase 5 auto-relogin"
+fi
+if [ "${interactive}" -eq 1 ] && [ -n "${ss_file}" ]; then
+  die "${EXIT_USAGE_ERROR}" "--interactive and --storage-state-file are mutually exclusive"
 fi
 [ -n "${site}" ]    || { usage; die "${EXIT_USAGE_ERROR}" "--site is required"; }
 # --as defaults to site.default_session if the site sets one.
@@ -69,10 +80,14 @@ if [ -z "${as}" ]; then
     die "${EXIT_USAGE_ERROR}" "--as is required (site ${site} has no default_session set)"
   fi
 fi
-# Validate session name before using it as a filename.
 assert_safe_name "${as}" "session-name"
-[ -n "${ss_file}" ] || { usage; die "${EXIT_USAGE_ERROR}" "--storage-state-file is required (Phase 2 is stub-only)"; }
-[ -f "${ss_file}" ] || die "${EXIT_USAGE_ERROR}" "storage-state-file not found: ${ss_file}"
+if [ "${interactive}" -eq 0 ] && [ -z "${ss_file}" ]; then
+  usage
+  die "${EXIT_USAGE_ERROR}" "--interactive or --storage-state-file is required"
+fi
+if [ "${interactive}" -eq 0 ]; then
+  [ -f "${ss_file}" ] || die "${EXIT_USAGE_ERROR}" "storage-state-file not found: ${ss_file}"
+fi
 
 started_at_ms="$(now_ms)"
 
@@ -81,8 +96,33 @@ profile_json="$(site_load "${site}")"   # exits 23 if missing
 site_url="$(printf '%s' "${profile_json}" | jq -r .url)"
 site_origin="$(url_origin "${site_url}")"
 
+# Interactive mode: launch the driver, which opens a headed browser, waits
+# for the user to press Enter, and writes the captured storageState to a
+# temp file. Then we validate + save through the same pipeline as the
+# storage-state-file path.
+if [ "${interactive}" -eq 1 ]; then
+  if [ "${dry_run}" -eq 1 ]; then
+    ok "dry-run: would launch headed browser to ${site_url}, capture session ${as}"
+    duration_ms=$(( $(now_ms) - started_at_ms ))
+    summary_json verb=login tool=playwright-lib why=interactive-dry-run status=ok would_run=true \
+                 site="${site}" session="${as}" duration_ms="${duration_ms}"
+    exit "${EXIT_OK}"
+  fi
+  # Tempfile under SESSIONS_DIR (mode 0600 inherited from 0700 dir + driver chmod).
+  mkdir -p "${SESSIONS_DIR}"
+  chmod 700 "${SESSIONS_DIR}"
+  ss_file="${SESSIONS_DIR}/${as}.interactive-tmp.$$"
+  ok "launching headed Chromium at ${site_url}; press Enter when done logging in"
+  if ! node "${SCRIPT_DIR}/lib/node/playwright-driver.mjs" login \
+        --url "${site_url}" --output-path "${ss_file}"; then
+    rm -f "${ss_file}"
+    die "${EXIT_TOOL_CRASHED}" "interactive login failed (driver returned non-zero)"
+  fi
+fi
+
 # Read & validate the storageState file.
 if ! ss_json="$(jq -c . "${ss_file}" 2>/dev/null)"; then
+  [ "${interactive}" -eq 1 ] && rm -f "${ss_file}"
   die "${EXIT_USAGE_ERROR}" "storage-state-file is not valid JSON: ${ss_file}"
 fi
 
@@ -112,16 +152,19 @@ meta_json="$(jq -nc \
   --arg s "${site}" \
   --arg o "${site_origin}" \
   --arg c "${captured_at}" \
-  --arg ua "browser-skill phase-2 stub adapter" \
+  --arg ua "$([ "${interactive}" -eq 1 ] && echo 'browser-skill playwright-lib interactive capture' || echo 'browser-skill storageState-file import')" \
   '{
     name: $n, site: $s, origin: $o, captured_at: $c,
     source_user_agent: $ua, expires_in_hours: 168, schema_version: 1
   }')"
 
 session_save "${as}" "${ss_json}" "${meta_json}"
+[ "${interactive}" -eq 1 ] && rm -f "${ss_file}"
 ok "session captured: ${as}"
 
 duration_ms=$(( $(now_ms) - started_at_ms ))
-summary_json verb=login tool=playwright-lib why=storageState-file-import status=ok \
+why_tag="storageState-file-import"
+[ "${interactive}" -eq 1 ] && why_tag="interactive-headed-capture"
+summary_json verb=login tool=playwright-lib why="${why_tag}" status=ok \
              site="${site}" session="${as}" origin="${site_origin}" \
              expires_in_hours=168 duration_ms="${duration_ms}"

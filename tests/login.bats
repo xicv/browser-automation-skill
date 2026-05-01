@@ -104,6 +104,44 @@ teardown() { teardown_temp_home; }
   assert_output_contains "default_session"
 }
 
+@test "login: --interactive and --storage-state-file are mutually exclusive" {
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod-app --as x --interactive --storage-state-file /tmp/x.json
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "mutually exclusive"
+}
+
+@test "login: --interactive --dry-run skips browser launch and reports planned action" {
+  setup_temp_home
+  bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/site.sh'
+    profile=\$(jq -nc '{name:\"prod\", url:\"https://app.example.com\", label:\"\", viewport:\"1280x800\", default_session:null, default_tool:null, schema_version:1}')
+    site_save prod \"\${profile}\" '{}'
+  "
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod --as prod--admin --interactive --dry-run
+  teardown_temp_home
+  assert_status 0
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  printf '%s' "${last_json}" | jq -e '.verb == "login" and .why == "interactive-dry-run" and .status == "ok"' >/dev/null
+}
+
+@test "login: requires --interactive OR --storage-state-file (one of them)" {
+  setup_temp_home
+  bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/site.sh'
+    profile=\$(jq -nc '{name:\"prod\", url:\"https://app.example.com\", label:\"\", viewport:\"1280x800\", default_session:null, default_tool:null, schema_version:1}')
+    site_save prod \"\${profile}\" '{}'
+  "
+  run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as x
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "interactive"
+}
+
 @test "login: rejects path-traversal in --as" {
   run bash "${SCRIPTS_DIR}/browser-login.sh" \
     --site prod-app --as '../evil' \
