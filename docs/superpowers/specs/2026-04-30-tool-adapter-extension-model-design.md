@@ -46,6 +46,8 @@ This spec is dense but flat. Sections 2–4 are the contract; Sections 5–7 are
 
 This is the contract every `scripts/lib/tool/<tool>.sh` implements. Identity functions are queried by the framework (router, doctor, lint, autogen). Verb-dispatch functions are called once per verb invocation, after the router has selected exactly one adapter.
 
+> **See also:** [Token-Efficient Adapter Output design spec](2026-05-01-token-efficient-adapter-output-design.md) governs the bytes a verb-dispatch function emits to stdout/stderr — single-line summary contract, `eN` element refs, capture-paths-not-inline, `--raw` / `--json` / `--depth` flag semantics, and the six WRONG/RIGHT anti-pattern pairs. Adapter authors implement the ABI here and emit through the helpers in `scripts/lib/output.sh` (Phase 3 deliverable). Lint tier 3 (§7 below) enforces output-shape drift.
+
 ### 2.1 Required identity & capability functions
 
 ```bash
