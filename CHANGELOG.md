@@ -13,6 +13,16 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 4 part 4e — show-session + remove-session verbs (full session CRUD)
+
+- [feat] `scripts/browser-show-session.sh` — emits session metadata (origin, captured_at, expires_in_hours, source_user_agent) plus storage_state counts (cookie_count, origin_count, file_size_bytes). **CRITICAL:** never emits cookie/token values; the agent has no business seeing raw session material. Test asserts cookie values do not leak into output.
+- [feat] `scripts/browser-remove-session.sh` — typed-name confirmed delete of session storageState + meta. Mirrors `remove-site` ergonomics: `--yes-i-know` skips prompt, `--dry-run` reports planned action. Does NOT clear `site.default_session` pointers (cascade is Phase 5); dangling pointers surface clearly via `resolve_session_storage_state`'s self-healing hint at next use.
+- [feat] `scripts/lib/session.sh::session_delete` — new lib helper. Idempotent (no-op on missing files), `assert_safe_name` guards path-traversal.
+- [docs] `SKILL.md` verbs table gains `show-session` + `remove-session` rows.
+- [internal] `tests/show-remove-session.bats` (10) — full coverage incl. cookie-value-leak guard. `tests/session.bats` (+3) — session_delete unit tests.
+
+Session CRUD now complete: `login` (create) / `list-sessions` (read all) / `show-session` (read one) / `remove-session` (delete). Update happens via re-login.
+
 ### Phase 4 part 4d — Real-mode interactive login + multi-session ergonomics
 
 - [feat] `playwright-driver.mjs::runLogin` — single-shot headed Chromium flow. Launches browser at `--url`, prints "press Enter when done logging in" to stderr, waits for stdin newline, captures `context.storageState()`, writes to `--output-path` (mode 0600). Independent of the IPC daemon — login is its own ephemeral isolated context.
