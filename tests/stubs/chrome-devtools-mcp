@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# tests/stubs/chrome-devtools-mcp — mock binary for adapter contract tests.
+#
+# Behavior mirrors tests/stubs/playwright-cli:
+#   1. Logs argv (newline-separated, one arg per line) to ${STUB_LOG_FILE:-/tmp/chrome-devtools-mcp-stub.log}
+#      so tests can grep argv for leak / shape assertions.
+#   2. Computes sha256 of argv (joined by NULs) and looks up
+#      tests/fixtures/chrome-devtools-mcp/<sha>.json. If found, prints the file's
+#      contents to stdout and exits 0.
+#   3. If no fixture matches, prints a JSON error line and exits with the
+#      EXIT_TOOL_UNSUPPORTED_OP code (41) so tests detect missing fixtures
+#      explicitly rather than silently passing.
+#
+# As with the playwright-cli stub, this deliberately does NOT shell out to the
+# real chrome-devtools-mcp binary. The integration layer is the adapter, not
+# the MCP server. Real-mode bridge testing is deferred to phase-05 part 1b.
+#
+# Special: --version is honored (returns "stub 0.0.0") so tool_doctor_check
+# under stub-mode reports the binary as found.
+
+set -euo pipefail
+LOG_FILE="${STUB_LOG_FILE:-/tmp/chrome-devtools-mcp-stub.log}"
+
+if [ "${1:-}" = "--version" ]; then
+  printf 'chrome-devtools-mcp-stub 0.0.0\n'
+  exit 0
+fi
+
+{
+  printf '%s\n' "--- $(date -u +%Y-%m-%dT%H:%M:%SZ) ---"
+  for a in "$@"; do printf '%s\n' "${a}"; done
+} >> "${LOG_FILE}"
+
+hash="$(printf '%s\0' "$@" | shasum -a 256 | awk '{print $1}')"
+
+FIXTURES_DIR="${CHROME_DEVTOOLS_MCP_FIXTURES_DIR:-tests/fixtures/chrome-devtools-mcp}"
+if [ -f "${FIXTURES_DIR}/${hash}.json" ]; then
+  cat "${FIXTURES_DIR}/${hash}.json"
+  exit 0
+fi
+
+printf '{"status":"error","reason":"no fixture for argv-hash %s","argv":%s}\n' \
+  "${hash}" "$(printf '%s\n' "$@" | jq -R . | jq -sc .)"
+exit 41
