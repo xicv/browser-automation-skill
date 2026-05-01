@@ -51,14 +51,18 @@ teardown() {
   rm -f "${STUB_LOG_FILE}"
 }
 
-@test "playwright-lib driver: real mode for stateful verbs (snapshot/click/fill/login) returns 41 with daemon-mode hint" {
-  # `open` real-mode is implemented (single-shot launch+navigate+close).
-  # Stateful verbs require a long-lived browser shared across invocations —
-  # daemon mode lands in Phase 4 part 4. Until then they error with hint.
+@test "playwright-lib driver: stateful verb without running daemon returns 41 with self-healing hint" {
+  # Stateful verbs IPC-call the daemon. If no daemon is running, the client
+  # exits with a clear "run daemon-start" pointer instead of a confusing
+  # connect-refused error.
   unset BROWSER_SKILL_LIB_STUB
+  setup_temp_home
+  local real_home="${HOME}"
+  HOME="${real_home}"; export HOME
   run bash -c "node scripts/lib/node/playwright-driver.mjs snapshot 2>&1"
+  teardown_temp_home
   [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
-  echo "${output}" | grep -qE "Phase 4 part 4b|daemon mode" || fail "expected deferred-mode hint, got: ${output}"
+  echo "${output}" | grep -qE "requires running daemon|daemon-start" || fail "expected self-healing daemon hint, got: ${output}"
 }
 
 # --- Adapter contract ---

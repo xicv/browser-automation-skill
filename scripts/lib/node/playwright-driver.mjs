@@ -20,6 +20,7 @@
 
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, chmodSync, mkdirSync, openSync } from 'node:fs';
+import { createServer, createConnection } from 'node:net';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -71,18 +72,21 @@ async function realDispatch(args) {
   switch (verb) {
     case 'open':
       return await runOpen(flags);
+    case 'snapshot':
+      return await runSnapshot(flags);
+    case 'click':
+      return await runClick(flags);
+    case 'fill':
+      return await runFill(flags);
     case 'daemon-start':
       return await runDaemonStart(flags);
     case 'daemon-stop':
       return runDaemonStop();
     case 'daemon-status':
       return runDaemonStatus();
-    case 'snapshot':
-    case 'click':
-    case 'fill':
     case 'login':
       process.stderr.write(
-        `playwright-driver.mjs: real mode for verb='${verb}' deferred to Phase 4 part 4b; ` +
+        `playwright-driver.mjs: real mode for verb='${verb}' deferred to Phase 4 part 4d; ` +
           `use BROWSER_SKILL_LIB_STUB=1 or route via --tool=playwright-cli\n`
       );
       process.exit(41);
@@ -90,6 +94,123 @@ async function realDispatch(args) {
       process.stderr.write(`playwright-driver.mjs: unknown verb '${verb}'\n`);
       process.exit(2);
   }
+}
+
+// --- Stateful verbs (route through IPC daemon) ---
+// chromium.connect()-based clients can't share state across processes.
+// The daemon (started via daemon-start) holds browser+context+page+refMap
+// internally and exposes verb operations over a Unix socket. Verb processes
+// here are thin clients: send one JSON line, read one JSON line, exit.
+
+async function runSnapshot(flags) {
+  const reply = await ipcCall({ verb: 'snapshot' });
+  emitDaemonReply(reply);
+  process.exit(reply.event === 'error' ? 30 : 0);
+}
+
+async function runClick(flags) {
+  if (!flags.ref) {
+    process.stderr.write('playwright-driver.mjs::click: --ref eN is required\n');
+    process.exit(2);
+  }
+  const reply = await ipcCall({ verb: 'click', ref: flags.ref });
+  emitDaemonReply(reply);
+  process.exit(reply.event === 'error' ? 30 : 0);
+}
+
+async function runFill(flags) {
+  if (!flags.ref) {
+    process.stderr.write('playwright-driver.mjs::fill: --ref eN is required\n');
+    process.exit(2);
+  }
+  let text = flags.text;
+  if (flags['secret-stdin']) {
+    if (typeof flags.text === 'string') {
+      process.stderr.write('playwright-driver.mjs::fill: --text and --secret-stdin are mutually exclusive\n');
+      process.exit(2);
+    }
+    text = await readAllStdin();
+  }
+  if (typeof text !== 'string' || text.length === 0) {
+    process.stderr.write('playwright-driver.mjs::fill: --text VALUE or --secret-stdin required\n');
+    process.exit(2);
+  }
+  const reply = await ipcCall({ verb: 'fill', ref: flags.ref, text });
+  // Replace the text field in the reply (defensive; daemon should not echo it).
+  delete reply.text;
+  emitDaemonReply(reply);
+  process.exit(reply.event === 'error' ? 30 : 0);
+}
+
+function emitDaemonReply(reply) {
+  if (reply.event === 'snapshot' && Array.isArray(reply.refs)) {
+    // Compact eN-indexed listing the agent can read directly.
+    const summary = { ...reply, ref_count: reply.refs.length };
+    delete summary.refs;
+    process.stdout.write(JSON.stringify(summary) + '\n');
+    for (const r of reply.refs) {
+      const tail = r.name ? ` "${r.name}"` : '';
+      process.stdout.write(`${r.id} ${r.role}${tail}\n`);
+    }
+    return;
+  }
+  process.stdout.write(JSON.stringify(reply) + '\n');
+}
+
+async function ipcCall(msg) {
+  const state = readDaemonState();
+  if (!state || !isPidAlive(state.pid) || !state.ipc_port) {
+    process.stderr.write(
+      `playwright-driver.mjs: stateful verb '${msg.verb}' requires running daemon ` +
+        `(run: node playwright-driver.mjs daemon-start)\n`
+    );
+    process.exit(41);
+  }
+  return await new Promise((resolve, reject) => {
+    const conn = createConnection({ host: state.ipc_host || '127.0.0.1', port: state.ipc_port });
+    let buf = '';
+    let settled = false;
+    const t = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try { conn.destroy(); } catch (_) {}
+      reject(new Error(`ipcCall: timeout waiting for daemon reply (verb=${msg.verb})`));
+    }, parseInt(process.env.BROWSER_SKILL_LIB_TIMEOUT_MS || '30000', 10));
+
+    conn.on('connect', () => {
+      conn.write(JSON.stringify(msg) + '\n');
+    });
+    conn.on('data', (chunk) => {
+      buf += chunk.toString('utf-8');
+      const nl = buf.indexOf('\n');
+      if (nl < 0 || settled) return;
+      settled = true;
+      clearTimeout(t);
+      try {
+        resolve(JSON.parse(buf.slice(0, nl)));
+      } catch (e) {
+        reject(e);
+      } finally {
+        try { conn.end(); } catch (_) {}
+      }
+    });
+    conn.on('error', (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(t);
+      reject(e);
+    });
+  });
+}
+
+function readAllStdin() {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    process.stdin.setEncoding('utf-8');
+    process.stdin.on('data', (chunk) => { data += chunk; });
+    process.stdin.on('end', () => resolve(data));
+    process.stdin.on('error', reject);
+  });
 }
 
 // --- Daemon lifecycle ---
@@ -167,9 +288,139 @@ async function daemonChildMain(flags) {
   const server = await chromium.launchServer({ headless });
   const wsEndpoint = server.wsEndpoint();
 
+  // The daemon HOLDS the browser handle + current context + current page.
+  // Verb clients send commands; the daemon mutates this state and replies.
+  // This sidesteps the chromium.connect cross-process state-sharing limit.
+  const browser = await chromium.connect(wsEndpoint);
+  let context = null;
+  let page = null;
+  let refMap = null;
+
+  // IPC over TCP loopback (not Unix socket) — Unix-socket sun_path is capped
+  // at 104 chars on macOS; bats temp paths exceed it. Loopback + random port
+  // sidesteps the limit cleanly and matches Playwright's own launchServer
+  // which uses ws://localhost:PORT.
+  const ipcServer = createServer((conn) => {
+    let buf = '';
+    conn.setEncoding('utf-8');
+    conn.on('data', async (chunk) => {
+      buf += chunk;
+      let nl;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let reply;
+        try {
+          const msg = JSON.parse(line);
+          reply = await dispatch(msg);
+        } catch (err) {
+          reply = { event: 'error', message: err && err.message ? err.message : String(err) };
+        }
+        try { conn.write(JSON.stringify(reply) + '\n'); } catch (_) {}
+      }
+    });
+    conn.on('error', () => { /* client closed mid-write; ignore */ });
+  });
+
+  async function dispatch(msg) {
+    switch (msg.verb) {
+      case 'open': {
+        if (context) { try { await context.close(); } catch (_) {} }
+        const opts = { viewport: { width: 1280, height: 800 } };
+        if (msg.viewport)        opts.viewport     = msg.viewport;
+        if (msg.storage_state)   opts.storageState = msg.storage_state;
+        if (msg.user_agent)      opts.userAgent    = msg.user_agent;
+        context = await browser.newContext(opts);
+        page = await context.newPage();
+        const resp = await page.goto(msg.url, { waitUntil: 'domcontentloaded' });
+        return {
+          event: 'navigated',
+          url: page.url(),
+          title: await page.title(),
+          status: resp ? resp.status() : null,
+          attached_to_daemon: true,
+        };
+      }
+      case 'snapshot': {
+        if (!page) return { event: 'error', message: 'no open page (run open --url first)' };
+        // Playwright 1.59 dropped page.accessibility. Use ariaSnapshot which
+        // returns the agent-readable YAML format, then parse out interactive
+        // (role, name) pairs to assign eN refs the agent can click/fill by.
+        const yaml = await page.ariaSnapshot();
+        const refs = parseAriaSnapshot(yaml);
+        refMap = refs;
+        try {
+          const refsFile = join(browserSkillHome(), 'playwright-lib-refs.json');
+          mkdirSync(dirname(refsFile), { recursive: true, mode: 0o700 });
+          writeFileSync(refsFile, JSON.stringify({
+            page_url: page.url(),
+            captured_at: new Date().toISOString(),
+            aria_yaml: yaml,
+            refs,
+          }, null, 2));
+          chmodSync(refsFile, 0o600);
+        } catch (_) { /* non-fatal */ }
+        return { event: 'snapshot', page_url: page.url(), aria_yaml: yaml, refs };
+      }
+      case 'click': {
+        if (!page) return { event: 'error', message: 'no open page' };
+        if (!refMap) return { event: 'error', message: 'no refs (run snapshot first)' };
+        const entry = refMap.find((r) => r.id === msg.ref);
+        if (!entry) {
+          return {
+            event: 'error',
+            message: `ref '${msg.ref}' not found in last snapshot (${refMap.length} refs available)`,
+          };
+        }
+        await locatorFor(page, entry).click();
+        return { event: 'click', ref: entry.id, role: entry.role, name: entry.name || null, status: 'ok' };
+      }
+      case 'fill': {
+        if (!page) return { event: 'error', message: 'no open page' };
+        if (!refMap) return { event: 'error', message: 'no refs (run snapshot first)' };
+        const entry = refMap.find((r) => r.id === msg.ref);
+        if (!entry) {
+          return { event: 'error', message: `ref '${msg.ref}' not found in last snapshot` };
+        }
+        const text = typeof msg.text === 'string' ? msg.text : '';
+        // Playwright echoes the fill arg in error logs (e.g. "fill(\"<text>\")"
+        // — would leak the secret). Wrap + scrub before returning so the
+        // client never sees the secret in any path.
+        try {
+          await locatorFor(page, entry).fill(text);
+        } catch (err) {
+          let safeMessage = err && err.message ? err.message : String(err);
+          if (text && safeMessage.includes(text)) {
+            safeMessage = safeMessage.split(text).join('<redacted>');
+          }
+          return { event: 'error', message: `fill failed: ${safeMessage}` };
+        }
+        return {
+          event: 'fill',
+          ref: entry.id,
+          role: entry.role,
+          name: entry.name || null,
+          text_length: text.length,
+          status: 'ok',
+        };
+      }
+      default:
+        return { event: 'error', message: `unknown verb '${msg.verb}'` };
+    }
+  }
+
+  await new Promise((resolve, reject) => {
+    ipcServer.listen(0, '127.0.0.1', () => resolve());
+    ipcServer.once('error', reject);
+  });
+  const ipcPort = ipcServer.address().port;
+
   const state = {
     pid: process.pid,
     ws_endpoint: wsEndpoint,
+    ipc_host: '127.0.0.1',
+    ipc_port: ipcPort,
     started_at: new Date().toISOString(),
     browser: 'chromium',
     headless,
@@ -181,6 +432,9 @@ async function daemonChildMain(flags) {
   chmodSync(stateFile, 0o600);
 
   const cleanup = async () => {
+    try { await ipcServer.close(); } catch (_) {}
+    try { if (context) await context.close(); } catch (_) {}
+    try { await browser.close(); } catch (_) {}
     try { await server.close(); } catch (_) {}
     try { unlinkSync(stateFile); } catch (_) {}
     process.exit(0);
@@ -191,6 +445,53 @@ async function daemonChildMain(flags) {
   // Block forever (until signal).
   await new Promise(() => {});
 }
+
+// Roles considered "interactive" for the purposes of assigning eN refs.
+// Plus 'heading' (when named) so agents can disambiguate sections.
+const INTERACTIVE_ROLES = new Set([
+  'button', 'link', 'textbox', 'searchbox', 'combobox',
+  'checkbox', 'radio', 'menuitem', 'menuitemcheckbox', 'menuitemradio',
+  'option', 'tab', 'switch', 'slider', 'spinbutton',
+]);
+
+// Parse Playwright's ariaSnapshot YAML output and emit eN-tagged interactive
+// refs. Each line of the form `  - role "name":` or `  - role:` produces a
+// (role, name) tuple — we keep only roles agents typically click/fill, plus
+// named headings for landmarking.
+//
+// Example input:
+//   - heading "Example Domain" [level=1]
+//   - link "Learn more"
+//   - paragraph: This domain is for use in documentation examples …
+//
+// Output: [{id:"e1", role:"heading", name:"Example Domain"},
+//          {id:"e2", role:"link", name:"Learn more"}]
+function parseAriaSnapshot(yaml) {
+  const refs = [];
+  let n = 0;
+  const re = /^\s*-\s+([a-z][a-z]+)(?:\s+"([^"]*)")?[\s:[]/gm;
+  let m;
+  while ((m = re.exec(yaml)) !== null) {
+    const role = m[1];
+    const name = m[2] || '';
+    if (INTERACTIVE_ROLES.has(role) || (role === 'heading' && name)) {
+      n += 1;
+      refs.push({ id: `e${n}`, role, name });
+    }
+  }
+  return refs;
+}
+
+function locatorFor(page, entry) {
+  // Resolve a Locator from the (role, name) stored in the ref-map. Uses
+  // Playwright's getByRole — most stable cross-call locator. Limitation:
+  // pages with weak ARIA may have ambiguous (role, name) pairs; .first()
+  // picks the first match.
+  const opts = {};
+  if (entry.name) opts.name = entry.name;
+  return page.getByRole(entry.role, opts).first();
+}
+
 
 function runDaemonStop() {
   const state = readDaemonState();
@@ -293,33 +594,28 @@ async function runOpen(flags) {
 
   const { chromium } = loadPlaywright();
 
-  // If daemon is running, attach to it and create a new context. Page
-  // persists in the daemon process for subsequent verbs (snapshot/click/fill
-  // in part 4b). If no daemon, do a one-shot launch + close — useful as a
-  // smoke test but no state for later verbs to use.
+  // If a daemon with an IPC socket is running, route through it so the
+  // context+page persists for subsequent stateful verbs (snapshot/click/fill).
+  // Otherwise: one-shot launch + close — useful as a smoke test, no state.
   const daemon = readDaemonState();
-  const useDaemon = daemon && isPidAlive(daemon.pid);
-
-  let browser, attached = false;
-  if (useDaemon) {
-    browser = await chromium.connect(daemon.ws_endpoint);
-    attached = true;
-  } else {
-    browser = await chromium.launch({ headless: !headed });
+  if (daemon && isPidAlive(daemon.pid) && daemon.ipc_port) {
+    const reply = await ipcCall({
+      verb: 'open',
+      url,
+      viewport,
+      storage_state: storageStatePath || undefined,
+      user_agent: userAgent || undefined,
+    });
+    process.stdout.write(JSON.stringify(reply) + '\n');
+    process.exit(reply.event === 'error' ? 30 : 0);
   }
 
+  const browser = await chromium.launch({ headless: !headed });
+  const attached = false;
   try {
     const contextOptions = { viewport };
     if (storageStatePath) contextOptions.storageState = storageStatePath;
     if (userAgent)        contextOptions.userAgent    = userAgent;
-
-    // When attached: close any pre-existing contexts so the agent's
-    // "current context" is unambiguous (snapshot picks the most-recent).
-    if (attached) {
-      for (const old of browser.contexts()) {
-        try { await old.close(); } catch (_) {}
-      }
-    }
 
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
