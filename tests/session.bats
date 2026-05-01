@@ -125,6 +125,46 @@ teardown() { teardown_temp_home; }
   printf '%s' "${output}" | jq -e '.expires_in_hours == null' >/dev/null
 }
 
+@test "session.sh: session_delete removes both .json + .meta.json" {
+  setup_temp_home
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/session.sh'
+    storage='{\"cookies\":[],\"origins\":[]}'
+    meta='{\"schema_version\":1,\"origin\":\"https://x.test\"}'
+    session_save zap \"\${storage}\" \"\${meta}\"
+    [ -f \"\${SESSIONS_DIR}/zap.json\" ] || exit 1
+    [ -f \"\${SESSIONS_DIR}/zap.meta.json\" ] || exit 1
+    session_delete zap
+    [ ! -f \"\${SESSIONS_DIR}/zap.json\" ] || exit 2
+    [ ! -f \"\${SESSIONS_DIR}/zap.meta.json\" ] || exit 3
+  "
+  teardown_temp_home
+  assert_status 0
+}
+
+@test "session.sh: session_delete is idempotent (no-op on missing)" {
+  setup_temp_home
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/session.sh'
+    session_delete ghost
+  "
+  teardown_temp_home
+  assert_status 0
+}
+
+@test "session.sh: session_delete rejects path-traversal in NAME" {
+  setup_temp_home
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/session.sh'
+    session_delete '../evil'
+  "
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+}
+
 @test "session.sh: session_save rejects path-traversal in NAME (security)" {
   run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save '../evil' '{\"cookies\":[],\"origins\":[]}' '{}'"
   assert_status "$EXIT_USAGE_ERROR"

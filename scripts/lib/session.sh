@@ -71,6 +71,20 @@ session_load() {
   cat "${path}"
 }
 
+# session_delete NAME — remove session storageState + meta files.
+# Idempotent: succeeds even if files are already gone (dangling references
+# can come from a cascading site removal that didn't clean sessions).
+# Does NOT clear site.default_session pointers — Phase 5 may add that
+# cascade once the credential lifecycle is more developed.
+session_delete() {
+  local name="$1"
+  assert_safe_name "${name}" "session-name"
+  local ss_path meta_path
+  ss_path="$(_session_path "${name}")"
+  meta_path="$(_session_meta_path "${name}")"
+  rm -f "${ss_path}" "${meta_path}"
+}
+
 session_meta_load() {
   local name="$1"
   local path
