@@ -22,6 +22,7 @@ Real browser launches arrive in Phase 3.
 | `remove-site`   | Typed-name confirmed delete | `… remove-site --name prod --yes-i-know` |
 | `use`           | Get / set / clear current site | `… use --set prod` |
 | `login`         | Capture a Playwright storageState into a session | `… login --site prod --as prod--admin --storage-state-file PATH` |
+| `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
 
 `${CLAUDE_SKILL_DIR}` is the absolute path that Claude Code injects when it
 invokes the skill — it points at the symlink under `~/.claude/skills/`. Use it
