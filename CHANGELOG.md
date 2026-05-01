@@ -13,6 +13,15 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 3 part 3 — Sibling verb scripts
+
+- [feat] `scripts/browser-snapshot.sh` — `eN`-indexed accessibility snapshot via picked adapter; passes through optional `--depth N`.
+- [feat] `scripts/browser-click.sh` — click by `--ref eN` (preferred) or `--selector CSS` (mutually exclusive; one required).
+- [feat] `scripts/browser-fill.sh` — fill by `--ref eN` with `--text VALUE` or `--secret-stdin` (mutually exclusive). `--secret-stdin` reads the secret from stdin and pipes it through to the adapter; the secret string never appears in argv (test asserts the leak guard).
+- [feat] `scripts/browser-inspect.sh` — inspect by `--selector CSS`.
+- [docs] `SKILL.md` verbs table gains `snapshot` / `click` / `fill` / `inspect` rows.
+- [internal] 4 new bats files (19 cases) + 2 new stub fixtures (`fill --ref e3 --text hello`, `inspect --selector h1`).
+
 ### Phase 3 part 2 — Real verb scripts
 
 - [feat] `scripts/lib/verb_helpers.sh` — `parse_verb_globals` + `source_picked_adapter` shared boilerplate for all verb scripts.

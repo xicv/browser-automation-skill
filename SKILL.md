@@ -23,6 +23,10 @@ Real browser launches arrive in Phase 3.
 | `use`           | Get / set / clear current site | `… use --set prod` |
 | `login`         | Capture a Playwright storageState into a session | `… login --site prod --as prod--admin --storage-state-file PATH` |
 | `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
+| `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |
+| `click`         | Click an element by `--ref eN` or `--selector CSS` | `… click --ref e3` |
+| `fill`          | Fill an input — `--text VALUE` or `--secret-stdin` | `… fill --ref e3 --text "search query"` |
+| `inspect`       | Inspect an element by `--selector CSS` | `… inspect --selector "h1"` |
 
 `${CLAUDE_SKILL_DIR}` is the absolute path that Claude Code injects when it
 invokes the skill — it points at the symlink under `~/.claude/skills/`. Use it
