@@ -55,3 +55,64 @@ teardown() {
     [ "${status}" = "0" ] || fail "function ${fn} is not defined"
   done
 }
+
+@test "playwright-cli adapter: tool_open shells to PLAYWRIGHT_CLI_BIN with verb='open'" {
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash -c "source '${LIB_TOOL_DIR}/playwright-cli.sh'; tool_open --url https://example.com"
+  assert_status 0
+  grep -q '^open$' "${STUB_LOG_FILE}"
+  grep -q '^--url$' "${STUB_LOG_FILE}"
+  grep -q '^https://example.com$' "${STUB_LOG_FILE}"
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "playwright-cli adapter: tool_open echoes the canned fixture JSON" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+    run bash -c "source '${LIB_TOOL_DIR}/playwright-cli.sh'; tool_open --url https://example.com"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.event == "navigate"' >/dev/null
+  printf '%s' "${output}" | jq -e '.url == "https://example.com"' >/dev/null
+}
+
+@test "playwright-cli adapter: tool_snapshot returns refs array" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+    run bash -c "source '${LIB_TOOL_DIR}/playwright-cli.sh'; tool_snapshot"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.refs | length == 2' >/dev/null
+}
+
+@test "playwright-cli adapter: tool_click logs argv with --ref" {
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash -c "source '${LIB_TOOL_DIR}/playwright-cli.sh'; tool_click --ref e3"
+  assert_status 0
+  grep -q '^click$' "${STUB_LOG_FILE}"
+  grep -q '^--ref$' "${STUB_LOG_FILE}"
+  grep -q '^e3$' "${STUB_LOG_FILE}"
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "playwright-cli adapter: tool_audit returns 41 (TOOL_UNSUPPORTED_OP)" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    run bash -c "source '${LIB_TOOL_DIR}/playwright-cli.sh'; tool_audit"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+}
+
+@test "playwright-cli adapter: tool_extract returns 41 (TOOL_UNSUPPORTED_OP)" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    run bash -c "source '${LIB_TOOL_DIR}/playwright-cli.sh'; tool_extract"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+}
+
+@test "playwright-cli adapter: secret never appears in argv (uses --secret-stdin)" {
+  result="$(adapter_run_query playwright-cli tool_capabilities)"
+  printf '%s' "${result}" | jq -e '.verbs.fill.flags | index("--secret-stdin")' >/dev/null \
+    || fail "tool_capabilities.verbs.fill must declare --secret-stdin support"
+}
