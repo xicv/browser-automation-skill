@@ -9,15 +9,14 @@ teardown() {
   teardown_temp_home
 }
 
-@test "browser-open: --url passes through to picked adapter via stub" {
+@test "browser-open: --url translates to positional URL at adapter boundary" {
   STUB_LOG_FILE="$(mktemp)"
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
   PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
   STUB_LOG_FILE="${STUB_LOG_FILE}" \
     run bash "${SCRIPTS_DIR}/browser-open.sh" --url https://example.com
   assert_status 0
-  grep -q '^open$' "${STUB_LOG_FILE}"
-  grep -q '^--url$' "${STUB_LOG_FILE}"
+  grep -q '^open$'                "${STUB_LOG_FILE}"
   grep -q '^https://example.com$' "${STUB_LOG_FILE}"
   rm -f "${STUB_LOG_FILE}"
 }

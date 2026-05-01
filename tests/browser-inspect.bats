@@ -1,9 +1,14 @@
 load helpers
 
+# inspect: deferred to Phase 5 (chrome-devtools-mcp adapter). playwright-cli has
+# no `inspect` subcommand and the snapshot+eval composition is non-trivial.
+# The verb script ships; tests are gated until an adapter declares inspect.
+
 setup() {
   setup_temp_home
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
+  skip "inspect verb has no adapter until Phase 5 (chrome-devtools-mcp)"
 }
 teardown() {
   teardown_temp_home

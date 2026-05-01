@@ -9,7 +9,7 @@ teardown() {
   teardown_temp_home
 }
 
-@test "browser-click: --ref e3 passes through to adapter via stub" {
+@test "browser-click: --ref e3 translates to positional target at adapter boundary" {
   STUB_LOG_FILE="$(mktemp)"
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
   PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
@@ -17,8 +17,7 @@ teardown() {
     run bash "${SCRIPTS_DIR}/browser-click.sh" --ref e3
   assert_status 0
   grep -q '^click$' "${STUB_LOG_FILE}"
-  grep -q '^--ref$' "${STUB_LOG_FILE}"
-  grep -q '^e3$' "${STUB_LOG_FILE}"
+  grep -q '^e3$'    "${STUB_LOG_FILE}"
   rm -f "${STUB_LOG_FILE}"
 }
 
