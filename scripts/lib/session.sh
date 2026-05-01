@@ -29,6 +29,12 @@ session_save() {
   if ! printf '%s' "${ss_json}" | jq -e '.origins | type == "array"' >/dev/null 2>&1; then
     die "${EXIT_USAGE_ERROR}" "session_save: storageState missing origins array"
   fi
+  # Playwright's context.addInitScript() / .storageState() round-trip requires
+  # each origin to declare a localStorage array (may be empty). Hand-edited
+  # storageState files trip on this at browser launch — surface it here.
+  if ! printf '%s' "${ss_json}" | jq -e 'all(.origins[]; .localStorage | type == "array")' >/dev/null 2>&1; then
+    die "${EXIT_USAGE_ERROR}" "session_save: storageState origins[*].localStorage must be an array (use [] for empty); see Playwright storageState shape"
+  fi
   if ! printf '%s' "${meta_json}" | jq -e . >/dev/null 2>&1; then
     die "${EXIT_USAGE_ERROR}" "session_save: meta JSON is not valid"
   fi
