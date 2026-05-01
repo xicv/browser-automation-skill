@@ -100,7 +100,7 @@ ok "site=${site} session=${as} origin=${site_origin}"
 if [ "${dry_run}" -eq 1 ]; then
   ok "dry-run: would write ${SESSIONS_DIR}/${as}.json"
   duration_ms=$(( $(now_ms) - started_at_ms ))
-  summary_json verb=login tool=playwright-lib-stub why=dry-run status=ok would_run=true \
+  summary_json verb=login tool=playwright-lib why=dry-run status=ok would_run=true \
                site="${site}" session="${as}" duration_ms="${duration_ms}"
   exit "${EXIT_OK}"
 fi
@@ -122,6 +122,6 @@ session_save "${as}" "${ss_json}" "${meta_json}"
 ok "session captured: ${as}"
 
 duration_ms=$(( $(now_ms) - started_at_ms ))
-summary_json verb=login tool=playwright-lib-stub why=stub-storageState status=ok \
+summary_json verb=login tool=playwright-lib why=storageState-file-import status=ok \
              site="${site}" session="${as}" origin="${site_origin}" \
              expires_in_hours=168 duration_ms="${duration_ms}"
