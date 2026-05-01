@@ -309,6 +309,8 @@ tool_capabilities() # echoes JSON of what this tool supports
 
 If an adapter doesn't support a verb, its function exits 41 (`TOOL_UNSUPPORTED_OP`). The router never picks an unsupporting tool, so this is defensive only.
 
+> **See also:** [Tool Adapter Extension Model design spec](2026-04-30-tool-adapter-extension-model-design.md) for the full ABI surface (identity vs verb-dispatch functions, `abi_version`), the loading model (lazy single-source for verb dispatch + subshell iteration for cross-tool aggregation), capability-driven routing (`ROUTING_RULES` array of rule functions + `_tool_supports()` capability filter), autogeneration of `references/tool-versions.md` and `SKILL.md` Tools section, lint enforcement (static + dynamic + drift), the two-path recipe (Path A: ship-without-promotion with zero core edits; Path B: promote-to-default), and worked WRONG/RIGHT anti-pattern examples. §13.2 Recipe 2 here remains the high-level checklist; the linked spec provides the detailed contract.
+
 ### 3.4 On-disk format
 
 All paths below are relative to the resolved `BROWSER_SKILL_HOME` (default `~/.browser-skill/`; project-scoped mode resolves to `<project>/.browser-skill/`). The structure is identical in both modes.
