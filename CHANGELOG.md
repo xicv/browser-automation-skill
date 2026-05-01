@@ -13,6 +13,12 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 4 part 4b — IPC daemon investigation + plan (no implementation in this phase)
+
+- [docs] `docs/superpowers/plans/2026-05-01-phase-04-part-4c-ipc-daemon.md` — design for the IPC-daemon architecture stateful verbs need.
+- [internal] Empirical finding documented: `chromium.connect()` clients DO NOT share contexts across connections. State opened in one client process disappears when that client disconnects. Phase 4 part 4a's `attached_to_daemon: true` is therefore a **connect-time optimization** (saves ~1.5s of cold launch), NOT a state-persistence promise. Comment in `runOpen` clarifies the semantics.
+- [internal] Stateful verbs (`snapshot`/`click`/`fill`/`login`) error message updated: "deferred to Phase 4 part 4c (IPC daemon)" — pointing at the new plan.
+
 ### Phase 4 part 4a — Daemon lifecycle + open-via-daemon
 
 - [feat] `playwright-driver.mjs` `daemon-start` / `daemon-stop` / `daemon-status` subcommands. Spawns a detached node child that calls `chromium.launchServer()` and writes state (PID + wsEndpoint + started_at) to `${BROWSER_SKILL_HOME}/playwright-lib-daemon.json` (mode 0600). Parent polls (≤10s), prints state, exits. Stopping SIGTERMs the PID and cleans up.

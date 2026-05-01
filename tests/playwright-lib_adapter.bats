@@ -58,7 +58,7 @@ teardown() {
   unset BROWSER_SKILL_LIB_STUB
   run bash -c "node scripts/lib/node/playwright-driver.mjs snapshot 2>&1"
   [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
-  echo "${output}" | grep -qE "Phase 4 part 4b|daemon mode" || fail "expected deferred-mode hint, got: ${output}"
+  echo "${output}" | grep -qE "Phase 4 part 4(b|c)|daemon mode|IPC daemon" || fail "expected deferred-mode hint, got: ${output}"
 }
 
 # --- Adapter contract ---

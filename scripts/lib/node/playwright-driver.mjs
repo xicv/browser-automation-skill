@@ -81,8 +81,16 @@ async function realDispatch(args) {
     case 'click':
     case 'fill':
     case 'login':
+      // Empirically confirmed (Phase 4 part 4b investigation): chromium.connect
+      // does NOT share contexts across connections. Each connect() returns a
+      // Browser handle that only sees contexts it created. Closing the handle
+      // (or process exit) closes those contexts. So stateful verbs cannot be
+      // implemented as separate-process clients of a launchServer daemon —
+      // they need verb logic to run INSIDE the daemon process holding the
+      // long-lived browser state, dispatched via IPC (Unix socket / HTTP).
+      // Phase 4 part 4c reworks daemon-start to be an IPC server.
       process.stderr.write(
-        `playwright-driver.mjs: real mode for verb='${verb}' deferred to Phase 4 part 4b; ` +
+        `playwright-driver.mjs: real mode for verb='${verb}' deferred to Phase 4 part 4c (IPC daemon); ` +
           `use BROWSER_SKILL_LIB_STUB=1 or route via --tool=playwright-cli\n`
       );
       process.exit(41);
@@ -293,10 +301,13 @@ async function runOpen(flags) {
 
   const { chromium } = loadPlaywright();
 
-  // If daemon is running, attach to it and create a new context. Page
-  // persists in the daemon process for subsequent verbs (snapshot/click/fill
-  // in part 4b). If no daemon, do a one-shot launch + close — useful as a
-  // smoke test but no state for later verbs to use.
+  // If a daemon is running, connect to its chromium server (saves the ~1.5s
+  // cold launch). Note: the context+page created here die when this process
+  // disconnects (chromium.connect returns a per-client Browser handle whose
+  // contexts are not shared across connections, empirically verified). So
+  // attach mode is purely a connect-time optimization; state persistence
+  // for stateful verbs (snapshot/click/fill) requires the IPC daemon
+  // architecture in Phase 4 part 4c.
   const daemon = readDaemonState();
   const useDaemon = daemon && isPidAlive(daemon.pid);
 
@@ -312,14 +323,6 @@ async function runOpen(flags) {
     const contextOptions = { viewport };
     if (storageStatePath) contextOptions.storageState = storageStatePath;
     if (userAgent)        contextOptions.userAgent    = userAgent;
-
-    // When attached: close any pre-existing contexts so the agent's
-    // "current context" is unambiguous (snapshot picks the most-recent).
-    if (attached) {
-      for (const old of browser.contexts()) {
-        try { await old.close(); } catch (_) {}
-      }
-    }
 
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
