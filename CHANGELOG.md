@@ -13,6 +13,14 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 4 part 4a — Daemon lifecycle + open-via-daemon
+
+- [feat] `playwright-driver.mjs` `daemon-start` / `daemon-stop` / `daemon-status` subcommands. Spawns a detached node child that calls `chromium.launchServer()` and writes state (PID + wsEndpoint + started_at) to `${BROWSER_SKILL_HOME}/playwright-lib-daemon.json` (mode 0600). Parent polls (≤10s), prints state, exits. Stopping SIGTERMs the PID and cleans up.
+- [feat] `runOpen` attaches to a running daemon when present (chromium.connect via wsEndpoint). Closes pre-existing contexts so the agent's "current context" is unambiguous; a new context+page persists in the daemon for subsequent verbs. Falls back to one-shot launch when no daemon — keeps existing smoke-test ergonomics. Output now includes `attached_to_daemon: bool` so callers can see which path ran.
+- [feat] Daemon stderr captured to `${BROWSER_SKILL_HOME}/playwright-lib-daemon.log` (mode 0600) — silent failures (e.g. missing chromium cache) become diagnosable.
+- [internal] `tests/playwright-lib_daemon_e2e.bats` — 5 e2e cases gated on `command -v playwright`. Covers start/status/stop, attach-on-open, idempotent start, stop-when-none-running. CI without Playwright skips the file via `setup_file()`.
+- [fix] `.gitignore` — daemon state/log files (so accidental driver runs from inside the repo don't pollute git).
+
 ### Phase 4 part 3 — Real-mode driver (open) + sessions threaded into all verbs
 
 - [feat] `scripts/lib/node/playwright-driver.mjs` real-mode `open` — single-shot launch + navigate + close. Lazy-imports `playwright` via `createRequire` with `npm root -g` fallback (or `BROWSER_SKILL_NPM_GLOBAL` override) so users can keep playwright globally installed without project-level package.json.

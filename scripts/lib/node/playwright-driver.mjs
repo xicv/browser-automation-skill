@@ -19,11 +19,12 @@
 //       docs/superpowers/specs/2026-05-01-token-efficient-adapter-output-design.md §3
 
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync, appendFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, appendFileSync, unlinkSync, chmodSync, mkdirSync, openSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { execSync } from 'node:child_process';
+import { execSync, spawn } from 'node:child_process';
+import { homedir } from 'node:os';
 
 const argv = process.argv.slice(2);
 
@@ -70,16 +71,18 @@ async function realDispatch(args) {
   switch (verb) {
     case 'open':
       return await runOpen(flags);
+    case 'daemon-start':
+      return await runDaemonStart(flags);
+    case 'daemon-stop':
+      return runDaemonStop();
+    case 'daemon-status':
+      return runDaemonStatus();
     case 'snapshot':
     case 'click':
     case 'fill':
     case 'login':
-      // Stateful verbs require a long-lived browser the agent can revisit
-      // across invocations (e.g. snapshot returns refs that click/fill
-      // address later). That's a daemon-mode design — Phase 4 part 4.
-      // Until then: stub mode + playwright-cli adapter for these flows.
       process.stderr.write(
-        `playwright-driver.mjs: real mode for verb='${verb}' requires daemon mode (Phase 4 part 4); ` +
+        `playwright-driver.mjs: real mode for verb='${verb}' deferred to Phase 4 part 4b; ` +
           `use BROWSER_SKILL_LIB_STUB=1 or route via --tool=playwright-cli\n`
       );
       process.exit(41);
@@ -87,6 +90,172 @@ async function realDispatch(args) {
       process.stderr.write(`playwright-driver.mjs: unknown verb '${verb}'\n`);
       process.exit(2);
   }
+}
+
+// --- Daemon lifecycle ---
+// daemon-start spawns a detached node child that calls launchServer (chromium)
+// and writes ${BROWSER_SKILL_HOME}/playwright-lib-daemon.json with PID +
+// wsEndpoint. The parent process polls the state file (up to 10s), prints
+// the state, and exits. Subsequent verb invocations connect via the
+// wsEndpoint. daemon-stop SIGTERMs the PID and removes the state file.
+//
+// State file mode 0600; directory mode 0700 (matches BROWSER_SKILL_HOME).
+
+async function runDaemonStart(flags) {
+  if (flags['internal-server'] === true) {
+    return await daemonChildMain(flags);
+  }
+
+  const existing = readDaemonState();
+  if (existing && isPidAlive(existing.pid)) {
+    process.stdout.write(
+      JSON.stringify({ event: 'daemon-already-running', ...existing }) + '\n'
+    );
+    process.exit(0);
+  }
+
+  // Stale state file (PID dead) — clear it before spawning.
+  if (existing) {
+    try { unlinkSync(daemonStatePath()); } catch (_) {}
+  }
+
+  const childArgv = [
+    fileURLToPath(import.meta.url),
+    'daemon-start',
+    '--internal-server',
+  ];
+  if (flags.headed) childArgv.push('--headed');
+
+  // Capture daemon child stderr to a log under BROWSER_SKILL_HOME instead of
+  // /dev/null so launch failures aren't silent. The log is gitignored
+  // (.browser-skill/captures pattern); mode 0600 inherits from parent dir.
+  mkdirSync(browserSkillHome(), { recursive: true, mode: 0o700 });
+  const logPath = join(browserSkillHome(), 'playwright-lib-daemon.log');
+  const stderrFd = openSync(logPath, 'a', 0o600);
+
+  const child = spawn(process.execPath, childArgv, {
+    detached: true,
+    stdio: ['ignore', 'ignore', stderrFd],
+    env: process.env,
+  });
+  child.unref();
+
+  const stateFile = daemonStatePath();
+  const deadline = Date.now() + 10000;
+  while (Date.now() < deadline) {
+    if (existsSync(stateFile)) {
+      const state = readDaemonState();
+      if (state && isPidAlive(state.pid)) {
+        process.stdout.write(
+          JSON.stringify({ event: 'daemon-started', ...state }) + '\n'
+        );
+        process.exit(0);
+      }
+    }
+    await sleep(100);
+  }
+
+  process.stderr.write(
+    'playwright-driver.mjs::daemon-start: timed out waiting for daemon to come up\n'
+  );
+  process.exit(30);
+}
+
+async function daemonChildMain(flags) {
+  const { chromium } = loadPlaywright();
+  const headless = !flags.headed;
+  const server = await chromium.launchServer({ headless });
+  const wsEndpoint = server.wsEndpoint();
+
+  const state = {
+    pid: process.pid,
+    ws_endpoint: wsEndpoint,
+    started_at: new Date().toISOString(),
+    browser: 'chromium',
+    headless,
+  };
+
+  const stateFile = daemonStatePath();
+  mkdirSync(dirname(stateFile), { recursive: true, mode: 0o700 });
+  writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  chmodSync(stateFile, 0o600);
+
+  const cleanup = async () => {
+    try { await server.close(); } catch (_) {}
+    try { unlinkSync(stateFile); } catch (_) {}
+    process.exit(0);
+  };
+  process.on('SIGTERM', cleanup);
+  process.on('SIGINT', cleanup);
+
+  // Block forever (until signal).
+  await new Promise(() => {});
+}
+
+function runDaemonStop() {
+  const state = readDaemonState();
+  if (!state) {
+    process.stdout.write('{"event":"daemon-not-running"}\n');
+    process.exit(0);
+  }
+  if (isPidAlive(state.pid)) {
+    try { process.kill(state.pid, 'SIGTERM'); } catch (_) {}
+  }
+  // Brief wait for the daemon to clean up its state file.
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline && existsSync(daemonStatePath())) {
+    // Busy-wait — sleep helper is async; sync wait is fine for ≤5s shutdown.
+    const now = Date.now();
+    while (Date.now() - now < 50) { /* ~50ms tick */ }
+  }
+  try { unlinkSync(daemonStatePath()); } catch (_) {}
+  process.stdout.write(
+    JSON.stringify({ event: 'daemon-stopped', pid: state.pid }) + '\n'
+  );
+  process.exit(0);
+}
+
+function runDaemonStatus() {
+  const state = readDaemonState();
+  if (state && isPidAlive(state.pid)) {
+    process.stdout.write(
+      JSON.stringify({ event: 'daemon-running', ...state }) + '\n'
+    );
+    process.exit(0);
+  }
+  process.stdout.write('{"event":"daemon-not-running"}\n');
+  process.exit(0);
+}
+
+function browserSkillHome() {
+  return process.env.BROWSER_SKILL_HOME || join(homedir(), '.browser-skill');
+}
+
+function daemonStatePath() {
+  return join(browserSkillHome(), 'playwright-lib-daemon.json');
+}
+
+function readDaemonState() {
+  const p = daemonStatePath();
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, 'utf-8'));
+  } catch (_) {
+    return null;
+  }
+}
+
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
 }
 
 function parseFlags(args) {
@@ -120,18 +289,38 @@ async function runOpen(flags) {
     ? parseViewport(flags.viewport)
     : { width: 1280, height: 800 };
   const storageStatePath = flags['storage-state'];
+  const userAgent = flags['user-agent'];
 
   const { chromium } = loadPlaywright();
 
-  const browser = await chromium.launch({ headless: !headed });
+  // If daemon is running, attach to it and create a new context. Page
+  // persists in the daemon process for subsequent verbs (snapshot/click/fill
+  // in part 4b). If no daemon, do a one-shot launch + close — useful as a
+  // smoke test but no state for later verbs to use.
+  const daemon = readDaemonState();
+  const useDaemon = daemon && isPidAlive(daemon.pid);
+
+  let browser, attached = false;
+  if (useDaemon) {
+    browser = await chromium.connect(daemon.ws_endpoint);
+    attached = true;
+  } else {
+    browser = await chromium.launch({ headless: !headed });
+  }
+
   try {
     const contextOptions = { viewport };
-    if (storageStatePath) {
-      contextOptions.storageState = storageStatePath;
+    if (storageStatePath) contextOptions.storageState = storageStatePath;
+    if (userAgent)        contextOptions.userAgent    = userAgent;
+
+    // When attached: close any pre-existing contexts so the agent's
+    // "current context" is unambiguous (snapshot picks the most-recent).
+    if (attached) {
+      for (const old of browser.contexts()) {
+        try { await old.close(); } catch (_) {}
+      }
     }
-    if (flags['user-agent']) {
-      contextOptions.userAgent = flags['user-agent'];
-    }
+
     const context = await browser.newContext(contextOptions);
     const page = await context.newPage();
 
@@ -145,20 +334,24 @@ async function runOpen(flags) {
         url: finalUrl,
         title,
         status: response ? response.status() : null,
+        attached_to_daemon: attached,
       }) + '\n'
     );
 
-    await context.close();
-    await browser.close();
+    if (attached) {
+      // Disconnect — context + page stay alive in the daemon.
+      await browser.close();
+    } else {
+      await context.close();
+      await browser.close();
+    }
     process.exit(0);
   } catch (err) {
-    try {
-      await browser.close();
-    } catch (_) {}
+    try { await browser.close(); } catch (_) {}
     process.stderr.write(
       `playwright-driver.mjs::open: ${err && err.message ? err.message : String(err)}\n`
     );
-    process.exit(30); // EXIT_NETWORK_ERROR
+    process.exit(30);
   }
 }
 
