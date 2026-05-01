@@ -85,11 +85,7 @@ async function realDispatch(args) {
     case 'daemon-status':
       return runDaemonStatus();
     case 'login':
-      process.stderr.write(
-        `playwright-driver.mjs: real mode for verb='${verb}' deferred to Phase 4 part 4d; ` +
-          `use BROWSER_SKILL_LIB_STUB=1 or route via --tool=playwright-cli\n`
-      );
-      process.exit(41);
+      return await runLogin(flags);
     default:
       process.stderr.write(`playwright-driver.mjs: unknown verb '${verb}'\n`);
       process.exit(2);
@@ -210,6 +206,82 @@ function readAllStdin() {
     process.stdin.on('data', (chunk) => { data += chunk; });
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
+  });
+}
+
+// runLogin — headed Chromium one-shot for interactive credential capture.
+// User logs in to the site in the browser window, presses Enter on stdin to
+// signal "done", driver captures context.storageState() and writes it to
+// --output-path (caller validates origins + writes meta sidecar afterwards).
+//
+// Single-shot (not daemon-routed): login is its own ephemeral flow. Daemon
+// would interfere — we want a fresh, isolated context for each login.
+async function runLogin(flags) {
+  const url = flags.url;
+  const outputPath = flags['output-path'];
+  if (!url) {
+    process.stderr.write('playwright-driver.mjs::login: --url is required\n');
+    process.exit(2);
+  }
+  if (!outputPath) {
+    process.stderr.write('playwright-driver.mjs::login: --output-path is required\n');
+    process.exit(2);
+  }
+
+  const { chromium } = loadPlaywright();
+  // Always headed — login is an interactive verb. --headless is meaningless.
+  const browser = await chromium.launch({ headless: false });
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+    process.stderr.write(
+      `\n  Browser opened at ${url}\n` +
+      `  Log in interactively, then press Enter here to capture the session.\n` +
+      `  (Press Ctrl-C to abort without saving.)\n\n`
+    );
+
+    await waitForEnterOnStdin();
+
+    // Capture state BEFORE closing the browser/context.
+    const state = await ctx.storageState();
+    mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
+    writeFileSync(outputPath, JSON.stringify(state, null, 2));
+    chmodSync(outputPath, 0o600);
+
+    process.stdout.write(
+      JSON.stringify({
+        event: 'login-saved',
+        output_path: outputPath,
+        cookie_count: state.cookies.length,
+        origin_count: state.origins.length,
+      }) + '\n'
+    );
+
+    await browser.close();
+    process.exit(0);
+  } catch (err) {
+    try { await browser.close(); } catch (_) {}
+    process.stderr.write(
+      `playwright-driver.mjs::login: ${err && err.message ? err.message : err}\n`
+    );
+    process.exit(30);
+  }
+}
+
+function waitForEnterOnStdin() {
+  return new Promise((resolve) => {
+    process.stdin.setEncoding('utf-8');
+    const onData = (chunk) => {
+      if (chunk.includes('\n')) {
+        process.stdin.removeListener('data', onData);
+        process.stdin.pause();
+        resolve();
+      }
+    };
+    process.stdin.on('data', onData);
+    process.stdin.resume();
   });
 }
 

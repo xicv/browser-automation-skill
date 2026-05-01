@@ -13,6 +13,14 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 4 part 4d — Real-mode interactive login + multi-session ergonomics
+
+- [feat] `playwright-driver.mjs::runLogin` — single-shot headed Chromium flow. Launches browser at `--url`, prints "press Enter when done logging in" to stderr, waits for stdin newline, captures `context.storageState()`, writes to `--output-path` (mode 0600). Independent of the IPC daemon — login is its own ephemeral isolated context.
+- [feat] `scripts/browser-login.sh` adds `--interactive` flag (mutually exclusive with `--storage-state-file`). Shells the driver, validates the captured storageState through the same Phase-2 origin-binding pipeline, writes the session + meta sidecar. `--interactive --dry-run` skips the browser launch and reports the planned action. Summary `why` field becomes `interactive-headed-capture` (vs `storageState-file-import` for the file path).
+- [feat] `scripts/browser-list-sessions.sh` — new verb. Lists sessions with their bound site + origin + captured_at + expires_in_hours. Optional `--site NAME` filter exposes the **1-many credential model**: a site can have many sessions (e.g. `prod--admin`, `prod--readonly`, `prod--ci`) for per-role/per-account workflows. Storage state itself stays at mode 0600; this verb only emits metadata, never cookie/token values.
+- [docs] `SKILL.md` verbs table gains rows for `login --interactive`, `login --storage-state-file`, and `list-sessions`. Login usage block now documents the 1-many model explicitly.
+- [internal] `tests/list-sessions.bats` (5 cases) + 3 new login-flag tests. Phase-2 fixture-based login tests unchanged.
+
 ### Phase 4 part 4b — IPC daemon + stateful verbs (snapshot/click/fill) real mode
 
 - [feat] `daemonChildMain` becomes an IPC server. Holds `(BrowserServer, Browser, current Context, current Page, refMap)` in closure. Listens on TCP loopback (random port — Unix socket sun_path is 104 chars on macOS; bats temp paths exceed it). State file gains `ipc_host` + `ipc_port` fields.
