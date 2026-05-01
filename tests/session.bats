@@ -44,8 +44,8 @@ teardown() { teardown_temp_home; }
   jq -e '.schema_version == 1' "${BROWSER_SKILL_HOME}/sessions/prod-app--admin.meta.json" >/dev/null
   for f in prod-app--admin.json prod-app--admin.meta.json; do
     local mode
-    mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}/sessions/${f}" 2>/dev/null \
-         || stat -c '%a' "${BROWSER_SKILL_HOME}/sessions/${f}" 2>/dev/null)"
+    mode="$(stat -c '%a' "${BROWSER_SKILL_HOME}/sessions/${f}" 2>/dev/null \
+         || stat -f '%Lp' "${BROWSER_SKILL_HOME}/sessions/${f}" 2>/dev/null)"
     [ "${mode}" = "600" ] || fail "expected mode 600 on ${f}, got ${mode}"
   done
 }

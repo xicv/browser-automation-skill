@@ -47,8 +47,8 @@ teardown() { teardown_temp_home; }
   [ -f "${BROWSER_SKILL_HOME}/sites/prod-app.json" ]
   jq -e . "${BROWSER_SKILL_HOME}/sites/prod-app.json" >/dev/null
   local mode
-  mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}/sites/prod-app.json" 2>/dev/null \
-       || stat -c '%a' "${BROWSER_SKILL_HOME}/sites/prod-app.json" 2>/dev/null)"
+  mode="$(stat -c '%a' "${BROWSER_SKILL_HOME}/sites/prod-app.json" 2>/dev/null \
+       || stat -f '%Lp' "${BROWSER_SKILL_HOME}/sites/prod-app.json" 2>/dev/null)"
   [ "${mode}" = "600" ]
   # Meta file likewise.
   [ -f "${BROWSER_SKILL_HOME}/sites/prod-app.meta.json" ]
@@ -153,8 +153,8 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ "$(cat "${BROWSER_SKILL_HOME}/current")" = "prod" ]
   local mode
-  mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}/current" 2>/dev/null \
-       || stat -c '%a' "${BROWSER_SKILL_HOME}/current" 2>/dev/null)"
+  mode="$(stat -c '%a' "${BROWSER_SKILL_HOME}/current" 2>/dev/null \
+       || stat -f '%Lp' "${BROWSER_SKILL_HOME}/current" 2>/dev/null)"
   [ "${mode}" = "600" ]
 }
 

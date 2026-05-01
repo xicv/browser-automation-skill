@@ -21,10 +21,19 @@ load helpers
 
 @test "install.sh: preflight fails (exit 20) when jq missing" {
   setup_temp_home
-  # Stub PATH so jq isn't found; bash + python3 still are.
-  local stub_dir="${TEST_HOME}/empty-bin"
+  # Stub PATH containing only bash + python3 — NOT jq. /usr/bin / /bin would
+  # still expose jq if installed system-wide (Linux apt package), so we build
+  # a minimal symlinked bin and point PATH at it exclusively.
+  local stub_dir="${TEST_HOME}/stub-bin"
   mkdir -p "${stub_dir}"
-  PATH="${stub_dir}:/usr/bin:/bin" run bash "${REPO_ROOT}/install.sh" --dry-run
+  ln -s "$(command -v bash)"    "${stub_dir}/bash"
+  ln -s "$(command -v python3)" "${stub_dir}/python3"
+  ln -s "$(command -v stat)"    "${stub_dir}/stat"
+  ln -s "$(command -v dirname)" "${stub_dir}/dirname"
+  ln -s "$(command -v mkdir)"   "${stub_dir}/mkdir"
+  ln -s "$(command -v ln)"      "${stub_dir}/ln"
+  ln -s "$(command -v rm)"      "${stub_dir}/rm"
+  PATH="${stub_dir}" run "${stub_dir}/bash" "${REPO_ROOT}/install.sh" --dry-run
   teardown_temp_home
   assert_status "$EXIT_PREFLIGHT_FAILED"
   assert_output_contains "jq"
@@ -42,7 +51,7 @@ load helpers
     [ -d "${BROWSER_SKILL_HOME}/${d}" ] || { teardown_temp_home; fail "expected dir: ${BROWSER_SKILL_HOME}/${d}"; }
   done
   local mode
-  mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}" 2>/dev/null || stat -c '%a' "${BROWSER_SKILL_HOME}" 2>/dev/null)"
+  mode="$(stat -c '%a' "${BROWSER_SKILL_HOME}" 2>/dev/null || stat -f '%Lp' "${BROWSER_SKILL_HOME}" 2>/dev/null)"
   teardown_temp_home
   [ "${mode}" = "700" ]
 }
@@ -93,7 +102,8 @@ load helpers
 
 @test "install.sh: runs doctor at the end and reports its result" {
   setup_temp_home
-  run bash "${REPO_ROOT}/install.sh" --user
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    run bash "${REPO_ROOT}/install.sh" --user
   assert_status 0
   assert_output_contains "running doctor"
   assert_output_contains "all checks passed"

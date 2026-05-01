@@ -13,7 +13,8 @@ load helpers
   setup_temp_home
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
-  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
   assert_status 0
   assert_output_contains "all checks passed"
@@ -23,10 +24,10 @@ load helpers
   setup_temp_home
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
-  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
   assert_status 0
-  # Find the final line that's valid JSON
   local last_json
   last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
   printf '%s' "${last_json}" | jq -e '.verb == "doctor"' >/dev/null
@@ -56,30 +57,66 @@ load helpers
   setup_temp_home
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
-  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
-  # disk-encryption status is advisory: doctor MUST mention it but MUST NOT fail on it.
   assert_status 0
   assert_output_contains "disk encryption"
 }
 
-@test "doctor: missing node is advisory only (still exits 0)" {
+@test "doctor: missing node fails doctor (required from Phase 3 onward)" {
   setup_temp_home
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
-  # Build a stub bin dir with bash + jq + python3 symlinked from real locations.
-  # Crucially: NO `node` symlink. We restrict PATH to the stub so node lookup fails
-  # while bash 4+ (required) and the doctor's other deps still work.
   local stub="${TEST_HOME}/bin"
   mkdir -p "${stub}"
   ln -s "$(command -v bash)" "${stub}/bash"
   ln -s "$(command -v jq)" "${stub}/jq"
   ln -s "$(command -v python3)" "${stub}/python3"
-  # /usr/sbin needed for fdesetup (disk encryption check).
   PATH="${stub}:/usr/sbin:/bin:/usr/bin" run "${stub}/bash" "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
-  # node is missing but it's advisory — doctor must still exit 0.
-  assert_status 0
+  assert_status "$EXIT_PREFLIGHT_FAILED"
   assert_output_contains "node NOT FOUND"
-  assert_output_contains "advisory"
+}
+
+@test "doctor: reports each adapter under lib/tool/ as a check line" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_output_contains "playwright-cli"
+}
+
+@test "doctor: streams a JSON line per adapter with check=adapter and adapter=<name>" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  echo "${output}" | grep -E '^\{.*"check":"adapter"' >/dev/null \
+    || fail "no adapter check line found"
+  echo "${output}" | grep -E '"adapter":"playwright-cli"' >/dev/null \
+    || fail "playwright-cli adapter not reported"
+}
+
+@test "doctor: summary includes adapters_ok and adapters_failed counts" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  summary="$(printf '%s\n' "${output}" | tail -1)"
+  printf '%s' "${summary}" | jq -e 'has("adapters_ok") and has("adapters_failed")' >/dev/null \
+    || fail "summary does not include adapter counts"
+}
+
+@test "doctor: well-formed status field even when adapter binary is missing" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  summary="$(printf '%s\n' "${output}" | tail -1)"
+  printf '%s' "${summary}" | jq -e '.status' >/dev/null
 }
