@@ -2,5 +2,6 @@
 
 | Tool | Version pin | Install hint | Cheatsheet |
 |---|---|---|---|
+| chrome-devtools-mcp | 0.x | npm i -g chrome-devtools-mcp (or run via 'npx chrome-devtools-mcp@latest' over stdio MCP) | [references/chrome-devtools-mcp-cheatsheet.md](../references/chrome-devtools-mcp-cheatsheet.md) |
 | playwright-cli | 1.49.x | npm i -g playwright @playwright/test @playwright/cli && playwright install chromium | [references/playwright-cli-cheatsheet.md](../references/playwright-cli-cheatsheet.md) |
 | playwright-lib | 1.59.x | npm i -g playwright @playwright/test && playwright install chromium | [references/playwright-lib-cheatsheet.md](../references/playwright-lib-cheatsheet.md) |
