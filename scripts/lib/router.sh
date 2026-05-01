@@ -55,7 +55,7 @@ _tool_supports() {
 rule_default_navigation() {
   local verb="$1"
   case "${verb}" in
-    open|click|fill|snapshot|inspect)
+    open|click|fill|snapshot)
       printf 'playwright-cli\t%s\n' "default for ${verb}"
       ;;
   esac

@@ -23,7 +23,7 @@ readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_LOADED=1
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../output.sh"
 
-readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_BIN="${PLAYWRIGHT_CLI_BIN:-playwright}"
+readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_BIN="${PLAYWRIGHT_CLI_BIN:-playwright-cli}"
 readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_DEFAULT_VIEWPORT="1280x800"
 
 # --- Identity functions (called by framework once or for queries) ---
@@ -34,7 +34,8 @@ tool_metadata() {
   "name": "playwright-cli",
   "abi_version": 1,
   "version_pin": "1.49.x",
-  "cheatsheet_path": "references/playwright-cli-cheatsheet.md"
+  "cheatsheet_path": "references/playwright-cli-cheatsheet.md",
+  "install_hint": "npm i -g playwright @playwright/test @playwright/cli && playwright install chromium"
 }
 EOF
 }
@@ -45,9 +46,8 @@ tool_capabilities() {
   "verbs": {
     "open":     { "flags": ["--headed", "--viewport", "--user-agent"] },
     "click":    { "flags": ["--ref", "--selector"] },
-    "fill":     { "flags": ["--ref", "--text", "--secret-stdin"] },
-    "snapshot": { "flags": [] },
-    "inspect":  { "flags": ["--selector"] }
+    "fill":     { "flags": ["--ref", "--text"] },
+    "snapshot": { "flags": ["--depth"] }
   }
 }
 EOF
@@ -57,7 +57,7 @@ tool_doctor_check() {
   if ! command -v "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" >/dev/null 2>&1; then
     cat <<EOF
 { "ok": false, "binary": "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}", "error": "not on PATH",
-  "install_hint": "npm i -g playwright @playwright/test && playwright install chromium" }
+  "install_hint": "npm i -g playwright @playwright/test @playwright/cli && playwright install chromium" }
 EOF
     return 0
   fi
@@ -75,24 +75,71 @@ EOF
 #   - Returns 41 if it cannot handle the op (defensive — router shouldn't route
 #     here, but the guard is cheap).
 
+# Skill→tool argv translation: real playwright-cli takes most args as positional
+# (e.g. `open <url>`, `click <ref>`, `fill <ref> <text>`). Adapters are the
+# translation boundary — verb scripts speak skill-flag surface, adapters convert.
+
 tool_open() {
-  "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" open "$@"
+  local url=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --url) url="$2"; shift 2 ;;
+      *)     rest+=("$1"); shift ;;
+    esac
+  done
+  if [ -n "${url}" ]; then
+    "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" open "${url}" "${rest[@]}"
+  else
+    "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" open "${rest[@]}"
+  fi
 }
 
 tool_click() {
-  "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" click "$@"
+  local target=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ref|--selector) target="$2"; shift 2 ;;
+      *)                rest+=("$1"); shift ;;
+    esac
+  done
+  [ -n "${target}" ] || return 41
+  "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" click "${target}" "${rest[@]}"
 }
 
 tool_fill() {
-  "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" fill "$@"
+  local target="" text="" use_stdin=0
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ref)           target="$2"; shift 2 ;;
+      --text)          text="$2";   shift 2 ;;
+      --secret-stdin)  use_stdin=1; shift ;;
+      *)               rest+=("$1"); shift ;;
+    esac
+  done
+  if [ "${use_stdin}" = "1" ]; then
+    # playwright-cli has no stdin-secret mode; passing the secret as a
+    # positional arg would leak it via argv (anti-pattern AP-7). Reject —
+    # routing should pick playwright-lib (Phase 4) which reads stdin in node.
+    return 41
+  fi
+  [ -n "${target}" ] && [ -n "${text}" ] || return 41
+  "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" fill "${target}" "${text}" "${rest[@]}"
 }
 
 tool_snapshot() {
+  # snapshot takes no required args; --depth N pass-through is a real
+  # playwright-cli flag (recognised by the binary natively).
   "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" snapshot "$@"
 }
 
 tool_inspect() {
-  "${_BROWSER_TOOL_PLAYWRIGHT_CLI_BIN}" inspect "$@"
+  # Real playwright-cli has no `inspect` subcommand; the closest composition
+  # (snapshot + eval per-ref) is non-trivial and lives in Phase 5 chrome-
+  # devtools-mcp adapter (which has first-class console + network + eval).
+  return 41
 }
 
 tool_audit() {

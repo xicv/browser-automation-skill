@@ -21,9 +21,11 @@ emit_tool_versions() {
     for adapter_file in "${LIB_TOOL_DIR}"/*.sh; do
       [ "$(basename "${adapter_file}")" = ".gitkeep" ] && continue
       meta="$(source "${adapter_file}" 2>/dev/null; tool_metadata 2>/dev/null)"
-      doctor="$(source "${adapter_file}" 2>/dev/null; tool_doctor_check 2>/dev/null)"
-      jq -nr --argjson meta "${meta}" --argjson doctor "${doctor}" \
-        '"| \($meta.name) | \($meta.version_pin) | \($doctor.install_hint // "n/a") | [\($meta.cheatsheet_path)](../\($meta.cheatsheet_path)) |"'
+      # install_hint is static (in tool_metadata), NOT dynamic (tool_doctor_check),
+      # so the generator output is deterministic across environments — drift lint
+      # passes regardless of whether the tool is currently installed on PATH.
+      jq -nr --argjson meta "${meta}" \
+        '"| \($meta.name) | \($meta.version_pin) | \($meta.install_hint // "n/a") | [\($meta.cheatsheet_path)](../\($meta.cheatsheet_path)) |"'
     done
     shopt -u nullglob
   )"

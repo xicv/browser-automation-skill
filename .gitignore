@@ -49,6 +49,8 @@ credentials.yaml
 trace.zip
 lighthouse.json
 *.png.diff
+# playwright-cli working dir (snapshots, console logs, generated code)
+.playwright-cli/
 
 # --- Test temp artifacts ---
 tests/tmp/
