@@ -67,3 +67,58 @@ EOF
   [ "${status}" -ne 0 ] || fail "lint should fail when adapter has no test bats file"
   assert_output_contains "missing tests/lonely_adapter.bats"
 }
+
+@test "lint: dynamic tier — passes for canonical playwright-cli" {
+  run bash "${BATS_TEST_DIRNAME}/lint.sh" --dynamic-only
+  assert_status 0
+}
+
+@test "lint: dynamic tier — fails when tool_metadata.name doesn't match filename" {
+  fake_dir="${TEST_HOME}/lib/tool"
+  mkdir -p "${fake_dir}" "${TEST_HOME}/tests" "${TEST_HOME}/references"
+  cat > "${fake_dir}/foo.sh" <<'EOF'
+tool_metadata() { printf '{"name":"NOT_FOO","abi_version":1,"version_pin":"any","cheatsheet_path":"references/foo.md"}\n'; }
+tool_capabilities() { printf '{"verbs":{}}\n'; }
+tool_doctor_check() { printf '{"ok":true}\n'; }
+tool_open()    { :; }
+tool_click()   { :; }
+tool_fill()    { :; }
+tool_snapshot(){ :; }
+tool_inspect() { :; }
+tool_audit()   { :; }
+tool_extract() { :; }
+tool_eval()    { :; }
+EOF
+  touch "${TEST_HOME}/tests/foo_adapter.bats"
+  touch "${TEST_HOME}/references/foo.md"
+  cp -r "${REPO_ROOT}/scripts" "${TEST_HOME}/scripts"
+  LIB_TOOL_DIR="${fake_dir}" REPO_ROOT="${TEST_HOME}" \
+    run bash "${BATS_TEST_DIRNAME}/lint.sh" --dynamic-only
+  [ "${status}" -ne 0 ] || fail "lint should fail when name doesn't match filename"
+  assert_output_contains "doesn't match filename"
+}
+
+@test "lint: dynamic tier — fails when adapter abi_version doesn't match framework" {
+  fake_dir="${TEST_HOME}/lib/tool"
+  mkdir -p "${fake_dir}" "${TEST_HOME}/tests" "${TEST_HOME}/references"
+  cat > "${fake_dir}/abimismatch.sh" <<'EOF'
+tool_metadata() { printf '{"name":"abimismatch","abi_version":99,"version_pin":"any","cheatsheet_path":"references/x.md"}\n'; }
+tool_capabilities() { printf '{"verbs":{}}\n'; }
+tool_doctor_check() { printf '{"ok":true}\n'; }
+tool_open(){ :; }
+tool_click(){ :; }
+tool_fill(){ :; }
+tool_snapshot(){ :; }
+tool_inspect(){ :; }
+tool_audit(){ :; }
+tool_extract(){ :; }
+tool_eval(){ :; }
+EOF
+  touch "${TEST_HOME}/tests/abimismatch_adapter.bats"
+  touch "${TEST_HOME}/references/x.md"
+  cp -r "${REPO_ROOT}/scripts" "${TEST_HOME}/scripts"
+  LIB_TOOL_DIR="${fake_dir}" REPO_ROOT="${TEST_HOME}" \
+    run bash "${BATS_TEST_DIRNAME}/lint.sh" --dynamic-only
+  [ "${status}" -ne 0 ] || fail "lint should fail on abi_version mismatch"
+  assert_output_contains "abi_version mismatch"
+}
