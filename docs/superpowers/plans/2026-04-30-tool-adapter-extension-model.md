@@ -21,10 +21,12 @@
 | Path | Purpose | Size budget |
 |---|---|---|
 | `scripts/lib/router.sh` | Single-source routing precedence; `pick_tool()`, `ROUTING_RULES`, `_tool_supports()` | ≤ 250 LOC |
+| `scripts/lib/output.sh` | Token-efficient output helpers; `emit_summary` / `emit_event` / `capture_path` (per `2026-05-01-token-efficient-adapter-output-design.md`) | ≤ 200 LOC |
 | `scripts/lib/tool/playwright-cli.sh` | First concrete adapter implementing the §2 contract | ≤ 500 LOC |
 | `scripts/regenerate-docs.sh` | Generator for `tool-versions.md` + `SKILL.md` Tools block | ≤ 250 LOC |
 | `tests/lint.sh` | Lint runner (static + dynamic + drift) | ≤ 250 LOC |
 | `tests/router.bats` | Router unit tests (rules, capability filter, error mapping) | ≤ 300 LOC |
+| `tests/output.bats` | `emit_summary` / `emit_event` / `capture_path` unit tests | ≤ 200 LOC |
 | `tests/playwright-cli_adapter.bats` | First-adapter contract conformance + verb dispatch tests | ≤ 300 LOC |
 | `tests/lint.bats` | Lint unit tests (positive + negative for each tier) | ≤ 200 LOC |
 | `tests/routing-capability-sync.bats` | Drift test: rules ↔ capabilities | ≤ 100 LOC |
@@ -234,6 +236,217 @@ Expected: same number of passing tests as before this task (no test relies on th
 ```bash
 git add tests/helpers.bash
 git commit -m "test(helpers): adapter_source / adapter_run_query helpers for subshell-isolated adapter queries"
+```
+
+---
+
+## Task 2.5: Output helpers — scripts/lib/output.sh (token-efficient adapter output)
+
+**Files:**
+- Create: `scripts/lib/output.sh`
+- Create: `tests/output.bats`
+
+Implements the contract from `docs/superpowers/specs/2026-05-01-token-efficient-adapter-output-design.md` §3 (mandatory output schema), §3.3 (streaming line schema), and §6 (capture file layout). Lands as framework-level helpers ahead of the first adapter (Task 5) so verb scripts and adapters never hand-roll JSON. Lint tier 3 (Task 13) enforces every adapter sources this file.
+
+- [ ] **Step 2.5.1: Write the failing tests**
+
+Create `tests/output.bats`:
+
+```bash
+load helpers
+
+setup() {
+  setup_temp_home
+  init_paths_safe() { source "${LIB_DIR}/common.sh"; init_paths; }
+}
+teardown() {
+  teardown_temp_home
+}
+
+@test "output: emit_summary requires verb, tool, why, status" {
+  run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/output.sh'; emit_summary"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "verb"
+}
+
+@test "output: emit_summary emits one line of valid JSON with all required keys" {
+  run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/output.sh'; emit_summary verb=open tool=playwright-cli why=default status=ok duration_ms=42"
+  assert_status 0
+  [ "${#lines[@]}" -eq 1 ]
+  printf '%s' "${output}" | jq -e '.verb and .tool and .why and .status and .duration_ms' >/dev/null
+}
+
+@test "output: emit_summary auto-fills duration_ms when SUMMARY_T0 is set" {
+  run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/output.sh'; SUMMARY_T0=\$(now_ms); sleep 0.05; emit_summary verb=test tool=none why=test status=ok"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.duration_ms | type == "number" and . >= 0' >/dev/null
+}
+
+@test "output: emit_summary status enum guard rejects unknown statuses" {
+  run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/output.sh'; emit_summary verb=test tool=none why=test status=banana"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "status"
+}
+
+@test "output: emit_summary accepts the five canonical status values" {
+  for s in ok partial empty error aborted; do
+    run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/output.sh'; emit_summary verb=test tool=none why=test status=${s}"
+    [ "${status}" = "0" ] || fail "status=${s} unexpectedly rejected"
+  done
+}
+
+@test "output: emit_event emits one line of JSON with .event key" {
+  run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/output.sh'; emit_event navigated url=https://example.com/dashboard"
+  assert_status 0
+  [ "${#lines[@]}" -eq 1 ]
+  [ "$(printf '%s' "${output}" | jq -r .event)" = "navigated" ]
+  [ "$(printf '%s' "${output}" | jq -r .url)" = "https://example.com/dashboard" ]
+}
+
+@test "output: emit_event rejects empty event name" {
+  run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/output.sh'; emit_event ''"
+  assert_status "$EXIT_USAGE_ERROR"
+}
+
+@test "output: capture_path generates standard path for a category + site" {
+  setup_temp_home
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/output.sh'; capture_path screenshots prod png"
+  assert_status 0
+  [[ "${output}" =~ /captures/screenshots/prod--[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{6}Z\.png$ ]] \
+    || fail "expected captures/screenshots/<site>--<ts>.png path, got: ${output}"
+  teardown_temp_home
+}
+
+@test "output: capture_path rejects unsafe category or site (path traversal)" {
+  for bad in '../evil' 'foo/bar' 'foo bar' ''; do
+    run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/output.sh'; capture_path screenshots '${bad}' png"
+    [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR for site='${bad}', got ${status}"
+  done
+}
+
+@test "output: capture_path mkdir -p's the parent directory" {
+  setup_temp_home
+  result="$(bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/output.sh'; capture_path hars prod har")"
+  parent_dir="$(dirname "${result}")"
+  [ -d "${parent_dir}" ] || fail "expected parent dir ${parent_dir} to exist"
+  teardown_temp_home
+}
+```
+
+- [ ] **Step 2.5.2: Run tests — expect fail**
+
+```bash
+bats tests/output.bats
+```
+
+Expected: all 10 tests fail (no `output.sh` to source yet).
+
+- [ ] **Step 2.5.3: Create `scripts/lib/output.sh`**
+
+```bash
+# scripts/lib/output.sh
+# Token-efficient adapter output helpers. Implements the contract from
+# docs/superpowers/specs/2026-05-01-token-efficient-adapter-output-design.md §3.
+#
+# Verbs and adapters MUST emit through these helpers — never hand-roll JSON.
+# Lint tier 3 (tests/lint.sh) enforces it.
+
+[ -n "${BROWSER_SKILL_OUTPUT_LOADED:-}" ] && return 0
+readonly BROWSER_SKILL_OUTPUT_LOADED=1
+
+# Canonical status values (spec §3.1). Reject anything else at the helper boundary
+# so output stays parseable by jq routing logic.
+readonly _OUTPUT_STATUSES_OK="ok partial empty error aborted"
+
+# emit_summary key=value [key=value ...]
+# Required keys: verb, tool, why, status. duration_ms auto-fills from
+# SUMMARY_T0 (set by caller via `SUMMARY_T0=$(now_ms)` at verb entry).
+# Wraps summary_json from common.sh; adds key-presence + status-enum guards.
+emit_summary() {
+  local has_verb=0 has_tool=0 has_why=0 has_status=0 has_duration=0
+  local arg key value
+  for arg in "$@"; do
+    case "${arg}" in
+      verb=*)         has_verb=1 ;;
+      tool=*)         has_tool=1 ;;
+      why=*)          has_why=1 ;;
+      status=*)
+        has_status=1
+        value="${arg#status=}"
+        if ! [[ " ${_OUTPUT_STATUSES_OK} " == *" ${value} "* ]]; then
+          die "${EXIT_USAGE_ERROR}" "emit_summary: status='${value}' not in {${_OUTPUT_STATUSES_OK// /, }}"
+        fi
+        ;;
+      duration_ms=*)  has_duration=1 ;;
+    esac
+  done
+
+  [ "${has_verb}" = "1" ]   || die "${EXIT_USAGE_ERROR}" "emit_summary: missing required key 'verb'"
+  [ "${has_tool}" = "1" ]   || die "${EXIT_USAGE_ERROR}" "emit_summary: missing required key 'tool'"
+  [ "${has_why}" = "1" ]    || die "${EXIT_USAGE_ERROR}" "emit_summary: missing required key 'why'"
+  [ "${has_status}" = "1" ] || die "${EXIT_USAGE_ERROR}" "emit_summary: missing required key 'status'"
+
+  # Auto-fill duration_ms from SUMMARY_T0 if not supplied.
+  if [ "${has_duration}" = "0" ] && [ -n "${SUMMARY_T0:-}" ]; then
+    local now elapsed
+    now="$(now_ms)"
+    elapsed=$((now - SUMMARY_T0))
+    summary_json "$@" "duration_ms=${elapsed}"
+    return
+  fi
+
+  summary_json "$@"
+}
+
+# emit_event EVENT_NAME [key=value ...]
+# Streaming JSON line with `.event = EVENT_NAME`. Spec §3.3.
+emit_event() {
+  local event="${1:-}"
+  shift || true
+  [ -n "${event}" ] || die "${EXIT_USAGE_ERROR}" "emit_event: empty event name"
+  summary_json "event=${event}" "$@"
+}
+
+# capture_path CATEGORY SITE EXT
+# Returns ${CAPTURES_DIR}/<category>/<site>--<ts>.<ext> and mkdir -p's the parent.
+# CATEGORY: snapshots | screenshots | hars | traces | videos | pdfs (spec §6).
+# SITE: must pass assert_safe_name (no traversal).
+# EXT: file extension without dot (e.g. png, har, yaml, webm, pdf, zip).
+capture_path() {
+  local category="$1" site="$2" ext="$3"
+  assert_safe_name "${category}" "capture-category"
+  assert_safe_name "${site}"     "site-name"
+  assert_safe_name "${ext}"      "capture-extension"
+
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H%M%SZ)"
+  local dir="${CAPTURES_DIR:?CAPTURES_DIR not set; call init_paths first}/${category}"
+  mkdir -p "${dir}"
+  printf '%s/%s--%s.%s\n' "${dir}" "${site}" "${ts}" "${ext}"
+}
+```
+
+- [ ] **Step 2.5.4: Run tests — expect pass**
+
+```bash
+bats tests/output.bats
+```
+
+Expected: all 10 tests pass.
+
+- [ ] **Step 2.5.5: Run full suite**
+
+```bash
+tests/run.sh 2>&1 | tail -3
+```
+
+Expected: total tests = previous count + 10, zero failures.
+
+- [ ] **Step 2.5.6: Commit**
+
+```bash
+git add scripts/lib/output.sh tests/output.bats
+git commit -m "feat(output): emit_summary / emit_event / capture_path helpers — token-efficient output contract"
 ```
 
 ---
@@ -595,6 +808,13 @@ Create `scripts/lib/tool/playwright-cli.sh`:
 # model only sources one per shell, so this is belt-and-suspenders.
 [ -n "${_BROWSER_TOOL_PLAYWRIGHT_CLI_LOADED:-}" ] && return 0
 readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_LOADED=1
+
+# Required by spec 2026-05-01-token-efficient-adapter-output-design §8: every
+# adapter sources output.sh so verb-dispatch emits JSON via emit_summary /
+# emit_event rather than hand-rolled printf. Lint tier 3 enforces this.
+# shellcheck source=../output.sh
+# shellcheck disable=SC1091
+source "$(dirname "${BASH_SOURCE[0]}")/../output.sh"
 
 # Adapter-private namespace prefix — never use bare globals. (AP-6 in spec §9.)
 readonly _BROWSER_TOOL_PLAYWRIGHT_CLI_BIN="${PLAYWRIGHT_CLI_BIN:-playwright}"
@@ -1793,6 +2013,34 @@ Append to `tests/lint.bats`:
   mv references/tool-versions.md.bak references/tool-versions.md
   [ "${drift_status}" -ne 0 ] || fail "lint should fail on stale tool-versions.md"
 }
+
+@test "lint: drift tier — output-shape — every adapter sources scripts/lib/output.sh" {
+  # Per token-efficient-output spec §8: hand-rolled JSON in adapters is the
+  # commonest token-bloat regression vector. Lint guards it.
+  run bash "${BATS_TEST_DIRNAME}/lint.sh" --drift-only
+  assert_status 0
+}
+
+@test "lint: drift tier — output-shape — fails when an adapter omits 'source .*output.sh'" {
+  # Synthesise a non-conforming adapter, run lint, restore.
+  cat > scripts/lib/tool/_drift-test-adapter.sh <<'EOF'
+tool_metadata()        { printf '{"name":"_drift-test-adapter","abi_version":1}\n'; }
+tool_capabilities()    { printf '{"verbs":{}}\n'; }
+tool_doctor_check()    { printf '{"ok":true}\n'; }
+tool_open()            { printf '{"verb":"open","status":"ok"}\n'; }
+tool_click()           { return 41; }
+tool_fill()            { return 41; }
+tool_snapshot()        { return 41; }
+tool_inspect()         { return 41; }
+tool_audit()           { return 41; }
+tool_extract()         { return 41; }
+tool_eval()            { return 41; }
+EOF
+  run bash "${BATS_TEST_DIRNAME}/lint.sh" --drift-only
+  drift_status=$?
+  rm -f scripts/lib/tool/_drift-test-adapter.sh
+  [ "${drift_status}" -ne 0 ] || fail "lint should fail on adapter missing 'source .*output.sh'"
+}
 ```
 
 - [ ] **Step 13.2: Run — expect fail**
@@ -1836,8 +2084,28 @@ ensure_docs_in_sync() {
   return "${errors}"
 }
 
+# Per token-efficient-output spec §8: every adapter MUST source-import
+# scripts/lib/output.sh so its verb-dispatch functions emit JSON via
+# emit_summary / emit_event rather than hand-rolled `printf '{...}'` lines.
+# Hand-rolled JSON is the commonest regression — keys drift, escaping breaks,
+# token costs creep up. This check is cheap (one grep per adapter file).
+ensure_adapters_use_output_helpers() {
+  local errors=0 file
+  for file in "${REPO_ROOT}"/scripts/lib/tool/*.sh; do
+    [ -f "${file}" ] || continue
+    if ! grep -qE 'source[[:space:]]+.*lib/output\.sh' "${file}"; then
+      warn_lint "$(basename "${file}") does not source scripts/lib/output.sh; verb output must go through emit_summary / emit_event (spec §8)"
+      errors=$((errors + 1))
+    fi
+  done
+  return "${errors}"
+}
+
 run_drift_tier() {
-  ensure_docs_in_sync
+  local rc=0
+  ensure_docs_in_sync                 || rc=$((rc + $?))
+  ensure_adapters_use_output_helpers  || rc=$((rc + $?))
+  return "${rc}"
 }
 ```
 
