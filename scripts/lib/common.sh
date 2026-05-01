@@ -181,6 +181,15 @@ now_iso() {
   date -u +%Y-%m-%dT%H:%M:%SZ
 }
 
+# file_mode PATH echoes the octal permission bits (e.g. "700", "0600") of PATH.
+# Portable across GNU stat (-c '%a') and BSD stat (-f '%Lp'). GNU is tried
+# first because GNU's `stat -f` does NOT fail on a regular file — it dumps
+# filesystem-status info instead, polluting stdout. So order matters:
+# GNU first; if -c is unrecognised (BSD), fall through to -f.
+file_mode() {
+  stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
+}
+
 # --- Name safety ---
 # assert_safe_name NAME [FIELD_LABEL]
 # Refuses names that could escape a state dir or run outside the allowed

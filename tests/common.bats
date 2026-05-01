@@ -172,3 +172,25 @@ load helpers
   assert_status 0
   [ "${output%/lib/tool}" != "${output}" ] || fail "expected LIB_TOOL_DIR to end with /lib/tool"
 }
+
+@test "common.sh: file_mode returns octal mode portably (BSD + GNU stat)" {
+  setup_temp_home
+  local f="${TEST_HOME}/probe"
+  : > "${f}"
+  chmod 0644 "${f}"
+  run bash -c "source '${LIB_DIR}/common.sh'; file_mode '${f}'"
+  teardown_temp_home
+  assert_status 0
+  [ "${output}" = "644" ] || fail "expected 644, got '${output}'"
+}
+
+@test "common.sh: file_mode handles 0700 directory mode" {
+  setup_temp_home
+  local d="${TEST_HOME}/probe-dir"
+  mkdir -p "${d}"
+  chmod 0700 "${d}"
+  run bash -c "source '${LIB_DIR}/common.sh'; file_mode '${d}'"
+  teardown_temp_home
+  assert_status 0
+  [ "${output}" = "700" ] || fail "expected 700, got '${output}'"
+}

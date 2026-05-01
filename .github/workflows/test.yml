@@ -21,11 +21,15 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y bats jq
 
-      - name: Install bats (macOS)
+      - name: Install bats + bash 5 (macOS)
         if: runner.os == 'macOS'
         run: |
           brew update
-          brew install bats-core jq
+          brew install bats-core jq bash
+          # /opt/homebrew/bin must come before /bin so child `bash` resolves
+          # to brew's 5.x (the doctor's `check_bash_version` requires >= 4;
+          # macOS's stock /bin/bash is 3.2).
+          echo "/opt/homebrew/bin" >> "${GITHUB_PATH}"
 
       - name: Run unit suite
         run: bash tests/run.sh

@@ -56,7 +56,8 @@ check_home() {
     return 0
   fi
   local mode
-  mode="$(stat -f '%Lp' "${BROWSER_SKILL_HOME}" 2>/dev/null || stat -c '%a' "${BROWSER_SKILL_HOME}" 2>/dev/null || echo "?")"
+  mode="$(file_mode "${BROWSER_SKILL_HOME}")"
+  [ -n "${mode}" ] || mode="?"
   if [ "${mode}" != "700" ]; then
     warn "${BROWSER_SKILL_HOME} has mode ${mode}, expected 700"
     warn "  remediation: chmod 700 ${BROWSER_SKILL_HOME}"
