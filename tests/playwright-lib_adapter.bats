@@ -51,11 +51,14 @@ teardown() {
   rm -f "${STUB_LOG_FILE}"
 }
 
-@test "playwright-lib driver: real mode (BROWSER_SKILL_LIB_STUB unset) errors with self-healing hint" {
+@test "playwright-lib driver: real mode for stateful verbs (snapshot/click/fill/login) returns 41 with daemon-mode hint" {
+  # `open` real-mode is implemented (single-shot launch+navigate+close).
+  # Stateful verbs require a long-lived browser shared across invocations —
+  # daemon mode lands in Phase 4 part 4. Until then they error with hint.
   unset BROWSER_SKILL_LIB_STUB
-  run node scripts/lib/node/playwright-driver.mjs open --url https://example.com
+  run bash -c "node scripts/lib/node/playwright-driver.mjs snapshot 2>&1"
   [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
-  echo "${output}" | grep -q "BROWSER_SKILL_LIB_STUB" || fail "expected self-healing hint"
+  echo "${output}" | grep -q "daemon mode" || fail "expected daemon-mode hint, got: ${output}"
 }
 
 # --- Adapter contract ---
