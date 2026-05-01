@@ -15,7 +15,11 @@ readonly BROWSER_SKILL_ROUTER_LOADED=1
 # whose function returns 0 (after also passing the capability filter) wins.
 # Rules are appended in priority order. Add a new rule = define _rule_<name>
 # function below + append its NAME to this array.
-ROUTING_RULES=()
+# Order matters: top-down, first-match-with-capability-support wins.
+# Adding a tool that's NEVER the default for any verb = ZERO edits to this array.
+ROUTING_RULES=(
+  rule_default_navigation
+)
 
 # _has_flag FLAG ARGS... — returns 0 if FLAG appears in ARGS, else 1.
 # Used by rule functions to detect routing-trigger flags in the verb's argv.
@@ -41,6 +45,20 @@ _tool_supports() {
     source "${LIB_TOOL_DIR}/${tool}.sh"
     tool_capabilities 2>/dev/null
   )"
+}
+
+# --- Precedence rules (in order). Each fn echoes "TOOL\tWHY" if it matches.
+# Add a rule = define a function + append its NAME to ROUTING_RULES above.
+
+# Default for navigation/inspection verbs — playwright-cli is the cheap,
+# stable, multi-browser default per parent spec Appendix B.
+rule_default_navigation() {
+  local verb="$1"
+  case "${verb}" in
+    open|click|fill|snapshot|inspect)
+      printf 'playwright-cli\t%s\n' "default for ${verb}"
+      ;;
+  esac
 }
 
 # pick_tool VERB [FLAGS...] — echoes "TOOL_NAME\tWHY" on success.

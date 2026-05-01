@@ -7,11 +7,6 @@ teardown() {
   teardown_temp_home
 }
 
-@test "router: pick_tool errors EXIT_TOOL_MISSING when no rules and no --tool" {
-  run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/router.sh'; pick_tool open"
-  assert_status "$EXIT_TOOL_MISSING"
-}
-
 @test "router: pick_tool with --tool=X for non-existent X exits USAGE_ERROR" {
   run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/router.sh'; ARG_TOOL=ghost-tool pick_tool open"
   assert_status "$EXIT_USAGE_ERROR"
@@ -39,4 +34,55 @@ teardown() {
   run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/router.sh'; if _has_flag --foo --bar --baz; then echo found; else echo missing; fi"
   assert_status 0
   [ "${output}" = "missing" ]
+}
+
+@test "router: rule_default_navigation picks playwright-cli for verb=open" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool open
+  "
+  assert_status 0
+  assert_output_contains "playwright-cli"
+  assert_output_contains "default"
+}
+
+@test "router: rule_default_navigation picks playwright-cli for verb=snapshot" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool snapshot
+  "
+  assert_status 0
+  assert_output_contains "playwright-cli"
+}
+
+@test "router: --tool=playwright-cli explicit override returns playwright-cli with reason 'user-specified'" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    ARG_TOOL=playwright-cli pick_tool open
+  "
+  assert_status 0
+  assert_output_contains "playwright-cli"
+  assert_output_contains "user-specified"
+}
+
+@test "router: --tool=playwright-cli for verb=audit fails USAGE_ERROR (capability filter rejects)" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    ARG_TOOL=playwright-cli pick_tool audit
+  "
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "does not support"
+}
+
+@test "router: pick_tool audit (no --tool) falls through, dies EXIT_TOOL_MISSING (no rule for audit yet)" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool audit
+  "
+  assert_status "$EXIT_TOOL_MISSING"
 }
