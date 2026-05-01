@@ -1,9 +1,64 @@
-# playwright-cli — cheatsheet (placeholder)
+# playwright-cli — cheatsheet
 
-WIP — full content lands in Phase 3 Task 14.
+The browser-skill's playwright-cli adapter shells to the `playwright` binary (Microsoft's Playwright CLI). This adapter is the **default** for navigation and inspection verbs; it is the cheap, multi-browser, low-task-token-cost path.
 
-This file exists so the playwright-cli adapter's `tool_metadata.cheatsheet_path`
-check (lint tier 2) resolves to a real path while the cheatsheet itself is
-being written.
+## When the router picks this adapter
 
-See: `docs/superpowers/plans/2026-04-30-tool-adapter-extension-model.md` Task 14.
+| Verb | Default? |
+|---|---|
+| `open` | yes |
+| `click` (and `dblclick`) | yes |
+| `fill` (and `type`) | yes |
+| `snapshot` | yes |
+| `inspect` (without `--capture-*`) | yes |
+| `audit` | no — routed to chrome-devtools-mcp |
+| `extract --scrape` | no — routed to obscura |
+
+## Capabilities declared
+
+```json
+{
+  "verbs": {
+    "open":     { "flags": ["--headed", "--viewport", "--user-agent"] },
+    "click":    { "flags": ["--ref", "--selector"] },
+    "fill":     { "flags": ["--ref", "--text", "--secret-stdin"] },
+    "snapshot": { "flags": [] },
+    "inspect":  { "flags": ["--selector"] }
+  }
+}
+```
+
+## Doctor check
+
+The adapter checks for the `playwright` binary on PATH. To install:
+
+```bash
+npm i -g playwright @playwright/test
+playwright install chromium
+```
+
+## Version pin
+
+- `version_pin: "1.49.x"` — major.minor stability target. Fixture argv-hashes assume the surface CLI shape of 1.49.
+
+## Override
+
+To force this adapter even when the router would pick another:
+
+```bash
+bash scripts/browser-<verb>.sh --tool=playwright-cli ...
+```
+
+This is the **Path A entry point** for any new verb that isn't yet in the router's precedence table — it works without router edits.
+
+## Limitations
+
+- No console-message or network-HAR capture (use `--tool=chrome-devtools-mcp` or omit `--tool` and pass `--capture-console` / `--capture-network`).
+- No lighthouse audit (chrome-devtools-mcp).
+- No stealth / anti-fingerprinting (obscura).
+
+## See also
+
+- [Tool adapter extension model spec](../docs/superpowers/specs/2026-04-30-tool-adapter-extension-model-design.md)
+- [Routing heuristics](routing-heuristics.md)
+- [Tool versions](tool-versions.md)
