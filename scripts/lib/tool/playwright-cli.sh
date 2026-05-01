@@ -34,7 +34,8 @@ tool_metadata() {
   "name": "playwright-cli",
   "abi_version": 1,
   "version_pin": "1.49.x",
-  "cheatsheet_path": "references/playwright-cli-cheatsheet.md"
+  "cheatsheet_path": "references/playwright-cli-cheatsheet.md",
+  "install_hint": "npm i -g playwright @playwright/test @playwright/cli && playwright install chromium"
 }
 EOF
 }
