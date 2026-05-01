@@ -38,7 +38,7 @@ _seed_site_and_session() {
     source '${LIB_DIR}/common.sh'; init_paths
     source '${LIB_DIR}/session.sh'
     storage=\$(jq -nc --arg o '${origin}' \
-      '{cookies:[{name:\"sid\",value:\"abc\",domain:(\$o|sub(\"https?://\";\"\")|sub(\":.*\";\"\")),path:\"/\"}], origins:[{origin:\$o}]}')
+      '{cookies:[{name:\"sid\",value:\"abc\",domain:(\$o|sub(\"https?://\";\"\")|sub(\":.*\";\"\")),path:\"/\"}], origins:[{origin:\$o, localStorage:[]}]}')
     meta=\$(jq -nc --arg o '${origin}' '{schema_version:1, origin:\$o, captured_at:\"2026-05-01T00:00:00Z\"}')
     session_save '${session_name}' \"\${storage}\" \"\${meta}\"
   "

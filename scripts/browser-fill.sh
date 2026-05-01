@@ -30,6 +30,11 @@ SUMMARY_T0="$(now_ms)"; export SUMMARY_T0
 
 parse_verb_globals "$@"
 
+# Resolve site/session → BROWSER_SKILL_STORAGE_STATE (no-op if neither set).
+# Router's rule_session_required reads the env var to prefer playwright-lib
+# (which natively supports --secret-stdin via stdin-pipe to driver).
+resolve_session_storage_state
+
 ref="" text="" use_stdin=0
 verb_argv=()
 i=0
