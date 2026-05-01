@@ -23,6 +23,7 @@ Real browser launches arrive in Phase 3.
 | `use`           | Get / set / clear current site | `… use --set prod` |
 | `login`         | Capture a Playwright storageState into a session | `… login --site prod --as prod--admin --storage-state-file PATH` |
 | `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
+| `open` w/ session | Apply a stored storageState before navigating | `… open --site prod --as prod--admin --url …` |
 | `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |
 | `click`         | Click an element by `--ref eN` or `--selector CSS` | `… click --ref e3` |
 | `fill`          | Fill an input — `--text VALUE` or `--secret-stdin` | `… fill --ref e3 --text "search query"` |
@@ -43,6 +44,7 @@ for the rules):
 | Tool | Strengths | Cheatsheet |
 |---|---|---|
 | playwright-cli | declares 4 verbs | [references/playwright-cli-cheatsheet.md](references/playwright-cli-cheatsheet.md) |
+| playwright-lib | declares 5 verbs | [references/playwright-lib-cheatsheet.md](references/playwright-lib-cheatsheet.md) |
 <!-- END AUTOGEN: tools-table -->
 
 ## Before running anything

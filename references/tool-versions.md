@@ -3,3 +3,4 @@
 | Tool | Version pin | Install hint | Cheatsheet |
 |---|---|---|---|
 | playwright-cli | 1.49.x | npm i -g playwright @playwright/test @playwright/cli && playwright install chromium | [references/playwright-cli-cheatsheet.md](../references/playwright-cli-cheatsheet.md) |
+| playwright-lib | 1.59.x | npm i -g playwright @playwright/test && playwright install chromium | [references/playwright-lib-cheatsheet.md](../references/playwright-lib-cheatsheet.md) |
