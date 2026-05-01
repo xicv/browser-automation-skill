@@ -33,6 +33,12 @@ readonly EXIT_TOOL_UNSUPPORTED_OP=41
 readonly EXIT_TOOL_CRASHED=42
 readonly EXIT_TOOL_TIMEOUT=43
 
+# --- Tool adapter ABI version (single source of truth) ---
+# Bumping this is a [breaking] change. Every adapter's tool_metadata().abi_version
+# must equal this value; tests/lint.sh enforces it. See:
+# docs/superpowers/specs/2026-04-30-tool-adapter-extension-model-design.md §2.4
+readonly BROWSER_SKILL_TOOL_ABI=1
+
 # --- Logging ---
 # All logging goes to stderr. stdout is reserved for streaming JSON + summary.
 # Honors NO_COLOR=1 (https://no-color.org) and FORCE_COLOR=1.
@@ -105,6 +111,14 @@ init_paths() {
   export CAPTURES_DIR="${BROWSER_SKILL_HOME}/captures"
   export FLOWS_DIR="${BROWSER_SKILL_HOME}/flows"
   export CURRENT_FILE="${BROWSER_SKILL_HOME}/current"
+
+  # Adapter directory — single source of truth for "what adapters exist".
+  # Tools live one-file-per-adapter at $LIB_TOOL_DIR/<name>.sh; basename minus
+  # .sh is the canonical adapter name (enforced by tests/lint.sh §7.2).
+  local lib_dir
+  lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+  export LIB_TOOL_DIR
+  LIB_TOOL_DIR="$(cd "${lib_dir}/tool" 2>/dev/null && pwd || printf '%s/tool' "${lib_dir}")"
 }
 
 # --- JSON summary writer ---

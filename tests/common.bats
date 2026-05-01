@@ -154,3 +154,21 @@ load helpers
   assert_status "$EXIT_USAGE_ERROR"
   assert_output_contains "session-name"
 }
+
+@test "common.sh: BROWSER_SKILL_TOOL_ABI is exported as readonly integer" {
+  run bash -c "source '${LIB_DIR}/common.sh'; printf '%s\n' \"\${BROWSER_SKILL_TOOL_ABI}\""
+  assert_status 0
+  [ "${output}" = "1" ]
+}
+
+@test "common.sh: BROWSER_SKILL_TOOL_ABI is readonly (cannot be reassigned)" {
+  run bash -c "source '${LIB_DIR}/common.sh'; BROWSER_SKILL_TOOL_ABI=99"
+  assert_status 1
+  assert_output_contains "readonly"
+}
+
+@test "common.sh: LIB_TOOL_DIR points at scripts/lib/tool" {
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; printf '%s\n' \"\${LIB_TOOL_DIR}\""
+  assert_status 0
+  [ "${output%/lib/tool}" != "${output}" ] || fail "expected LIB_TOOL_DIR to end with /lib/tool"
+}
