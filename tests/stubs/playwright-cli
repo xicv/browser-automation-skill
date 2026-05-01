@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# tests/stubs/playwright-cli — mock binary for adapter contract tests.
+#
+# Behavior:
+#   1. Logs argv (newline-separated, one arg per line) to ${STUB_LOG_FILE:-/tmp/playwright-cli-stub.log}
+#      so tests can grep argv for leak / shape assertions.
+#   2. Computes sha256 of argv (joined by NULs) and looks up
+#      tests/fixtures/playwright-cli/<sha>.json. If found, prints the file's
+#      contents to stdout and exits 0.
+#   3. If no fixture matches, prints a JSON error line and exits with the
+#      EXIT_TOOL_UNSUPPORTED_OP code (41) so tests detect missing fixtures
+#      explicitly rather than silently passing.
+#
+# This stub deliberately does NOT shell out to a real browser — the integration
+# layer is the adapter, not the browser. Real-browser e2e lives in a separate
+# suite (Phase 3 part 2).
+
+set -euo pipefail
+LOG_FILE="${STUB_LOG_FILE:-/tmp/playwright-cli-stub.log}"
+
+{
+  printf '%s\n' "--- $(date -u +%Y-%m-%dT%H:%M:%SZ) ---"
+  for a in "$@"; do printf '%s\n' "${a}"; done
+} >> "${LOG_FILE}"
+
+hash="$(printf '%s\0' "$@" | shasum -a 256 | awk '{print $1}')"
+
+FIXTURES_DIR="${PLAYWRIGHT_CLI_FIXTURES_DIR:-tests/fixtures/playwright-cli}"
+if [ -f "${FIXTURES_DIR}/${hash}.json" ]; then
+  cat "${FIXTURES_DIR}/${hash}.json"
+  exit 0
+fi
+
+printf '{"status":"error","reason":"no fixture for argv-hash %s","argv":%s}\n' \
+  "${hash}" "$(printf '%s\n' "$@" | jq -R . | jq -sc .)"
+exit 41
