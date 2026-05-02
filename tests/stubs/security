@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+# tests/stubs/security — mock of macOS `security` CLI for keychain backend tests.
+#
+# Supports the 3 subcommands the backend uses:
+#   add-generic-password    -s SERVICE -a NAME -w PW [-U]
+#   find-generic-password   -s SERVICE -a NAME [-w]
+#   delete-generic-password -s SERVICE -a NAME
+#
+# State lives in ${KEYCHAIN_STUB_STORE:-/tmp/keychain-stub.json} as a flat
+# JSON object {NAME: PW, ...}. Each test should set KEYCHAIN_STUB_STORE to a
+# unique tempfile to keep tests isolated.
+#
+# Argv logged to ${STUB_LOG_FILE} (one arg per line, with ISO timestamp
+# separator) so bats can assert argv shape — same pattern as the
+# playwright-cli stub.
+
+set -euo pipefail
+
+LOG_FILE="${STUB_LOG_FILE:-/tmp/security-stub.log}"
+STORE="${KEYCHAIN_STUB_STORE:-/tmp/keychain-stub.json}"
+
+{
+  printf '%s\n' "--- $(date -u +%Y-%m-%dT%H:%M:%SZ) ---"
+  for a in "$@"; do printf '%s\n' "${a}"; done
+} >> "${LOG_FILE}"
+
+# Initialize empty store if missing.
+[ -f "${STORE}" ] || printf '%s' '{}' > "${STORE}"
+
+cmd="${1:-}"; shift || true
+
+# Parse the flag set the backend uses. Anything else is logged but ignored.
+service=""
+account=""
+password=""
+want_w=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -s) service="$2"; shift 2 ;;
+    -a) account="$2"; shift 2 ;;
+    -w)
+      # `-w` followed by a value means "set this password".
+      # `-w` standalone (or followed by another flag) means "echo the password to stdout".
+      want_w=1
+      if [ "$#" -ge 2 ] && [ "${2:0:1}" != "-" ]; then
+        password="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    -U) shift ;;
+    *)  shift ;;
+  esac
+done
+
+case "${cmd}" in
+  add-generic-password)
+    [ -n "${account}" ] || { printf 'security: missing -a\n' >&2; exit 2; }
+    jq --arg n "${account}" --arg p "${password}" '. + {($n): $p}' \
+      "${STORE}" > "${STORE}.tmp.$$" \
+      && mv "${STORE}.tmp.$$" "${STORE}"
+    ;;
+  find-generic-password)
+    [ -n "${account}" ] || { printf 'security: missing -a\n' >&2; exit 2; }
+    val="$(jq -r --arg n "${account}" '.[$n] // ""' "${STORE}")"
+    if [ -z "${val}" ]; then
+      printf 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n' >&2
+      exit 44
+    fi
+    if [ "${want_w}" = "1" ]; then
+      printf '%s' "${val}"
+    else
+      # Without -w, real `security` prints metadata. We just exit 0 to signal
+      # existence — the backend's secret_exists call uses this path.
+      :
+    fi
+    ;;
+  delete-generic-password)
+    [ -n "${account}" ] || { printf 'security: missing -a\n' >&2; exit 2; }
+    val="$(jq -r --arg n "${account}" '.[$n] // ""' "${STORE}")"
+    if [ -z "${val}" ]; then
+      printf 'security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n' >&2
+      exit 44
+    fi
+    jq --arg n "${account}" 'del(.[$n])' "${STORE}" > "${STORE}.tmp.$$" \
+      && mv "${STORE}.tmp.$$" "${STORE}"
+    ;;
+  *)
+    printf 'security stub: unsupported subcommand %s\n' "${cmd}" >&2
+    exit 2
+    ;;
+esac
