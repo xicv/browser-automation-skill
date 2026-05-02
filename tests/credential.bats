@@ -164,16 +164,15 @@ run_lib() {
   [ "${out}" = "pw-route" ]
 }
 
-@test "credential.sh: credential_set_secret returns EXIT_TOOL_MISSING for keychain backend (deferred to part 2b)" {
+@test "credential.sh: credential_set_secret + get_secret roundtrip via keychain backend (stub-validated)" {
+  KEYCHAIN_STUB_STORE="${TEST_HOME}/keychain-stub.json"
+  KEYCHAIN_SECURITY_BIN="${STUBS_DIR}/security"
+  export KEYCHAIN_STUB_STORE KEYCHAIN_SECURITY_BIN
   meta="$(_meta_json prod--admin keychain)"
   run_lib "credential_save prod--admin '${meta}'"
-  run bash -c "
-    set +e
-    source '${LIB_DIR}/common.sh'; init_paths
-    source '${LIB_DIR}/credential.sh'
-    printf 'pw' | credential_set_secret prod--admin
-  "
-  [ "${status}" = "21" ] || fail "expected EXIT_TOOL_MISSING (21) for deferred keychain backend, got ${status}"
+  printf 'pw-keychain' | KEYCHAIN_STUB_STORE="${KEYCHAIN_STUB_STORE}" KEYCHAIN_SECURITY_BIN="${KEYCHAIN_SECURITY_BIN}" run_lib "credential_set_secret prod--admin"
+  out="$(KEYCHAIN_STUB_STORE="${KEYCHAIN_STUB_STORE}" KEYCHAIN_SECURITY_BIN="${KEYCHAIN_SECURITY_BIN}" run_lib "credential_get_secret prod--admin")"
+  [ "${out}" = "pw-keychain" ] || fail "expected 'pw-keychain', got '${out}'"
 }
 
 @test "credential.sh: credential_set_secret returns EXIT_TOOL_MISSING for libsecret backend (deferred to part 2c)" {

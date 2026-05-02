@@ -13,6 +13,20 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 2b — macOS Keychain backend (security CLI)
+
+- [feat] new `scripts/lib/secret/keychain.sh` — second secret backend. 4-fn API mirrors `plaintext.sh`. Shells to `${KEYCHAIN_SECURITY_BIN:-security}`; service prefix `${BROWSER_SKILL_KEYCHAIN_SERVICE:-browser-skill}`; account = credential name. `secret_set` reads stdin then calls `security add-generic-password -w "${secret}" -U`. `secret_get` echoes via `find-generic-password -w`. `secret_delete` idempotent (`|| true` swallows missing-item exit). `secret_exists` probes via `find-generic-password` without `-w`.
+- [security] AP-7 documented exception: macOS `security` CLI takes the password on argv (`-w PASSWORD`); no clean stdin path in upstream tool. Mitigations documented in keychain.sh header — short-lived subprocess (~50ms), -U makes idempotent, Linux libsecret backend (part 2c) uses stdin-clean `secret-tool`. The skill's own code never puts secrets on argv; the leak surface is the brief `security` subprocess. Honest documented exception pattern, NOT silent compromise of the invariant.
+- [feat] `scripts/lib/credential.sh` dispatcher: `keychain` branch shifted from part-2a's `EXIT_TOOL_MISSING` placeholder to actual backend dispatch (`source secret/keychain.sh; secret_${op}`). `libsecret` branch unchanged (still placeholder until 2c).
+- [internal] new `tests/stubs/security` — bash mock of macOS `security` CLI. Supports `add/find/delete-generic-password` with `-s/-a/-w/-U` flag set the backend uses. State in `${KEYCHAIN_STUB_STORE}` (per-test isolated tempfile). Logs argv to `${STUB_LOG_FILE}` for shape assertions. Mirrors `tests/stubs/playwright-cli` + `tests/stubs/chrome-devtools-mcp` (now-deleted) patterns. Lets bats run on Ubuntu CI without macOS keychain access.
+- [internal] `tests/secret_keychain.bats` (13 cases) — full backend coverage: stdin-roundtrip, idempotent delete, multi-secret, last-write-wins, override of service prefix, AP-7 header-comment grep guard.
+- [internal] `tests/credential.bats` — replaced the part-2a "keychain returns EXIT_TOOL_MISSING (deferred)" test with positive keychain-roundtrip-via-stub test. libsecret-deferred test stays (still placeholder until 2c).
+- [docs] `docs/superpowers/plans/2026-05-02-phase-05-part-2b-keychain.md` — phase plan.
+
+NO verb scripts this PR. NO doctor changes. NO router/adapter touches. macOS Keychain becomes the **per-OS-default backend on macOS** once `creds add` lands in part 2d (smart auto-detect: keychain on macOS, libsecret on Linux with libsecret installed, plaintext fallback otherwise).
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/secret/plaintext.sh`, `scripts/browser-doctor.sh`, every `scripts/browser-<verb>.sh`, every adapter file, `SKILL.md`, `tests/lint.sh`.
+
 ### Phase 5 part 2a — credentials foundation (lib + plaintext backend)
 
 - [feat] new `scripts/lib/credential.sh` — credentials substrate. Eight public fns: `credential_save/load/meta_load/list_names/delete/exists/set_secret/get_secret`. Schema v1 (mirror session schema). Two files per credential: `<name>.json` for metadata (mode 0600, NEVER secret values) and `<name>.secret` for backend-owned payload. Backend dispatcher routes secret operations by `metadata.backend` field; sources backends on demand to keep parent-shell namespace clean.

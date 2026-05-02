@@ -147,8 +147,9 @@ _credential_dispatch_backend() {
       "secret_${op}" "${name}" "$@"
       ;;
     keychain)
-      die "${EXIT_TOOL_MISSING}" \
-        "credential ${name}: backend 'keychain' lands in phase-05 part 2b; until then, use backend 'plaintext'"
+      # shellcheck source=/dev/null
+      source "${lib_dir}/keychain.sh"
+      "secret_${op}" "${name}" "$@"
       ;;
     libsecret)
       die "${EXIT_TOOL_MISSING}" \
