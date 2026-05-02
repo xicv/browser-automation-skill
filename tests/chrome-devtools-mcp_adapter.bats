@@ -70,8 +70,8 @@ teardown() {
   printf '%s' "${result}" | jq -e '.ok | type == "boolean"' >/dev/null
 }
 
-@test "chrome-devtools-mcp adapter: tool_doctor_check is ok=true when stub bin is on PATH" {
-  result="$(CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" adapter_run_query chrome-devtools-mcp tool_doctor_check)"
+@test "chrome-devtools-mcp adapter: tool_doctor_check is ok=true when node is on PATH (no env override needed)" {
+  result="$(adapter_run_query chrome-devtools-mcp tool_doctor_check)"
   printf '%s' "${result}" | jq -e '.ok == true' >/dev/null
 }
 
@@ -82,11 +82,11 @@ teardown() {
   done
 }
 
-# --- Verb dispatch via stub binary (happy paths) ---
+# --- Verb dispatch via lib-stub bridge (happy paths) ---
 
 @test "chrome-devtools-mcp adapter: tool_open --url shells to bin with translated argv (no --url leak)" {
   STUB_LOG_FILE="$(mktemp)"
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
   STUB_LOG_FILE="${STUB_LOG_FILE}" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_open --url https://example.com"
@@ -101,7 +101,7 @@ teardown() {
 }
 
 @test "chrome-devtools-mcp adapter: tool_open echoes the canned navigate fixture" {
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_open --url https://example.com"
   assert_status 0
@@ -110,7 +110,7 @@ teardown() {
 }
 
 @test "chrome-devtools-mcp adapter: tool_snapshot returns refs array (length 2)" {
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_snapshot"
   assert_status 0
@@ -119,7 +119,7 @@ teardown() {
 
 @test "chrome-devtools-mcp adapter: tool_click translates --ref to positional target" {
   STUB_LOG_FILE="$(mktemp)"
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
   STUB_LOG_FILE="${STUB_LOG_FILE}" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_click --ref e3"
@@ -134,7 +134,7 @@ teardown() {
 }
 
 @test "chrome-devtools-mcp adapter: tool_inspect --capture-console echoes inspect fixture (flagship verb)" {
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_inspect --capture-console"
   assert_status 0
@@ -143,7 +143,7 @@ teardown() {
 }
 
 @test "chrome-devtools-mcp adapter: tool_audit --lighthouse echoes audit fixture" {
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_audit --lighthouse"
   assert_status 0
@@ -152,7 +152,7 @@ teardown() {
 }
 
 @test "chrome-devtools-mcp adapter: tool_extract --selector echoes extract fixture" {
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_extract --selector .title"
   assert_status 0
@@ -162,7 +162,7 @@ teardown() {
 
 @test "chrome-devtools-mcp adapter: tool_eval --expression translates to positional" {
   STUB_LOG_FILE="$(mktemp)"
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
   STUB_LOG_FILE="${STUB_LOG_FILE}" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_eval --expression '1+1'"
@@ -179,7 +179,7 @@ teardown() {
 
 @test "chrome-devtools-mcp adapter: tool_fill --secret-stdin accepts stdin (does NOT 41 like playwright-cli)" {
   STUB_LOG_FILE="$(mktemp)"
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
   STUB_LOG_FILE="${STUB_LOG_FILE}" \
     run bash -c "printf 'pass' | bash -c 'source \"${LIB_TOOL_DIR}/chrome-devtools-mcp.sh\"; tool_fill --ref e3 --secret-stdin'"
@@ -193,14 +193,14 @@ teardown() {
 }
 
 @test "chrome-devtools-mcp adapter: missing-fixture path propagates exit 41 from stub" {
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
   CHROME_DEVTOOLS_MCP_FIXTURES_DIR="${FIXTURES_DIR}/chrome-devtools-mcp" \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_open --url https://no-such-fixture.example"
   [ "${status}" = "41" ] || fail "expected exit 41 (no fixture), got ${status}"
 }
 
 @test "chrome-devtools-mcp adapter: tool_click without --ref returns 41 (TOOL_UNSUPPORTED_OP)" {
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
+  BROWSER_SKILL_LIB_STUB=1 \
     run bash -c "source '${LIB_TOOL_DIR}/chrome-devtools-mcp.sh'; tool_click"
   [ "${status}" = "41" ] || fail "expected exit 41 (missing target), got ${status}"
 }

@@ -13,6 +13,19 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 1b — cdt-mcp bridge scaffold + lib-stub pivot
+
+- [adapter] new `scripts/lib/node/chrome-devtools-bridge.mjs` — node ESM bridge between the chrome-devtools-mcp adapter and the upstream MCP server. Stub mode (`BROWSER_SKILL_LIB_STUB=1`) performs sha256(argv) → `tests/fixtures/chrome-devtools-mcp/<sha>.json` lookup and echoes contents (matches the part-1 hashing form `printf '%s\0' "$@" | shasum -a 256` so existing fixtures work unchanged). Real-mode MCP transport (initialize handshake + `tools/call` + `uid → eN` translation) is deferred to phase-05 part 1c — bridge throws with a self-healing hint pointing at that part.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` rewired to shell to the bridge via a new `_drive` helper, mirroring `playwright-lib`'s shape exactly. Adapter no longer references `${CHROME_DEVTOOLS_MCP_BIN}` for verb dispatch; the env var still exists but its semantics shifted — it now means "the upstream MCP server binary the bridge spawns in real mode" (defaults to `chrome-devtools-mcp`).
+- [adapter] `tool_doctor_check` pivoted from "bin on PATH" to "node on PATH + bridge file present" (mirror `playwright-lib::tool_doctor_check`). Includes a `note` field explaining real-mode transport is deferred to part 1c. Doctor now passes on plain CI without any env override (node is always present).
+- [internal] deleted `tests/stubs/chrome-devtools-mcp` (~50 LOC of bash) — replaced by lib-stub mode in the bridge. Mirrors `playwright-lib`'s no-binary-stub model.
+- [internal] reverted the part-1 additions to `tests/doctor.bats` (3 sites) and `tests/install.bats` (1 site) — `CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp"` overrides are no longer needed because doctor now passes on node-and-bridge alone.
+- [internal] `tests/chrome-devtools-mcp_adapter.bats` (21 cases): env var pivoted from `CHROME_DEVTOOLS_MCP_BIN` to `BROWSER_SKILL_LIB_STUB=1`; one test renamed from "stub bin on PATH" to "node on PATH (no env override needed)". Argv-shape assertions via `STUB_LOG_FILE` unchanged — bridge logs argv to that file in stub mode for parity.
+- [docs] `references/chrome-devtools-mcp-cheatsheet.md` — new "Architecture" diagram (adapter → bridge → upstream); rewritten "Stub mode" section; new "Environment variables" reference table; "Limitations" section restructured to call out which sub-part lands each remaining capability.
+- [docs] `docs/superpowers/plans/2026-05-02-phase-05-part-1b-cdt-mcp-bridge.md` — phase plan.
+
+Untouched per Path A discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/browser-doctor.sh`, every `scripts/browser-<verb>.sh`, `references/routing-heuristics.md`, `tests/router.bats`, both pre-existing adapter files (`playwright-cli.sh`, `playwright-lib.sh`), 8 fixtures under `tests/fixtures/chrome-devtools-mcp/`.
+
 ### Phase 5 part 1 — chrome-devtools-mcp adapter (Path A — opt-in)
 
 - [adapter] added `scripts/lib/tool/chrome-devtools-mcp.sh` — third concrete adapter, third on the toolbox roster after `playwright-cli` and `playwright-lib`. Declares all 8 verbs (`open click fill snapshot inspect audit extract eval`) so `--tool=chrome-devtools-mcp` makes the full surface reachable today via the capability filter in `pick_tool`. The flagship verbs (`inspect`, `audit`, `extract`) are the long-term defaults per parent spec Appendix B; router promotion (Path B) is deferred to phase-05 part 1c per anti-pattern AP-4 (no same-PR promotion).

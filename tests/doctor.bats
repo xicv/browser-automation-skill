@@ -14,7 +14,6 @@ load helpers
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
     run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
   assert_status 0
@@ -26,7 +25,6 @@ load helpers
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
     run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
   assert_status 0
@@ -60,7 +58,6 @@ load helpers
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
     run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
   assert_status 0
