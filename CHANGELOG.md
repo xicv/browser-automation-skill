@@ -13,6 +13,28 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 2c — Linux libsecret backend (secret-tool)
+
+- [feat] new `scripts/lib/secret/libsecret.sh` — third (and final Tier-1) secret backend. Completes the per-OS roster: plaintext + keychain + libsecret. 4-fn API mirrors `keychain.sh` shape; shells to `${LIBSECRET_TOOL_BIN:-secret-tool}`; service prefix `${BROWSER_SKILL_LIBSECRET_SERVICE:-browser-skill}`; account = credential name. `secret_set` clear-then-store for idempotent overwrite; `secret_get` via `lookup`; `secret_delete` swallows missing-item exit-1 from `clear`; `secret_exists` probes via `lookup` to /dev/null.
+- [security] AP-7 CLEAN — no documented exception. The upstream `secret-tool` CLI reads passwords from stdin natively (via `store` subcommand). The skill's own code pipes stdin directly into `secret-tool store`; password never appears in argv. Contrast with macOS keychain backend (`secret/keychain.sh`) which has a documented AP-7 exception due to the upstream `security` CLI's argv-only design.
+- [feat] `scripts/lib/credential.sh` dispatcher: `libsecret` branch shifts from part-2a's `EXIT_TOOL_MISSING` placeholder to actual backend dispatch. **All three backend branches now dispatch to real implementations** — no placeholders remain in `_credential_dispatch_backend`.
+- [internal] new `tests/stubs/secret-tool` — bash mock of `secret-tool` CLI. Supports `store/lookup/clear` with attr=val pairs (`service`, `account`). State in `${LIBSECRET_STUB_STORE}` (per-test isolated tempfile). Reads PW from stdin verbatim (no trailing-newline strip). Logs argv to `${STUB_LOG_FILE}` for shape assertions. Lets bats run on macos-latest CI (no libsecret) and ubuntu-latest CI (no D-Bus session) identically.
+- [internal] `tests/secret_libsecret.bats` (13 cases) — full backend coverage: AP-7-clean header guard (asserts the absence of "AP-7 documented exception" + presence of stdin-clean affirmation), stdin-roundtrip, idempotent delete, multi-secret, last-write-wins (clear-then-store), service prefix override, byte-exact verbatim roundtrip.
+- [internal] `tests/credential.bats` — replaced the part-2a "libsecret returns EXIT_TOOL_MISSING (deferred)" test with positive libsecret-roundtrip-via-stub test. Uses inline env-prefix style matching the existing keychain test.
+- [docs] `docs/superpowers/plans/2026-05-02-phase-05-part-2c-libsecret.md` — phase plan.
+
+NO verb scripts this PR. NO doctor changes. NO router/adapter touches. Linux libsecret becomes the **per-OS-default backend on Linux** (when `secret-tool` is on PATH and a D-Bus Secret Service is reachable) once `creds add` lands in part 2d.
+
+Backend roster after this PR (3 of 3 Tier-1 shipped; smart auto-detect lands in 2d):
+
+| OS | Default backend | Fallback |
+|---|---|---|
+| Darwin | keychain (security CLI) | plaintext-with-typed-phrase |
+| Linux (with libsecret) | libsecret (secret-tool) | plaintext-with-typed-phrase |
+| Linux (no libsecret) / other | plaintext-with-typed-phrase | (none) |
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/secret/plaintext.sh`, `scripts/lib/secret/keychain.sh`, `scripts/browser-doctor.sh`, every `scripts/browser-<verb>.sh`, every adapter file, `SKILL.md`, `tests/lint.sh`.
+
 ### Phase 5 part 2b — macOS Keychain backend (security CLI)
 
 - [feat] new `scripts/lib/secret/keychain.sh` — second secret backend. 4-fn API mirrors `plaintext.sh`. Shells to `${KEYCHAIN_SECURITY_BIN:-security}`; service prefix `${BROWSER_SKILL_KEYCHAIN_SERVICE:-browser-skill}`; account = credential name. `secret_set` reads stdin then calls `security add-generic-password -w "${secret}" -U`. `secret_get` echoes via `find-generic-password -w`. `secret_delete` idempotent (`|| true` swallows missing-item exit). `secret_exists` probes via `find-generic-password` without `-w`.

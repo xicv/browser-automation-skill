@@ -175,16 +175,15 @@ run_lib() {
   [ "${out}" = "pw-keychain" ] || fail "expected 'pw-keychain', got '${out}'"
 }
 
-@test "credential.sh: credential_set_secret returns EXIT_TOOL_MISSING for libsecret backend (deferred to part 2c)" {
+@test "credential.sh: credential_set_secret + get_secret roundtrip via libsecret backend (stub-validated)" {
+  LIBSECRET_STUB_STORE="${TEST_HOME}/libsecret-stub.json"
+  LIBSECRET_TOOL_BIN="${STUBS_DIR}/secret-tool"
+  export LIBSECRET_STUB_STORE LIBSECRET_TOOL_BIN
   meta="$(_meta_json prod--admin libsecret)"
   run_lib "credential_save prod--admin '${meta}'"
-  run bash -c "
-    set +e
-    source '${LIB_DIR}/common.sh'; init_paths
-    source '${LIB_DIR}/credential.sh'
-    printf 'pw' | credential_set_secret prod--admin
-  "
-  [ "${status}" = "21" ] || fail "expected EXIT_TOOL_MISSING (21) for deferred libsecret backend, got ${status}"
+  printf 'pw-libsecret' | LIBSECRET_STUB_STORE="${LIBSECRET_STUB_STORE}" LIBSECRET_TOOL_BIN="${LIBSECRET_TOOL_BIN}" run_lib "credential_set_secret prod--admin"
+  out="$(LIBSECRET_STUB_STORE="${LIBSECRET_STUB_STORE}" LIBSECRET_TOOL_BIN="${LIBSECRET_TOOL_BIN}" run_lib "credential_get_secret prod--admin")"
+  [ "${out}" = "pw-libsecret" ] || fail "expected 'pw-libsecret', got '${out}'"
 }
 
 @test "credential.sh: credential_set_secret rejects unknown backend" {

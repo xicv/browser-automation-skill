@@ -152,8 +152,9 @@ _credential_dispatch_backend() {
       "secret_${op}" "${name}" "$@"
       ;;
     libsecret)
-      die "${EXIT_TOOL_MISSING}" \
-        "credential ${name}: backend 'libsecret' lands in phase-05 part 2c; until then, use backend 'plaintext'"
+      # shellcheck source=/dev/null
+      source "${lib_dir}/libsecret.sh"
+      "secret_${op}" "${name}" "$@"
       ;;
     *)
       die "${EXIT_USAGE_ERROR}" "credential ${name}: unknown backend '${backend}'"
