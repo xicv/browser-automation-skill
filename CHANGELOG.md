@@ -13,6 +13,19 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 2a — credentials foundation (lib + plaintext backend)
+
+- [feat] new `scripts/lib/credential.sh` — credentials substrate. Eight public fns: `credential_save/load/meta_load/list_names/delete/exists/set_secret/get_secret`. Schema v1 (mirror session schema). Two files per credential: `<name>.json` for metadata (mode 0600, NEVER secret values) and `<name>.secret` for backend-owned payload. Backend dispatcher routes secret operations by `metadata.backend` field; sources backends on demand to keep parent-shell namespace clean.
+- [feat] new `scripts/lib/secret/plaintext.sh` — first secret backend. Four fns: `secret_set/get/delete/exists`. AP-7-strict: secret material flows via stdin pipes only — never argv. Atomic writes (tmp + mv); mode 0600 files inside mode 0700 `${CREDENTIALS_DIR}`. Idempotent delete. Last-write-wins on overwrite (no implicit `--force` — caller's job to confirm via `credential_delete` first).
+- [feat] backend dispatcher returns `EXIT_TOOL_MISSING` (21) with self-healing hint for `keychain` and `libsecret` backends — placeholders until those backends land in phase-05 part 2b (macOS Security framework via `security` CLI) and part 2c (Linux Secret Service via `secret-tool`).
+- [security] `credential_load` privacy-invariant test: output MUST NOT contain a `secret` field or any secret value. `tests/credential.bats` asserts this with a sentinel value (`sekret-do-not-leak`) — guards against any future regression that conflates metadata with payload.
+- [internal] `tests/credential.bats` (21 cases) + `tests/secret_plaintext.bats` (12 cases) — full lib + backend coverage including: file-mode invariants, dir-mode invariants, schema validation, dispatcher routing, deferred-backend exit codes, path-traversal rejection, AP-7 grep guard.
+- [docs] `docs/superpowers/plans/2026-05-02-phase-05-part-2a-creds-foundation.md` — phase plan.
+
+NO verb scripts this PR. `creds add/list/show/remove` land in part 2d once the backend roster (2a/2b/2c) is complete. NO doctor changes — credential count comes in 2d when verbs trigger surface visibility.
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/browser-doctor.sh`, every `scripts/browser-<verb>.sh`, every adapter file, `SKILL.md` (no new verbs to autogen), `tests/lint.sh`.
+
 ### Phase 5 part 1b — cdt-mcp bridge scaffold + lib-stub pivot
 
 - [adapter] new `scripts/lib/node/chrome-devtools-bridge.mjs` — node ESM bridge between the chrome-devtools-mcp adapter and the upstream MCP server. Stub mode (`BROWSER_SKILL_LIB_STUB=1`) performs sha256(argv) → `tests/fixtures/chrome-devtools-mcp/<sha>.json` lookup and echoes contents (matches the part-1 hashing form `printf '%s\0' "$@" | shasum -a 256` so existing fixtures work unchanged). Real-mode MCP transport (initialize handshake + `tools/call` + `uid → eN` translation) is deferred to phase-05 part 1c — bridge throws with a self-healing hint pointing at that part.
