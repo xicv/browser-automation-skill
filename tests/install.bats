@@ -103,7 +103,6 @@ load helpers
 @test "install.sh: runs doctor at the end and reports its result" {
   setup_temp_home
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
-  CHROME_DEVTOOLS_MCP_BIN="${STUBS_DIR}/chrome-devtools-mcp" \
     run bash "${REPO_ROOT}/install.sh" --user
   assert_status 0
   assert_output_contains "running doctor"

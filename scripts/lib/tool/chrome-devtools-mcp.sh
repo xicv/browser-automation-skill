@@ -10,15 +10,22 @@
 # Path A introduction: this adapter is reachable only via
 # `--tool=chrome-devtools-mcp`. Router promotion (Path B) for verbs like
 # `inspect`, `audit`, and capture-flag variants of primitives (per parent spec
-# Appendix B) is deferred to phase-05 part 1c.
+# Appendix B) is deferred to phase-05 part 1d.
 #
-# Real-mode bridge: the upstream `chrome-devtools-mcp` is an MCP server (npx
-# stdio JSON-RPC), not a CLI. The bridge that speaks MCP to it is deferred to
-# phase-05 part 1b. Today, this adapter shells to ${CHROME_DEVTOOLS_MCP_BIN}
-# (default: chrome-devtools-mcp). On test boxes the bin is overridden to the
-# stub at tests/stubs/chrome-devtools-mcp; on production boxes without the bin
-# on PATH, verb-dispatch fails with the bin-not-found error and tool_doctor
-# surfaces the missing-binary state explicitly.
+# Architecture (phase-05 part 1b — bridge scaffold):
+# Verb-dispatch shells to a node ESM bridge at
+# scripts/lib/node/chrome-devtools-bridge.mjs which mirrors playwright-lib's
+# playwright-driver.mjs:
+# - Stub mode (BROWSER_SKILL_LIB_STUB=1): bridge looks up sha256(argv) in
+#   tests/fixtures/chrome-devtools-mcp/<sha>.json and echoes the contents.
+# - Real mode: bridge spawns ${CHROME_DEVTOOLS_MCP_BIN:-chrome-devtools-mcp}
+#   (typically `npx chrome-devtools-mcp@latest`) and speaks MCP JSON-RPC over
+#   stdio. NOT implemented this PR — deferred to phase-05 part 1c.
+#
+# CHROME_DEVTOOLS_MCP_BIN env var semantics: in part 1 this was "the binary
+# the adapter shells to (real or stub)"; in part 1b it shifts to "the upstream
+# MCP server binary the bridge spawns in real mode". In stub mode it is
+# unused. The shift is documented in CHANGELOG and the cheatsheet.
 #
 # Adapters are LEAVES — never source another adapter (AP-2). Shared logic
 # factors into scripts/lib/<concern>.sh (sibling to lib/tool/).
@@ -33,7 +40,9 @@ readonly _BROWSER_TOOL_CHROME_DEVTOOLS_MCP_LOADED=1
 # shellcheck disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/../output.sh"
 
-readonly _BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN="${CHROME_DEVTOOLS_MCP_BIN:-chrome-devtools-mcp}"
+readonly _BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN="${BROWSER_SKILL_NODE_BIN:-node}"
+readonly _BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BRIDGE="$(dirname "${BASH_SOURCE[0]}")/../node/chrome-devtools-bridge.mjs"
+readonly _BROWSER_TOOL_CHROME_DEVTOOLS_MCP_MCP_SERVER_BIN="${CHROME_DEVTOOLS_MCP_BIN:-chrome-devtools-mcp}"
 
 # --- Identity functions ---
 
@@ -67,25 +76,33 @@ EOF
 }
 
 tool_doctor_check() {
-  if ! command -v "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" >/dev/null 2>&1; then
+  if ! command -v "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" >/dev/null 2>&1; then
     cat <<EOF
-{ "ok": false, "binary": "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}", "error": "not on PATH",
-  "install_hint": "npm i -g chrome-devtools-mcp (or run via 'npx chrome-devtools-mcp@latest' over stdio MCP)",
-  "note": "real-mode MCP stdio bridge deferred to phase-05 part 1b" }
+{ "ok": false, "binary": "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}", "error": "node not on PATH",
+  "install_hint": "brew install node (>=20)" }
 EOF
     return 0
   fi
-  local version
-  version="$("${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" --version 2>/dev/null || printf 'unknown')"
-  printf '{"ok":true,"binary":"%s","version":"%s"}\n' \
-    "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" "${version}"
+  if [ ! -f "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BRIDGE}" ]; then
+    printf '{"ok":false,"binary":"%s","error":"bridge missing","bridge_path":"%s"}\n' \
+      "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BRIDGE}"
+    return 0
+  fi
+  local node_version
+  node_version="$("${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" --version 2>/dev/null || printf 'unknown')"
+  printf '{"ok":true,"binary":"%s","node_version":"%s","mcp_server_bin":"%s","note":"real-mode MCP transport deferred to phase-05 part 1c"}\n' \
+    "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" "${node_version}" "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_MCP_SERVER_BIN}"
 }
 
 # --- Verb-dispatch functions ---
-# Argv translation: skill flags → bin's positional + canonical flags. The bin
-# (real or stub) sees a stable surface: `<verb> [args...]`. The stub fixtures
-# are keyed by sha256 of that surface, so any translation change here requires
-# regenerating fixture filenames.
+# Argv translation: skill flags → bridge's `<verb> [args...]` surface. Bridge
+# in stub mode hashes that surface (sha256 of args joined+terminated by NUL)
+# and looks up the fixture. Bridge in real mode (part 1c) translates to
+# MCP `tools/call` requests against the upstream chrome-devtools-mcp server.
+
+_drive() {
+  "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BRIDGE}" "$@"
+}
 
 tool_open() {
   local url=""
@@ -97,9 +114,9 @@ tool_open() {
     esac
   done
   if [ -n "${url}" ]; then
-    "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" open "${url}" "${rest[@]}"
+    _drive open "${url}" "${rest[@]}"
   else
-    "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" open "${rest[@]}"
+    _drive open "${rest[@]}"
   fi
 }
 
@@ -113,7 +130,7 @@ tool_click() {
     esac
   done
   [ -n "${target}" ] || return 41
-  "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" click "${target}" "${rest[@]}"
+  _drive click "${target}" "${rest[@]}"
 }
 
 tool_fill() {
@@ -129,29 +146,27 @@ tool_fill() {
   done
   [ -n "${target}" ] || return 41
   if [ "${use_stdin}" = "1" ]; then
-    # chrome-devtools-mcp's fill_form MCP tool can stage values from a stdin
-    # JSON envelope. We pass --secret-stdin through; the bin reads stdin.
-    "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" fill "${target}" --secret-stdin "${rest[@]}"
+    _drive fill "${target}" --secret-stdin "${rest[@]}"
     return $?
   fi
   [ -n "${text}" ] || return 41
-  "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" fill "${target}" "${text}" "${rest[@]}"
+  _drive fill "${target}" "${text}" "${rest[@]}"
 }
 
 tool_snapshot() {
-  "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" snapshot "$@"
+  _drive snapshot "$@"
 }
 
 tool_inspect() {
-  "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" inspect "$@"
+  _drive inspect "$@"
 }
 
 tool_audit() {
-  "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" audit "$@"
+  _drive audit "$@"
 }
 
 tool_extract() {
-  "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" extract "$@"
+  _drive extract "$@"
 }
 
 tool_eval() {
@@ -164,8 +179,8 @@ tool_eval() {
     esac
   done
   if [ -n "${expression}" ]; then
-    "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" eval "${expression}" "${rest[@]}"
+    _drive eval "${expression}" "${rest[@]}"
   else
-    "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_BIN}" eval "${rest[@]}"
+    _drive eval "${rest[@]}"
   fi
 }
