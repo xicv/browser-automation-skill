@@ -120,3 +120,28 @@ load helpers
   summary="$(printf '%s\n' "${output}" | tail -1)"
   printf '%s' "${summary}" | jq -e '.status' >/dev/null
 }
+
+@test "doctor: prints credentials count line (zero state)" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_output_contains "credentials: 0 total"
+}
+
+@test "doctor: credentials count line reflects per-backend breakdown" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}/credentials"
+  chmod 700 "${BROWSER_SKILL_HOME}" "${BROWSER_SKILL_HOME}/credentials"
+  # Hand-write a plaintext-backed credential metadata file so we don't need
+  # to invoke creds-add (which requires --site / --as / stub bins).
+  cat > "${BROWSER_SKILL_HOME}/credentials/test--cred.json" <<'EOF'
+{"schema_version":1,"name":"test--cred","site":"test","account":"a@b.c","backend":"plaintext","auth_flow":"single-step-username-password","auto_relogin":true,"totp_enabled":false,"created_at":"2026-05-03T00:00:00Z"}
+EOF
+  chmod 600 "${BROWSER_SKILL_HOME}/credentials/test--cred.json"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_output_contains "credentials: 1 total"
+  assert_output_contains "plaintext: 1"
+}
