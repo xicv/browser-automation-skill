@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 3 — `login --auto` auto-relogin from stored credentials
+
+- [feat] `scripts/browser-login.sh --auto` — programmatic headless login using the credential set via `creds-add`. Reads username from credential metadata, password via `credential_get_secret` (dispatches to whichever backend the cred uses — plaintext / keychain / libsecret). Sends `username\0password` to the driver via stdin per AP-7 (secret never on argv). Mutually exclusive with `--interactive` and `--storage-state-file`. Validates: cred exists, cred bound to `--site`, `auto_relogin=true`, `account` non-empty.
+- [feat] `scripts/lib/node/playwright-driver.mjs::runAutoRelogin` — reads NUL-separated `username\0password` from stdin, launches headless chromium, navigates to site URL, fills best-effort form selectors (`input[type=email]`, `input[type=password]`, `button[type=submit]`, etc.), clicks submit, waits for navigation/network-idle (15s budget), captures `storageState`, writes to `--output-path`.
+- [security] AP-7 STRICT: secret reaches driver via stdin pipe only. `printf '%s\0' "${account}"` precedes `credential_get_secret "${as}"` in the pipeline; combined stdin is exactly `account\0password`. Never appears in process argv.
+- [security] Privacy: `--auto --dry-run` summary JSON contains `account` (the username, NOT the password) plus standard verb/tool/why/status/duration_ms/site/session keys. Sentinel canary `sekret` verified absent from `--dry-run` output.
+- [internal] `tests/login.bats` — replaced the obsolete "--auto refused in Phase 2" test with 7 new `--auto` cases: mutex with `--interactive`, mutex with `--storage-state-file`, `--site` required, missing cred (exit 23), `auto_relogin=false` refusal, site-mismatch refusal, `--dry-run` happy path. Each test pre-creates the plaintext-acknowledged marker + exports keychain/libsecret stubs (defensive — preserves the lesson from part 2b).
+- [docs] `SKILL.md` — added `login (auto)` row.
+- [docs] `docs/superpowers/plans/2026-05-03-phase-05-part-3-auto-relogin.md` — phase plan.
+
+The auth track now actually saves typing: stored credentials → one CLI invocation → fresh session captured. Stateless single-step username+password flows work via best-effort selectors. Multi-step / 2FA / non-standard form sites need future part 3-iii (auth-flow detection at creds-add time) or fall back to `--interactive`.
+
+**Out of scope (deferred to follow-ups)**:
+- **Transparent verb-retry on `EXIT_SESSION_EXPIRED`** (parent spec §4.4 silent re-login on every verb call) — Phase 5 part 3-ii.
+- **Auth-flow detection at `creds add` time** — Phase 5 part 3-iii.
+- **2FA detection → exit 25** — Phase 5 part 3-iv.
+- Real-browser bats tests (no stub) — gated like `--interactive`'s; manual / future-CI.
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/credential.sh`, `scripts/lib/secret/*.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/verb_helpers.sh` (verb-retry deferred), `scripts/lib/secret_backend_select.sh`, `scripts/lib/mask.sh`, `scripts/lib/tool/*.sh`, `scripts/lib/node/chrome-devtools-bridge.mjs`, `scripts/browser-doctor.sh`, every `scripts/browser-creds-*.sh`, every other adapter file, `tests/lint.sh`.
+
 ### Phase 5 part 1c — chrome-devtools-mcp real MCP stdio transport (stateless verbs)
 
 - [feat] `scripts/lib/node/chrome-devtools-bridge.mjs::realDispatch` — implemented. Bridge spawns `${CHROME_DEVTOOLS_MCP_BIN:-chrome-devtools-mcp}` with stdio piped, performs MCP `initialize` handshake (protocol version `2024-11-05`), translates verb argv → `tools/call`, shapes response into skill summary JSON, cleanly shuts down. JSON-RPC 2.0 NDJSON wire protocol per MCP stdio convention.

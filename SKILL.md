@@ -23,6 +23,7 @@ Real browser launches arrive in Phase 3.
 | `use`           | Get / set / clear current site | `… use --set prod` |
 | `login`         | Capture a Playwright storageState into a session | `… login --site prod --as prod--admin --interactive` |
 | `login` (file)  | Same — but consume a hand-edited storageState file | `… login --site prod --as prod--admin --storage-state-file PATH` |
+| `login` (auto)  | Programmatic headless login using stored credential (AP-7 stdin-only) | `… login --site prod --as prod--admin --auto` |
 | `list-sessions` | List captured sessions (optionally filter by site) | `… list-sessions --site prod` |
 | `show-session`  | Show session metadata (NEVER cookie/token values) | `… show-session --as prod--admin` |
 | `remove-session`| Typed-name confirmed delete of a captured session | `… remove-session --as prod--admin --yes-i-know` |
