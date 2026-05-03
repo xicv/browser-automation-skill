@@ -14,11 +14,31 @@ promotion (Path B — making it the default for capture-flag verbs and for
 part 1d after a soak window.
 
 Phase-05 part 1b shipped the **node bridge scaffold** at
-`scripts/lib/node/chrome-devtools-bridge.mjs`. The adapter now shells to that
+`scripts/lib/node/chrome-devtools-bridge.mjs`. The adapter shells to that
 bridge (mirrors `playwright-lib`'s shape: adapter → node bridge → upstream).
-Stub mode (`BROWSER_SKILL_LIB_STUB=1`) is the test path. Real-mode MCP stdio
-transport (initialize handshake + `tools/call` + `uid → eN` translation per
-token-efficient-output spec §5) is deferred to phase-05 part 1c.
+
+**Phase-05 part 1c shipped the real MCP stdio transport** for stateless
+verbs. With `${CHROME_DEVTOOLS_MCP_BIN}` pointing at a real
+`chrome-devtools-mcp` (e.g. `npx chrome-devtools-mcp@latest`), the bridge:
+1. spawns the upstream MCP server with stdio piped,
+2. sends the `initialize` handshake (protocol version `2024-11-05`),
+3. translates the verb → MCP `tools/call`,
+4. shapes the response into the skill's single-line summary JSON,
+5. exits cleanly.
+
+`uid → eN` translation happens at the adapter boundary (per token-efficient-
+output spec §5) for snapshot output. The original `uid` is kept on each ref
+for traceability.
+
+| Verb | Real-mode behavior |
+|---|---|
+| `open` | `navigate_page {url}` — works |
+| `snapshot` | `take_snapshot` — works; refs translated to `eN` |
+| `eval` | `evaluate_script {script}` — works |
+| `audit` | `lighthouse_audit` — works (60s timeout) |
+| `click`, `fill`, `inspect`, `extract` | exit 41 — needs `eN → uid` persistence across calls (deferred to part **1c-ii**, likely daemonizes the bridge mirroring playwright-lib's IPC daemon) |
+
+Stub mode (`BROWSER_SKILL_LIB_STUB=1`) still works exactly as part-1b — used by the bats suite + CI for adapter contract tests without spawning anything.
 
 ## When the router picks this adapter
 
