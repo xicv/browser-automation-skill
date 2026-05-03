@@ -25,7 +25,10 @@ readonly BROWSER_SKILL_CREDENTIAL_LOADED=1
 # Bump this is a [schema] change; phase-10 introduces migrate-schema.
 readonly BROWSER_SKILL_CREDENTIAL_SCHEMA_VERSION=1
 
-readonly _CREDENTIAL_REQUIRED_FIELDS="schema_version name site account backend created_at"
+# Bash array (not space-separated string) so iteration is IFS-independent.
+# Verb scripts set IFS=$'\n\t' which breaks word-splitting on space-separated
+# strings — using "${arr[@]}" sidesteps that.
+readonly _CREDENTIAL_REQUIRED_FIELDS=(schema_version name site account backend created_at)
 
 _credential_path() {
   printf '%s/%s.json' "${CREDENTIALS_DIR}" "$1"
@@ -50,7 +53,7 @@ credential_save() {
   fi
 
   local field
-  for field in ${_CREDENTIAL_REQUIRED_FIELDS}; do
+  for field in "${_CREDENTIAL_REQUIRED_FIELDS[@]}"; do
     if ! printf '%s' "${meta_json}" | jq -e --arg f "${field}" 'has($f) and (.[$f] != null)' >/dev/null 2>&1; then
       die "${EXIT_USAGE_ERROR}" "credential_save: metadata missing required field '${field}'"
     fi

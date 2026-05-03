@@ -26,6 +26,7 @@ Real browser launches arrive in Phase 3.
 | `list-sessions` | List captured sessions (optionally filter by site) | `… list-sessions --site prod` |
 | `show-session`  | Show session metadata (NEVER cookie/token values) | `… show-session --as prod--admin` |
 | `remove-session`| Typed-name confirmed delete of a captured session | `… remove-session --as prod--admin --yes-i-know` |
+| `creds add`     | Register credential (smart per-OS backend; AP-7 stdin-only) | `printf 'pw' \| … creds-add --site prod --as prod--admin --password-stdin` |
 | `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
 | `open` w/ session | Apply a stored storageState before navigating | `… open --site prod --as prod--admin --url …` |
 | `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |

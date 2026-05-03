@@ -13,6 +13,23 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 2d — `creds add` verb + smart backend select
+
+- [feat] new `scripts/browser-creds-add.sh` — first user-visible auth verb. Registers a credential under `${CREDENTIALS_DIR}/<name>.{json,secret}`. CLI: `creds-add --site SITE --as CRED_NAME --password-stdin [--account ACCOUNT] [--backend keychain|libsecret|plaintext] [--auto-relogin true|false] [--dry-run]`. Validates site exists, cred name safe + not already registered. Auto-detects backend per OS if `--backend` not set.
+- [security] AP-7 STRICT: `--password-stdin` is the **only** password-input path. NO `--password VALUE` flag. Lint-style grep test guards against future regression. Password reaches `credential_set_secret` via stdin pipe — never argv.
+- [feat] new `scripts/lib/secret_backend_select.sh` — smart per-OS backend auto-detection per parent spec §1. `detect_backend` echoes `keychain` (Darwin + `security` on PATH), `libsecret` (Linux + `secret-tool` on PATH), or `plaintext` (fallback). `BROWSER_SKILL_FORCE_BACKEND` env override honored. Does NOT probe D-Bus reachability for libsecret (too brittle); user can override to `plaintext` if their Linux box has no agent.
+- [feat] `scripts/browser-doctor.sh` — new advisory check after adapter aggregation. Walks `${CREDENTIALS_DIR}/*.json` and emits `credentials: N total (keychain: A, libsecret: B, plaintext: C)`. Does NOT increment `problems`; advisory only.
+- [internal] `tests/creds-add.bats` (14 cases) — happy path × 3 backends + auto-detect + validation (existing cred / unknown site / unsafe name / missing required flags) + AP-7 grep guard + `--dry-run` + `--account` override + summary JSON shape. Defensive: setup() exports stub bins for keychain + libsecret unconditionally so no test can fall through to a real OS vault.
+- [internal] `tests/secret_backend_select.bats` (8 cases) — env override, per-OS detection (Darwin/Linux/other) via a `uname -s` shim, missing-binary fallback to plaintext.
+- [internal] `tests/doctor.bats` — added 2 cases: zero-credential state + per-backend breakdown line with hand-written metadata fixture.
+- [bugfix] `scripts/lib/credential.sh` — `_CREDENTIAL_REQUIRED_FIELDS` changed from a space-separated string to a bash array. The string form was IFS-dependent: verb scripts set `IFS=$'\n\t'` (default protective hygiene), which silently broke `for field in ${_CREDENTIAL_REQUIRED_FIELDS}` word-splitting. Symptom: validation reported the entire string as one missing-field name. Array + `[@]` quoting is IFS-independent. Tests in part-2a passed because they ran in a `bash -c` subshell with default IFS; the bug surfaced when the verb script (the first IFS-strict caller) hit `credential_save`.
+- [docs] `SKILL.md` — added `creds add` row to the verbs table.
+- [docs] `docs/superpowers/plans/2026-05-03-phase-05-part-2d-creds-add.md` — phase plan.
+
+NO `creds list/show/remove` this PR — those follow the patterns established here in part 2d-ii. NO `mask.sh` + `--reveal` typed-phrase flow — part 2d-iii. NO `migrate-credential` — part 2e. NO interactive `read -s` password prompt — TTY-aware mocking in bats is complex; deferred. NO first-use plaintext typed-phrase confirmation prompt — lands with the TTY-prompt patterns in 2d-iii.
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/verb_helpers.sh`, `scripts/lib/secret/*.sh` (3 backends, all from parts 2a/2b/2c), every adapter file, `tests/lint.sh`, `tests/router.bats`.
+
 ### Phase 5 part 2c — Linux libsecret backend (secret-tool)
 
 - [feat] new `scripts/lib/secret/libsecret.sh` — third (and final Tier-1) secret backend. Completes the per-OS roster: plaintext + keychain + libsecret. 4-fn API mirrors `keychain.sh` shape; shells to `${LIBSECRET_TOOL_BIN:-secret-tool}`; service prefix `${BROWSER_SKILL_LIBSECRET_SERVICE:-browser-skill}`; account = credential name. `secret_set` clear-then-store for idempotent overwrite; `secret_get` via `lookup`; `secret_delete` swallows missing-item exit-1 from `clear`; `secret_exists` probes via `lookup` to /dev/null.

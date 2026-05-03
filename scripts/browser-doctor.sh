@@ -138,6 +138,28 @@ else
   done
 fi
 
+# --- Credentials count (advisory; never fails doctor) ---
+# Phase 5 part 2d: walk ${CREDENTIALS_DIR}/*.json and report per-backend.
+# .secret files are payload, not metadata, so they're skipped.
+creds_total=0
+creds_keychain=0
+creds_libsecret=0
+creds_plaintext=0
+if [ -d "${CREDENTIALS_DIR}" ]; then
+  shopt -s nullglob
+  for cred_file in "${CREDENTIALS_DIR}"/*.json; do
+    creds_total=$((creds_total + 1))
+    backend="$(jq -r .backend "${cred_file}" 2>/dev/null || printf 'unknown')"
+    case "${backend}" in
+      keychain)  creds_keychain=$((creds_keychain + 1)) ;;
+      libsecret) creds_libsecret=$((creds_libsecret + 1)) ;;
+      plaintext) creds_plaintext=$((creds_plaintext + 1)) ;;
+    esac
+  done
+  shopt -u nullglob
+fi
+ok "credentials: ${creds_total} total (keychain: ${creds_keychain}, libsecret: ${creds_libsecret}, plaintext: ${creds_plaintext})"
+
 duration_ms=$(( $(now_ms) - started_at_ms ))
 
 # Status semantics (§5.3 of extension-model spec).
