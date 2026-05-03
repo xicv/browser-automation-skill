@@ -29,6 +29,7 @@ backend=""
 auto_relogin="true"
 read_stdin=0
 dry_run=0
+yes_plaintext=0
 
 usage() {
   cat <<'USAGE'
@@ -46,6 +47,11 @@ Usage: creds-add --site SITE --as CRED_NAME --password-stdin [options]
   --password-stdin         REQUIRED — read password from stdin (one line);
                             this is the ONLY password-input path. AP-7
                             forbids accepting the password as an argv arg.
+  --yes-i-know-plaintext   acknowledge that the plaintext backend stores
+                            the secret on disk. Required on the FIRST
+                            plaintext credential add; subsequent adds skip
+                            (a marker file at ${CREDENTIALS_DIR}/.plaintext-
+                            acknowledged tracks acknowledgment).
   --dry-run                print planned action; write nothing
   -h, --help               this message
 
@@ -63,6 +69,7 @@ while [ $# -gt 0 ]; do
     --backend)         backend="$2";       shift 2 ;;
     --auto-relogin)    auto_relogin="$2";  shift 2 ;;
     --password-stdin)  read_stdin=1;       shift ;;
+    --yes-i-know-plaintext) yes_plaintext=1; shift ;;
     --dry-run)         dry_run=1;          shift ;;
     -h|--help)         usage; exit 0 ;;
     *)                 die "${EXIT_USAGE_ERROR}" "unknown flag: $1" ;;
@@ -97,6 +104,24 @@ case "${backend}" in
   keychain|libsecret|plaintext) ;;
   *) die "${EXIT_USAGE_ERROR}" "--backend must be one of {keychain, libsecret, plaintext} (got: ${backend})" ;;
 esac
+
+# First-use plaintext gate (per parent spec §1: plaintext is paper security
+# without disk encryption — gate the first add behind an explicit ack).
+# Marker file at ${CREDENTIALS_DIR}/.plaintext-acknowledged (mode 0600)
+# tracks the user's acknowledgment; subsequent adds skip the gate silently.
+if [ "${backend}" = "plaintext" ]; then
+  plaintext_marker="${CREDENTIALS_DIR}/.plaintext-acknowledged"
+  if [ ! -f "${plaintext_marker}" ]; then
+    if [ "${yes_plaintext}" -ne 1 ]; then
+      die "${EXIT_USAGE_ERROR}" \
+        "first plaintext credential requires --yes-i-know-plaintext (or pre-create ${plaintext_marker}); plaintext stores the secret on disk and is paper security without disk encryption — see 'doctor' for FileVault/LUKS status"
+    fi
+    mkdir -p "${CREDENTIALS_DIR}"
+    chmod 700 "${CREDENTIALS_DIR}"
+    ( umask 077; : > "${plaintext_marker}" )
+    chmod 600 "${plaintext_marker}"
+  fi
+fi
 
 # Read the password from stdin. `cat` consumes everything; trailing newlines
 # are preserved verbatim (some users intentionally include them).

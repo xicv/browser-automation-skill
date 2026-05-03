@@ -18,6 +18,14 @@ setup() {
   # without each having to register its own site.
   bash "${SCRIPTS_DIR}/browser-add-site.sh" \
     --name prod --url https://app.example.com >/dev/null 2>&1 || true
+
+  # Pre-create the plaintext-acknowledged marker so existing tests using
+  # plaintext backend don't hit the first-use gate (added in part 2d-iii).
+  # Tests that exercise the gate flow remove this marker explicitly.
+  mkdir -p "${BROWSER_SKILL_HOME}/credentials"
+  chmod 700 "${BROWSER_SKILL_HOME}/credentials"
+  : > "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged"
+  chmod 600 "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged"
 }
 teardown() {
   teardown_temp_home
@@ -114,4 +122,34 @@ run_creds_add() {
   printf '%s' "${summary}" | jq -e '.tool == "none"' >/dev/null
   printf '%s' "${summary}" | jq -e '.status == "ok"' >/dev/null
   printf '%s' "${summary}" | jq -e 'has("why") and has("duration_ms") and has("credential") and has("site") and has("backend")' >/dev/null
+}
+
+# --- First-use plaintext gate (part 2d-iii) ---
+
+@test "creds-add: plaintext + no marker + no flag → exit 2 with hint" {
+  rm -f "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged"
+  run bash -c "printf 'pw' | bash '${SCRIPTS_DIR}/browser-creds-add.sh' --site prod --as prod--first --backend plaintext --password-stdin"
+  [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR (2), got ${status}"
+  printf '%s' "${output}" | grep -q "yes-i-know-plaintext" || fail "error message should mention --yes-i-know-plaintext flag"
+}
+
+@test "creds-add: plaintext + no marker + --yes-i-know-plaintext → succeeds + creates marker" {
+  rm -f "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged"
+  printf 'pw' | run_creds_add --site prod --as prod--first --backend plaintext --password-stdin --yes-i-know-plaintext
+  [ -f "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged" ] || fail "marker should be created"
+  mode="$(file_mode "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged")"
+  [ "${mode}" = "600" ] || fail "marker should be mode 600, got ${mode}"
+}
+
+@test "creds-add: plaintext + marker pre-existing + no flag → succeeds (silent)" {
+  # marker is pre-created by setup(); no need to remove
+  printf 'pw' | run_creds_add --site prod --as prod--silent --backend plaintext --password-stdin
+  [ -f "${BROWSER_SKILL_HOME}/credentials/prod--silent.json" ] || fail "should have succeeded silently"
+}
+
+@test "creds-add: keychain backend skips first-use plaintext gate" {
+  # No marker, no --yes-i-know-plaintext, but backend is keychain — gate doesn't apply.
+  rm -f "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged"
+  printf 'pw-kc' | run_creds_add --site prod --as prod--kc --backend keychain --password-stdin
+  [ -f "${BROWSER_SKILL_HOME}/credentials/prod--kc.json" ] || fail "keychain add should not be gated"
 }

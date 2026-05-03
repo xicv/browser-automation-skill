@@ -79,3 +79,55 @@ _seed_cred() {
   out="$(run_show --as prod--keychain)"
   printf '%s' "${out}" | jq -e '.meta.backend == "keychain"' >/dev/null
 }
+
+# --- --reveal flow ---
+
+_seed_with_secret() {
+  # Seed metadata + write the secret (plaintext backend → file at <name>.secret).
+  local name="$1" secret="$2"
+  _seed_cred "${name}" prod plaintext
+  printf '%s' "${secret}" > "${BROWSER_SKILL_HOME}/credentials/${name}.secret"
+  chmod 600 "${BROWSER_SKILL_HOME}/credentials/${name}.secret"
+}
+
+@test "creds-show --reveal: typed-phrase match → emits secret + secret_masked" {
+  _seed_with_secret prod--admin "password123"
+  out="$(printf 'prod--admin\n' | bash "${SCRIPTS_DIR}/browser-creds-show.sh" --as prod--admin --reveal 2>/dev/null)"
+  printf '%s' "${out}" | jq -e '.why == "reveal"' >/dev/null
+  printf '%s' "${out}" | jq -e '.secret == "password123"' >/dev/null
+  printf '%s' "${out}" | jq -e '.secret_masked == "p*********3"' >/dev/null
+  printf '%s' "${out}" | jq -e '.meta.site == "prod"' >/dev/null
+}
+
+@test "creds-show --reveal: typed-phrase mismatch → exit non-zero, no secret leak" {
+  _seed_with_secret prod--admin "password123"
+  run bash -c "printf 'wrong-name\n' | bash '${SCRIPTS_DIR}/browser-creds-show.sh' --as prod--admin --reveal"
+  [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR, got ${status}"
+  if printf '%s' "${output}" | grep -q 'password123'; then
+    fail "secret value leaked in mismatch error path"
+  fi
+}
+
+@test "creds-show --reveal: works on keychain-backed credential (via stub)" {
+  _seed_cred prod--kc prod keychain
+  printf 'kc-secret-value' | bash -c "
+    set -euo pipefail
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/credential.sh'
+    credential_set_secret prod--kc
+  "
+  out="$(printf 'prod--kc\n' | bash "${SCRIPTS_DIR}/browser-creds-show.sh" --as prod--kc --reveal 2>/dev/null)"
+  printf '%s' "${out}" | jq -e '.secret == "kc-secret-value"' >/dev/null
+  printf '%s' "${out}" | jq -e '.secret_masked == "k*************e"' >/dev/null
+}
+
+@test "creds-show without --reveal: regression guard — no 'secret' key in output" {
+  _seed_with_secret prod--admin "password123"
+  out="$(run_show --as prod--admin)"
+  if printf '%s' "${out}" | jq -e 'has("secret")' >/dev/null 2>&1; then
+    fail "non-reveal path leaked 'secret' key — PRIVACY REGRESSION"
+  fi
+  if printf '%s' "${out}" | jq -e 'has("secret_masked")' >/dev/null 2>&1; then
+    fail "non-reveal path leaked 'secret_masked' key — should be reveal-only"
+  fi
+}

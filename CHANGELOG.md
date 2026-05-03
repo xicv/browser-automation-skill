@@ -13,6 +13,22 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 2d-iii — `mask.sh` + `creds show --reveal` + first-use plaintext gate
+
+- [feat] new `scripts/lib/mask.sh` — reusable masking helper. `mask_string VAL [SHOW_FIRST=1] [SHOW_LAST=1]`. Examples: `"password123"` → `"p*********3"`; short strings (≤2 chars) → all stars (no leak); very-long strings cap at 80 middle stars to keep masked rendering bounded. Used by `creds show --reveal` for the masked preview alongside the unmasked value; reusable for any future verb that needs to render a sensitive value safely.
+- [feat] `scripts/browser-creds-show.sh` — new `--reveal` flag. Default behavior unchanged (metadata only — privacy invariant from part 2d-ii holds). With `--reveal`: typed-phrase confirmation (mirror remove-session UX — user types credential name back via stdin), on match → emit `secret` + `secret_masked` keys alongside `meta`; on mismatch → die `EXIT_USAGE_ERROR`. Mismatch path verified to NOT leak the secret value in error output.
+- [security] `creds show --reveal` works for all 3 backends (plaintext, keychain via stub, libsecret via stub). The masked preview lets the user confirm visually they revealed the right credential without re-leaking the value. Regression guard: `creds show` WITHOUT `--reveal` continues to refuse `secret`/`secret_masked` keys in output.
+- [feat] `scripts/browser-creds-add.sh` — new `--yes-i-know-plaintext` flag + first-use plaintext gate. Per parent spec §1, plaintext is paper security without disk encryption — the first plaintext add now requires explicit acknowledgment. Marker file `${CREDENTIALS_DIR}/.plaintext-acknowledged` (mode 0600) tracks acknowledgment; subsequent plaintext adds skip the gate silently. Non-plaintext backends (keychain/libsecret) unaffected.
+- [internal] `tests/mask.bats` (8 cases) — covers standard / empty / 1-char (no leak) / 2-char (no leak) / 3-char / custom bounds / 200-char (capped output).
+- [internal] `tests/creds-show.bats` (+4 cases) — `--reveal` typed-phrase match (secret + masked emitted), `--reveal` mismatch (no leak in error path), `--reveal` works on keychain backend, regression guard for non-reveal path.
+- [internal] `tests/creds-add.bats` (+4 cases) — plaintext gate refuses without flag, `--yes-i-know-plaintext` bypasses + creates marker, marker-pre-existing path silent, keychain/libsecret backends skip the gate. setup() pre-creates the marker so existing plaintext-backend tests don't hit the gate.
+- [docs] `SKILL.md` — added `creds show --reveal` row; updated `creds add` row to mention `--yes-i-know-plaintext`.
+- [docs] `docs/superpowers/plans/2026-05-03-phase-05-part-2d-iii-mask-and-reveal.md` — phase plan.
+
+After this PR, the auth track's security/UX gaps are closed: secret disclosure is gated behind a typed-phrase confirmation; plaintext-on-disk requires explicit user acknowledgment. The `migrate-credential` cross-backend move (part 2e) is the last remaining auth-track verb.
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/credential.sh`, `scripts/lib/secret/*.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/secret_backend_select.sh`, `scripts/browser-doctor.sh`, `scripts/browser-creds-list.sh`, `scripts/browser-creds-remove.sh`, every adapter file, `tests/lint.sh`.
+
 ### Phase 5 part 2d-ii — `creds list/show/remove` verbs
 
 - [feat] new `scripts/browser-creds-list.sh` — walk `${CREDENTIALS_DIR}` and emit a single-line summary JSON listing all credentials. Optional `--site NAME` filter mirrors `list-sessions`. Each row carries `{credential, site, account, backend, auto_relogin, totp_enabled, created_at}` — metadata only; NEVER includes the secret payload (privacy invariant tested with sentinel canary `sekret-do-not-leak-list`).
