@@ -13,6 +13,21 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 1c — chrome-devtools-mcp real MCP stdio transport (stateless verbs)
+
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs::realDispatch` — implemented. Bridge spawns `${CHROME_DEVTOOLS_MCP_BIN:-chrome-devtools-mcp}` with stdio piped, performs MCP `initialize` handshake (protocol version `2024-11-05`), translates verb argv → `tools/call`, shapes response into skill summary JSON, cleanly shuts down. JSON-RPC 2.0 NDJSON wire protocol per MCP stdio convention.
+- [feat] **Stateless verbs work end-to-end via real MCP**: `open` → `navigate_page`, `snapshot` → `take_snapshot`, `eval` → `evaluate_script`, `audit` → `lighthouse_audit` (60s timeout for lighthouse). uid → eN translation at adapter boundary for snapshot output (per token-efficient-output spec §5); the original upstream `uid` is preserved on each ref for traceability.
+- [feat] **Stateful verbs (click/fill/inspect/extract) return exit 41** with self-healing hint pointing at part 1c-ii. They need eN → uid persistence across calls; without daemon-mode (planned next), each bridge process starts fresh and has no ref map. Hint message specifically calls out part 1c-ii so users know where the capability lands.
+- [internal] new `tests/stubs/mcp-server-stub.mjs` — mock MCP server speaking JSON-RPC 2.0 NDJSON over stdio. Handles `initialize` + `notifications/initialized` + `tools/call` for the 4 stateless tools. Logs each received line to `${MCP_STUB_LOG_FILE}` so bats can assert handshake order. Lets bats run on macos + ubuntu CI without `npx chrome-devtools-mcp@latest` (which needs network + Chrome).
+- [internal] `tests/chrome-devtools-bridge_real.bats` (13 cases) — real-mode integration via mock: BROWSER_SKILL_LIB_STUB=1 regression guard, initialize-before-tools/call ordering verified via stub log, all 4 stateless verbs, all 4 stateful verbs return 41, bad-args paths, missing-MCP-bin path.
+- [bugfix] Initial implementation hit a JS temporal-dead-zone bug — `realDispatch(argv)` was invoked at module top before the `const TIMEOUT_MS` declarations below ran; the async function body's synchronous prelude referenced consts in TDZ → `ReferenceError`. Fix: move the entry-point invocation to the very end of the module (after all consts initialize).
+- [docs] `references/chrome-devtools-mcp-cheatsheet.md` — updated Status section + per-verb real-mode behavior table; deferred-stateful note points at part 1c-ii.
+- [docs] `docs/superpowers/plans/2026-05-03-phase-05-part-1c-cdt-mcp-transport.md` — phase plan.
+
+After this PR, `bash scripts/browser-<verb>.sh --tool=chrome-devtools-mcp` actually works for the 4 stateless verbs against a real upstream MCP server (`npx chrome-devtools-mcp@latest` or any wrapper at `${CHROME_DEVTOOLS_MCP_BIN}`). Routing promotion (Path B) stays deferred to part 1d; verb scripts (audit/extract/inspect un-skip) to part 1e.
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/credential.sh`, `scripts/lib/secret/*.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/secret_backend_select.sh`, `scripts/lib/mask.sh`, `scripts/lib/verb_helpers.sh`, `scripts/lib/tool/chrome-devtools-mcp.sh` (capabilities unchanged), `scripts/browser-doctor.sh`, every `scripts/browser-*.sh`, every other adapter file, `tests/lint.sh`.
+
 ### Phase 5 part 2e — `migrate-credential` cross-backend moves
 
 - [feat] new `scripts/browser-creds-migrate.sh` — move a credential from one backend to another. CLI: `creds-migrate --as CRED_NAME --to BACKEND [--yes-i-know] [--yes-i-know-plaintext] [--dry-run]`. Mirrors `creds-remove`'s typed-name confirmation UX exactly.
