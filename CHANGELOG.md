@@ -13,6 +13,19 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 2d-ii — `creds list/show/remove` verbs
+
+- [feat] new `scripts/browser-creds-list.sh` — walk `${CREDENTIALS_DIR}` and emit a single-line summary JSON listing all credentials. Optional `--site NAME` filter mirrors `list-sessions`. Each row carries `{credential, site, account, backend, auto_relogin, totp_enabled, created_at}` — metadata only; NEVER includes the secret payload (privacy invariant tested with sentinel canary `sekret-do-not-leak-list`).
+- [feat] new `scripts/browser-creds-show.sh` — emit one credential's metadata JSON. NEVER emits the secret value (privacy invariant — bats grep guard with sentinel canary `sekret-do-not-leak-show`). `--reveal` flow with typed-phrase confirmation deferred to part 2d-iii.
+- [feat] new `scripts/browser-creds-remove.sh` — typed-name confirmation delete, mirroring `remove-session` UX exactly. `--yes-i-know` skips prompt; `--dry-run` reports without writing. Calls `credential_delete` which dispatches the secret-removal to the appropriate backend (plaintext: file unlink; keychain: `security delete-generic-password`; libsecret: `secret-tool clear`). Tests exercise all 3 backends via stubs.
+- [internal] `tests/creds-list.bats` (6 cases), `tests/creds-show.bats` (7 cases), `tests/creds-remove.bats` (10 cases) — total 23 new cases. Each setup() unconditionally exports `KEYCHAIN_SECURITY_BIN` + `LIBSECRET_TOOL_BIN` stubs (defensive: preserves the lesson from part 2b's keychain-dialog incident — never let a test fall through to a real OS vault).
+- [docs] `SKILL.md` — added 3 rows: `creds list`, `creds show`, `creds remove`.
+- [docs] `docs/superpowers/plans/2026-05-03-phase-05-part-2d-ii-creds-crud.md` — phase plan.
+
+After this PR, the basic credential CRUD loop is complete: `creds add` (part 2d) → `creds list` / `creds show` (read; metadata-only) → `creds remove` (delete; backend-aware). The `--reveal` flow + `mask.sh` + first-use plaintext typed-phrase prompt land together in part 2d-iii where TTY-prompt patterns get factored. `migrate-credential` cross-backend moves stay in part 2e.
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/credential.sh`, every `scripts/lib/secret/*.sh`, every adapter file, `scripts/browser-doctor.sh`, `scripts/browser-creds-add.sh`, `tests/lint.sh`.
+
 ### Phase 5 part 2d — `creds add` verb + smart backend select
 
 - [feat] new `scripts/browser-creds-add.sh` — first user-visible auth verb. Registers a credential under `${CREDENTIALS_DIR}/<name>.{json,secret}`. CLI: `creds-add --site SITE --as CRED_NAME --password-stdin [--account ACCOUNT] [--backend keychain|libsecret|plaintext] [--auto-relogin true|false] [--dry-run]`. Validates site exists, cred name safe + not already registered. Auto-detects backend per OS if `--backend` not set.
