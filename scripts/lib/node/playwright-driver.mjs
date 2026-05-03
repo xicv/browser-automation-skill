@@ -86,6 +86,8 @@ async function realDispatch(args) {
       return runDaemonStatus();
     case 'login':
       return await runLogin(flags);
+    case 'auto-relogin':
+      return await runAutoRelogin(flags);
     default:
       process.stderr.write(`playwright-driver.mjs: unknown verb '${verb}'\n`);
       process.exit(2);
@@ -268,6 +270,125 @@ async function runLogin(flags) {
     );
     process.exit(30);
   }
+}
+
+// runAutoRelogin — programmatic headless login using stored credentials
+// (phase-5 part 3). Reads NUL-separated `username\0password` from stdin,
+// navigates the site URL, fills best-effort form selectors, clicks submit,
+// captures storageState, writes to --output-path. AP-7: secret never on argv.
+//
+// Selectors are best-effort — common email + password + submit patterns.
+// Sites with non-standard login forms will fail; auth-flow detection at
+// creds-add time (phase-5 part 3-iii) is the long-term fix.
+async function runAutoRelogin(flags) {
+  const url = flags.url;
+  const outputPath = flags['output-path'];
+  if (!url) {
+    process.stderr.write('playwright-driver.mjs::auto-relogin: --url is required\n');
+    process.exit(2);
+  }
+  if (!outputPath) {
+    process.stderr.write('playwright-driver.mjs::auto-relogin: --output-path is required\n');
+    process.exit(2);
+  }
+
+  const credsBlob = await readAllStdin();
+  const sep = credsBlob.indexOf('\0');
+  if (sep === -1) {
+    process.stderr.write(
+      "playwright-driver.mjs::auto-relogin: stdin must be 'username\\0password'\n"
+    );
+    process.exit(2);
+  }
+  const username = credsBlob.slice(0, sep);
+  const password = credsBlob.slice(sep + 1);
+
+  const { chromium } = loadPlaywright();
+  const browser = await chromium.launch({ headless: true });
+  try {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const page = await ctx.newPage();
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+    const usernameSelectors = [
+      'input[type=email]',
+      'input[name=email]',
+      'input[name=username]',
+      'input[autocomplete=username]',
+      'input#email',
+      'input#username',
+    ];
+    const passwordSelectors = [
+      'input[type=password]',
+      'input[name=password]',
+      'input[autocomplete=current-password]',
+      'input#password',
+    ];
+    const submitSelectors = [
+      'button[type=submit]',
+      'input[type=submit]',
+      'button:has-text("Sign in")',
+      'button:has-text("Log in")',
+      'button:has-text("Login")',
+    ];
+
+    await fillFirstMatch(page, usernameSelectors, username, 'username');
+    await fillFirstMatch(page, passwordSelectors, password, 'password');
+    await clickFirstMatch(page, submitSelectors, 'submit');
+
+    // Wait for navigation OR network idle. 15s budget covers most flows.
+    await Promise.race([
+      page.waitForLoadState('networkidle', { timeout: 15000 }),
+      page.waitForURL((u) => u.toString() !== url, { timeout: 15000 }),
+    ]).catch(() => { /* both timed out — capture whatever state we have */ });
+
+    const state = await ctx.storageState();
+    mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
+    writeFileSync(outputPath, JSON.stringify(state, null, 2));
+    chmodSync(outputPath, 0o600);
+
+    process.stdout.write(JSON.stringify({
+      event: 'auto-relogin-saved',
+      output_path: outputPath,
+      cookie_count: state.cookies.length,
+      origin_count: state.origins.length,
+    }) + '\n');
+
+    await browser.close();
+    process.exit(0);
+  } catch (err) {
+    try { await browser.close(); } catch (_) { /* ignore */ }
+    process.stderr.write(
+      `playwright-driver.mjs::auto-relogin: ${err && err.message ? err.message : err}\n`
+    );
+    process.exit(30);
+  }
+}
+
+async function fillFirstMatch(page, selectors, value, label) {
+  for (const sel of selectors) {
+    const el = page.locator(sel).first();
+    if ((await el.count()) > 0) {
+      await el.fill(value);
+      return;
+    }
+  }
+  throw new Error(
+    `auto-relogin: no matching ${label} input among [${selectors.join(', ')}]`
+  );
+}
+
+async function clickFirstMatch(page, selectors, label) {
+  for (const sel of selectors) {
+    const el = page.locator(sel).first();
+    if ((await el.count()) > 0) {
+      await el.click();
+      return;
+    }
+  }
+  throw new Error(
+    `auto-relogin: no matching ${label} button among [${selectors.join(', ')}]`
+  );
 }
 
 function waitForEnterOnStdin() {

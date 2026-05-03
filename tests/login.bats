@@ -35,11 +35,121 @@ teardown() { teardown_temp_home; }
   assert_status "$EXIT_USAGE_ERROR"
 }
 
-@test "login: --auto refused in Phase 2 (clear error message)" {
+# --- --auto (phase-5 part 3) ---
+#
+# These tests cover --auto verb-side validation only. Driver-execution
+# (real-mode headless chromium login) is gated like --interactive's: deferred
+# to manual / future-CI integration testing.
+#
+# All --auto tests that touch a credential pre-create the plaintext-acknowledged
+# marker and stub bins for keychain/libsecret. Defensive: never let a test fall
+# through to a real OS vault (lesson from part 2b).
+
+_setup_auto_test() {
+  setup_temp_home
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" \
+    --name prod --url https://app.example.com >/dev/null
+  export KEYCHAIN_SECURITY_BIN="${STUBS_DIR}/security"
+  export KEYCHAIN_STUB_STORE="${TEST_HOME}/keychain-stub.json"
+  export LIBSECRET_TOOL_BIN="${STUBS_DIR}/secret-tool"
+  export LIBSECRET_STUB_STORE="${TEST_HOME}/libsecret-stub.json"
+  mkdir -p "${BROWSER_SKILL_HOME}/credentials"
+  chmod 700 "${BROWSER_SKILL_HOME}/credentials"
+  : > "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged"
+  chmod 600 "${BROWSER_SKILL_HOME}/credentials/.plaintext-acknowledged"
+}
+
+_seed_auto_cred() {
+  # name, account, auto_relogin (true|false), site
+  local name="$1" account="${2:-alice@example.com}" auto="${3:-true}" site="${4:-prod}"
+  local meta
+  meta="$(jq -nc --arg n "${name}" --arg s "${site}" --arg a "${account}" --argjson ar "${auto}" \
+    '{schema_version:1, name:$n, site:$s, account:$a, backend:"plaintext",
+      auth_flow:"single-step-username-password",
+      auto_relogin:$ar, totp_enabled:false, created_at:"2026-05-03T00:00:00Z"}')"
+  bash -c "
+    set -euo pipefail
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/credential.sh'
+    credential_save '${name}' '${meta}'
+    printf '%s' 'sekret' | credential_set_secret '${name}'
+  "
+}
+
+@test "login --auto: mutually exclusive with --interactive" {
+  _setup_auto_test
   run bash "${SCRIPTS_DIR}/browser-login.sh" \
-    --site prod-app --as x --auto
+    --site prod --as foo --auto --interactive
+  teardown_temp_home
   assert_status "$EXIT_USAGE_ERROR"
-  assert_output_contains "Phase 5"
+  assert_output_contains "mutually exclusive"
+}
+
+@test "login --auto: mutually exclusive with --storage-state-file" {
+  _setup_auto_test
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod --as foo --auto --storage-state-file /tmp/x.json
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "mutually exclusive"
+}
+
+@test "login --auto: --site is required" {
+  _setup_auto_test
+  run bash "${SCRIPTS_DIR}/browser-login.sh" --as foo --auto
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "site"
+}
+
+@test "login --auto: refuses missing credential (exit 23)" {
+  _setup_auto_test
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod --as never-set --auto
+  teardown_temp_home
+  assert_status "$EXIT_SITE_NOT_FOUND"
+  assert_output_contains "credential not found"
+}
+
+@test "login --auto: refuses credential with auto_relogin=false (exit 2)" {
+  _setup_auto_test
+  _seed_auto_cred prod--no-auto alice@example.com false
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod --as prod--no-auto --auto
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "auto_relogin=false"
+}
+
+@test "login --auto: refuses credential bound to a different site (exit 2)" {
+  _setup_auto_test
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" \
+    --name staging --url https://stg.example.com >/dev/null
+  _seed_auto_cred staging--admin alice@example.com true staging
+  # Try to use a staging-bound cred against the prod site
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod --as staging--admin --auto
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "bound to site"
+}
+
+@test "login --auto --dry-run: skips driver invocation, reports planned action" {
+  _setup_auto_test
+  _seed_auto_cred prod--admin alice@example.com true
+  run bash "${SCRIPTS_DIR}/browser-login.sh" \
+    --site prod --as prod--admin --auto --dry-run
+  teardown_temp_home
+  assert_status 0
+  local last_json
+  last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
+  printf '%s' "${last_json}" | jq -e '.verb == "login" and .why == "auto-relogin-dry-run" and .status == "ok" and .would_run == true' >/dev/null
+  printf '%s' "${last_json}" | jq -e '.account == "alice@example.com"' >/dev/null
+  printf '%s' "${last_json}" | jq -e '.session == "prod--admin"' >/dev/null
+  # Privacy: secret value 'sekret' (set by _seed_auto_cred) MUST NOT appear in output
+  if printf '%s\n' "${lines[@]}" | grep -q 'sekret'; then
+    fail "secret value leaked in --auto --dry-run output"
+  fi
 }
 
 @test "login: missing storage-state-file path exits 2" {
