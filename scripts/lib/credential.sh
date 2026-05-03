@@ -139,28 +139,69 @@ _credential_dispatch_backend() {
   local meta backend
   meta="$(credential_load "${name}")"
   backend="$(printf '%s' "${meta}" | jq -r '.backend')"
+  _credential_dispatch_to "${backend}" "${op}" "${name}" "$@"
+}
+
+# _credential_dispatch_to BACKEND OP NAME [...args]
+# Like _credential_dispatch_backend but uses BACKEND directly (instead of
+# reading metadata.backend). Used by credential_migrate_to to write to the
+# new backend BEFORE updating metadata, so a failed new-write doesn't leave
+# the credential in an orphaned state.
+_credential_dispatch_to() {
+  local backend="$1" op="$2" name="$3"
+  shift 3
 
   local lib_dir
   lib_dir="$(dirname "${BASH_SOURCE[0]}")/secret"
 
   case "${backend}" in
-    plaintext)
+    plaintext|keychain|libsecret)
       # shellcheck source=/dev/null
-      source "${lib_dir}/plaintext.sh"
-      "secret_${op}" "${name}" "$@"
-      ;;
-    keychain)
-      # shellcheck source=/dev/null
-      source "${lib_dir}/keychain.sh"
-      "secret_${op}" "${name}" "$@"
-      ;;
-    libsecret)
-      # shellcheck source=/dev/null
-      source "${lib_dir}/libsecret.sh"
+      source "${lib_dir}/${backend}.sh"
       "secret_${op}" "${name}" "$@"
       ;;
     *)
       die "${EXIT_USAGE_ERROR}" "credential ${name}: unknown backend '${backend}'"
       ;;
   esac
+}
+
+# credential_migrate_to NAME NEW_BACKEND
+# Move secret material from current backend to NEW_BACKEND, then update
+# metadata. Fail-safe ordering:
+#   1. Read secret from old backend
+#   2. Write secret to new backend (if this fails, original intact)
+#   3. Delete secret from old backend (failure → degraded but not fatal;
+#      verb script logs a warning, both backends transiently hold the secret)
+#   4. Update metadata.backend → new (atomic tmp+mv)
+# Refuses if new == old (no-op). Refuses unknown target backend.
+credential_migrate_to() {
+  local name="$1" new_backend="$2"
+  assert_safe_name "${name}" "credential-name"
+
+  case "${new_backend}" in
+    plaintext|keychain|libsecret) ;;
+    *) die "${EXIT_USAGE_ERROR}" "credential_migrate_to: unknown target backend '${new_backend}'" ;;
+  esac
+
+  local old_meta old_backend
+  old_meta="$(credential_load "${name}")"
+  old_backend="$(printf '%s' "${old_meta}" | jq -r '.backend')"
+
+  if [ "${old_backend}" = "${new_backend}" ]; then
+    die "${EXIT_USAGE_ERROR}" "credential ${name}: backend already '${new_backend}' (no-op refused)"
+  fi
+
+  local secret
+  secret="$(_credential_dispatch_to "${old_backend}" get "${name}")"
+  printf '%s' "${secret}" | _credential_dispatch_to "${new_backend}" set "${name}"
+  _credential_dispatch_to "${old_backend}" delete "${name}" || true
+
+  local new_meta path tmp
+  new_meta="$(printf '%s' "${old_meta}" | jq --arg b "${new_backend}" '.backend = $b')"
+  path="$(_credential_path "${name}")"
+  tmp="${path}.tmp.$$"
+  ( umask 077; printf '%s\n' "${new_meta}" | jq . > "${tmp}" )
+  chmod 600 "${tmp}"
+  mv "${tmp}" "${path}"
 }

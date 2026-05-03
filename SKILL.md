@@ -31,6 +31,7 @@ Real browser launches arrive in Phase 3.
 | `creds show`    | Show credential metadata (NEVER secret value) | `… creds-show --as prod--admin` |
 | `creds show` (reveal) | After typed-phrase confirmation, include secret + masked preview | `printf 'prod--admin\n' \| … creds-show --as prod--admin --reveal` |
 | `creds remove`  | Typed-name confirmed delete of a credential | `… creds-remove --as prod--admin --yes-i-know` |
+| `creds migrate` | Move credential to a different backend (fail-safe ordering) | `… creds-migrate --as prod--admin --to keychain --yes-i-know` |
 | `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
 | `open` w/ session | Apply a stored storageState before navigating | `… open --site prod --as prod--admin --url …` |
 | `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |

@@ -246,3 +246,94 @@ run_lib() {
   ")"
   [ "${result}" = "1" ] || fail "expected schema_version 1, got '${result}'"
 }
+
+# --- credential_migrate_to (part 2e) ---
+
+# Defensive setup: stub bins for keychain + libsecret. Avoids any test
+# falling through to a real OS vault during cross-backend migrations.
+_setup_migrate_stubs() {
+  export KEYCHAIN_SECURITY_BIN="${STUBS_DIR}/security"
+  export KEYCHAIN_STUB_STORE="${TEST_HOME}/keychain-stub.json"
+  export LIBSECRET_TOOL_BIN="${STUBS_DIR}/secret-tool"
+  export LIBSECRET_STUB_STORE="${TEST_HOME}/libsecret-stub.json"
+}
+
+@test "credential.sh: credential_migrate_to plaintext → keychain (cross-backend secret roundtrip)" {
+  _setup_migrate_stubs
+  meta="$(_meta_json prod--admin plaintext)"
+  run_lib "credential_save prod--admin '${meta}'"
+  printf 'pw-roundtrip-1' | run_lib "credential_set_secret prod--admin"
+  run_lib "credential_migrate_to prod--admin keychain"
+  # Old (plaintext) artifact gone:
+  [ ! -f "${BROWSER_SKILL_HOME}/credentials/prod--admin.secret" ] || fail "plaintext .secret should be removed"
+  # New (keychain) entry present in stub:
+  val="$(jq -r '."prod--admin"' "${KEYCHAIN_STUB_STORE}")"
+  [ "${val}" = "pw-roundtrip-1" ] || fail "expected 'pw-roundtrip-1' in keychain stub, got '${val}'"
+  # Metadata.backend updated:
+  backend="$(jq -r .backend "${BROWSER_SKILL_HOME}/credentials/prod--admin.json")"
+  [ "${backend}" = "keychain" ] || fail "metadata.backend should be 'keychain', got '${backend}'"
+}
+
+@test "credential.sh: credential_migrate_to keychain → libsecret" {
+  _setup_migrate_stubs
+  meta="$(_meta_json prod--svc keychain)"
+  run_lib "credential_save prod--svc '${meta}'"
+  printf 'pw-cross-vault' | run_lib "credential_set_secret prod--svc"
+  run_lib "credential_migrate_to prod--svc libsecret"
+  # Keychain stub: gone
+  val="$(jq -r '."prod--svc" // "GONE"' "${KEYCHAIN_STUB_STORE}")"
+  [ "${val}" = "GONE" ] || fail "keychain entry should be removed, got '${val}'"
+  # Libsecret stub: present
+  val="$(jq -r '."prod--svc"' "${LIBSECRET_STUB_STORE}")"
+  [ "${val}" = "pw-cross-vault" ] || fail "expected 'pw-cross-vault' in libsecret stub, got '${val}'"
+  backend="$(jq -r .backend "${BROWSER_SKILL_HOME}/credentials/prod--svc.json")"
+  [ "${backend}" = "libsecret" ] || fail "metadata.backend should be 'libsecret', got '${backend}'"
+}
+
+@test "credential.sh: credential_migrate_to libsecret → plaintext (creates .secret file)" {
+  _setup_migrate_stubs
+  meta="$(_meta_json prod--ls libsecret)"
+  run_lib "credential_save prod--ls '${meta}'"
+  printf 'pw-back-to-plain' | run_lib "credential_set_secret prod--ls"
+  run_lib "credential_migrate_to prod--ls plaintext"
+  [ -f "${BROWSER_SKILL_HOME}/credentials/prod--ls.secret" ] || fail "plaintext .secret should be created"
+  out="$(cat "${BROWSER_SKILL_HOME}/credentials/prod--ls.secret")"
+  [ "${out}" = "pw-back-to-plain" ] || fail "expected 'pw-back-to-plain', got '${out}'"
+}
+
+@test "credential.sh: credential_migrate_to refuses same-backend (no-op)" {
+  meta="$(_meta_json prod--admin plaintext)"
+  run_lib "credential_save prod--admin '${meta}'"
+  printf 'pw' | run_lib "credential_set_secret prod--admin"
+  run bash -c "
+    set +e
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/credential.sh'
+    credential_migrate_to prod--admin plaintext
+  "
+  [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR (2), got ${status}"
+}
+
+@test "credential.sh: credential_migrate_to refuses unknown target backend" {
+  meta="$(_meta_json prod--admin plaintext)"
+  run_lib "credential_save prod--admin '${meta}'"
+  printf 'pw' | run_lib "credential_set_secret prod--admin"
+  run bash -c "
+    set +e
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/credential.sh'
+    credential_migrate_to prod--admin made-up-vault
+  "
+  [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR (2), got ${status}"
+}
+
+@test "credential.sh: credential_migrate_to preserves secret value byte-exactly" {
+  _setup_migrate_stubs
+  meta="$(_meta_json prod--bytes plaintext)"
+  run_lib "credential_save prod--bytes '${meta}'"
+  # Try a tricky value: special chars + numbers + symbols
+  printf 'p@ss!w0rd_with$pecial#chars-and+symbols' | run_lib "credential_set_secret prod--bytes"
+  run_lib "credential_migrate_to prod--bytes keychain"
+  val="$(jq -r '."prod--bytes"' "${KEYCHAIN_STUB_STORE}")"
+  [ "${val}" = "p@ss!w0rd_with\$pecial#chars-and+symbols" ] || fail "expected exact byte preservation, got '${val}'"
+}
