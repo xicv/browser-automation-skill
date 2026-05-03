@@ -13,6 +13,22 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 2e — `migrate-credential` cross-backend moves
+
+- [feat] new `scripts/browser-creds-migrate.sh` — move a credential from one backend to another. CLI: `creds-migrate --as CRED_NAME --to BACKEND [--yes-i-know] [--yes-i-know-plaintext] [--dry-run]`. Mirrors `creds-remove`'s typed-name confirmation UX exactly.
+- [feat] `scripts/lib/credential.sh` — new `credential_migrate_to NAME NEW_BACKEND` public primitive + new `_credential_dispatch_to BACKEND OP NAME` internal helper. Existing `_credential_dispatch_backend` refactored to delegate to the new helper (DRY: one dispatcher implementation, two entry points).
+- [security] **Fail-safe ordering**: `credential_migrate_to` reads from old backend → writes to new backend → deletes from old → updates metadata. If the new-backend write fails (e.g. keychain unavailable), the original credential remains intact. If the old-backend delete fails AFTER a successful new-write, both backends transiently hold the secret — verb logs a warning, doesn't crash; user can manually clean up.
+- [security] **First-use plaintext gate inherited from creds-add**: migrating TO plaintext requires `--yes-i-know-plaintext` (or a pre-existing acknowledgment marker). Closes the bypass-via-migrate hole that the part-2d-iii insight flagged. Successful migrate-to-plaintext also touches the marker so subsequent plaintext ops skip the gate silently (consistent with creds-add behavior).
+- [security] Privacy invariant: summary JSON NEVER includes the secret value. Sentinel canary `sekret-do-not-leak-migrate` asserted absent from output.
+- [internal] `tests/credential.bats` (+6 cases) — `credential_migrate_to` lib coverage: each backend pair (plaintext↔keychain↔libsecret), same-backend refusal, unknown-backend refusal, byte-exact secret preservation across migration.
+- [internal] `tests/creds-migrate.bats` (11 cases) — verb integration: 3 backend pair migrations + plaintext-gate inheritance (refusal + acceptance) + same-backend refusal + unknown credential + unknown backend + typed-name mismatch + `--dry-run` + summary JSON shape + privacy canary.
+- [docs] `SKILL.md` — added `creds migrate` row.
+- [docs] `docs/superpowers/plans/2026-05-03-phase-05-part-2e-migrate-credential.md` — phase plan.
+
+**Phase 5 part 2 is now feature-complete.** All 5 credentials verbs shipped (`creds add/list/show/remove/migrate`), all 3 Tier-1 backends real (plaintext/keychain/libsecret), smart per-OS auto-detect, masked reveal, first-use plaintext gate uniformly enforced (creds-add + creds-migrate), doctor surface. Only auto-relogin (Phase 5 part 3) and TOTP (Phase 5 part 4) remain in the broader phase.
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/secret/*.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/secret_backend_select.sh`, `scripts/lib/mask.sh`, `scripts/browser-doctor.sh`, every other `scripts/browser-*.sh` (existing 4 creds verbs unchanged), every adapter file, `tests/lint.sh`.
+
 ### Phase 5 part 2d-iii — `mask.sh` + `creds show --reveal` + first-use plaintext gate
 
 - [feat] new `scripts/lib/mask.sh` — reusable masking helper. `mask_string VAL [SHOW_FIRST=1] [SHOW_LAST=1]`. Examples: `"password123"` → `"p*********3"`; short strings (≤2 chars) → all stars (no leak); very-long strings cap at 80 middle stars to keep masked rendering bounded. Used by `creds show --reveal` for the masked preview alongside the unmasked value; reusable for any future verb that needs to render a sensitive value safely.
