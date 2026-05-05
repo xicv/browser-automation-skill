@@ -149,6 +149,14 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'hover': {
+      const uid = args.uid ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `hovered ${uid}` }],
+        isError: false,
+      });
+      break;
+    }
     case 'select_option': {
       const uid = args.uid ?? '<missing>';
       let by;
