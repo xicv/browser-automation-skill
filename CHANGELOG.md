@@ -13,6 +13,18 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 3-ii (cont.) — Wire `invoke_with_retry` into all remaining session-aware verbs
+
+- [feat] `scripts/browser-open.sh` / `browser-click.sh` / `browser-fill.sh` / `browser-inspect.sh` / `browser-audit.sh` / `browser-extract.sh` — all 6 swap their `tool_${verb}` adapter call for `invoke_with_retry ${verb}`. Mechanical churn replicating the pattern shipped for `browser-snapshot.sh` in the previous sub-PR. Now session expiry → silent re-login → retry is uniform across the verb surface.
+- [security] No new exit code paths; no new privacy boundaries. The retry helper's gate (`_can_auto_relogin`: requires ARG_SITE + cred metadata `auto_relogin: true`) means non-session invocations are no-ops — preserving the existing behavior of every verb when invoked without `--site`.
+- [internal] No new tests — `tests/verb-retry.bats` already exercises the helper logic. Per-verb integration would require adapter-side runtime expiry detection (which still doesn't ship — adapters don't yet emit 22 mid-flight). When that lands, integration tests follow.
+
+`browser-login.sh` deliberately NOT wired: login IS the relogin mechanism. Wrapping it in retry would risk infinite recursion (login fails → retry → login --auto → calls login → …). Login's own error handling is the right boundary.
+
+After this PR, any verb invoked with `--site` (and a cred backing the resolved cred name) gets transparent session-expiry recovery for free. The harness is complete; adapter-side detection is the next layered concern.
+
+Untouched per scope discipline: `scripts/browser-snapshot.sh` (already wired in part 3-ii's helper PR), `scripts/browser-login.sh` (intentionally unwired), `scripts/browser-doctor.sh` + every other non-session verb, all adapters, router rules.
+
 ### Phase 5 part 3-ii — Transparent verb-retry on EXIT_SESSION_EXPIRED (helper + snapshot wired)
 
 - [feat] new `scripts/lib/verb_helpers.sh::invoke_with_retry VERB ARGS...` — wraps `tool_${VERB} ARGS`, returning its stdout + exit code. On `EXIT_SESSION_EXPIRED` (22), if a credential with `auto_relogin: true` exists for the resolved `--site` / `--as`, runs `bash browser-login.sh --auto` silently then retries the verb EXACTLY ONCE. Per parent spec §4.4 — every verb call → silent re-login → retry, exactly one attempt. Caller sees a single stdout + final rc.
