@@ -23,6 +23,7 @@ ROUTING_RULES=(
   rule_audit_or_perf
   rule_inspect_default
   rule_extract_default
+  rule_press_default
   rule_default_navigation
 )
 
@@ -119,6 +120,19 @@ rule_extract_default() {
   case "${verb}" in
     extract)
       printf 'chrome-devtools-mcp\t%s\n' "extract default per Appendix B"
+      ;;
+  esac
+}
+
+# Phase-6 part 1: keyboard press routes to chrome-devtools-mcp. cdt-mcp's
+# `press_key` MCP tool is the canonical input mechanism; playwright-cli/lib
+# don't declare press today (could be added later via their respective
+# `keyboard.press` APIs).
+rule_press_default() {
+  local verb="$1"
+  case "${verb}" in
+    press)
+      printf 'chrome-devtools-mcp\t%s\n' "press default (only cdt-mcp declares press today)"
       ;;
   esac
 }

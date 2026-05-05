@@ -280,6 +280,12 @@ async function runStatelessViaDaemon(verb, verbArgs) {
     case 'audit':
       msg = { verb: 'audit' };
       break;
+    case 'press': {
+      const key = verbArgs[0] ?? '';
+      if (!key) throw withExit(2, "verb 'press' requires a --key value");
+      msg = { verb: 'press', key };
+      break;
+    }
     default:
       throw withExit(2, `unknown verb: ${verb}`);
   }
@@ -850,6 +856,21 @@ async function daemonChildMain() {
         const summary = await dispatchExtract(mcpCall, msg);
         return { ...summary, attached_to_daemon: true };
       }
+      case 'press': {
+        // Phase-6 part 1: keyboard press. MCP `press_key` accepts a `key`
+        // arg (e.g. "Enter", "Tab", "Escape", "ArrowDown", "Cmd+S").
+        // Stateless w.r.t. refMap — acts on the focused element or page.
+        const result = await mcpCall('press_key', { key: msg.key });
+        return {
+          verb: 'press',
+          tool: 'chrome-devtools-mcp',
+          why: 'mcp/press_key',
+          status: result?.isError ? 'error' : 'ok',
+          key: msg.key,
+          message: extractText(result),
+          attached_to_daemon: true,
+        };
+      }
       default:
         return { event: 'error', status: 'error', message: `unknown verb '${msg.verb}'` };
     }
@@ -914,6 +935,11 @@ function translateVerb(verb, args) {
     }
     case 'audit':
       return { tool: 'lighthouse_audit', args: {}, verb };
+    case 'press': {
+      const key = args[0] ?? '';
+      if (!key) throw withExit(2, "verb 'press' requires a --key value");
+      return { tool: 'press_key', args: { key }, verb };
+    }
     case 'click':
     case 'fill':
     case 'inspect':
@@ -955,6 +981,10 @@ function shapeResponse(verb, tx, result) {
       const text = extractText(result);
       const scores = result?.scores ?? null;
       return { ...base, message: text, scores };
+    }
+    case 'press': {
+      const text = extractText(result);
+      return { ...base, key: tx.args.key, message: text };
     }
     default:
       return { ...base, raw: result };

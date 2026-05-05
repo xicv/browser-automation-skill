@@ -120,6 +120,15 @@ run_real() {
   printf '%s' "${out}" | jq -e '.value | contains("document.title")' >/dev/null
 }
 
+@test "bridge real-mode (Phase 6): press --key Enter dispatches press_key tool (one-shot)" {
+  out="$(run_real press Enter)"
+  printf '%s' "${out}" | jq -e '.verb == "press"' >/dev/null
+  printf '%s' "${out}" | jq -e '.tool == "chrome-devtools-mcp"' >/dev/null
+  printf '%s' "${out}" | jq -e '.why == "mcp/press_key"' >/dev/null
+  printf '%s' "${out}" | jq -e '.key == "Enter"' >/dev/null
+  printf '%s' "${out}" | jq -e '.message | contains("pressed Enter")' >/dev/null
+}
+
 @test "bridge real-mode: open with no URL exits non-zero" {
   run bash -c "CHROME_DEVTOOLS_MCP_BIN='${STUB}' node '${BRIDGE}' open"
   [ "${status}" -ne 0 ] || fail "expected non-zero exit when --url missing"

@@ -16,6 +16,7 @@
 //   - tools/call name=list_console_messages   → 2 canned messages (phase-5 part 1e-ii)
 //   - tools/call name=list_network_requests   → 1 canned request (phase-5 part 1e-ii)
 //   - tools/call name=take_screenshot         → canned path (phase-5 part 1e-ii)
+//   - tools/call name=press_key               → "pressed <key>" content (phase-6 part 1)
 //   - any other method/tool            → JSON-RPC error -32601
 //
 // Logs each received message (one JSON per line) to ${MCP_STUB_LOG_FILE}
@@ -136,6 +137,14 @@ function handleToolsCall(id, params) {
       reply(id, {
         content: [{ type: 'text', text: 'screenshot saved' }],
         path: '/tmp/cdt-mcp-stub-screenshot.png',
+        isError: false,
+      });
+      break;
+    }
+    case 'press_key': {
+      const key = args.key ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `pressed ${key}` }],
         isError: false,
       });
       break;
