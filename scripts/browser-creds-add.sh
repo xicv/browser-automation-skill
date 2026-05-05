@@ -30,6 +30,7 @@ auto_relogin="true"
 auth_flow="single-step-username-password"
 enable_totp=0
 yes_totp=0
+totp_secret_stdin=0
 read_stdin=0
 dry_run=0
 yes_plaintext=0
@@ -60,6 +61,10 @@ Usage: creds-add --site SITE --as CRED_NAME --password-stdin [options]
                             (TOTP shared secrets MUST go through OS keychain /
                             libsecret per parent spec §1).
   --yes-i-know-totp        acknowledgment for --enable-totp.
+  --totp-secret-stdin      read base32 TOTP shared secret from stdin AFTER
+                            the password (separated by NUL byte). Stored at
+                            the <name>:totp backend slot. Requires
+                            --enable-totp. Phase-5 part 4-ii.
   --password-stdin         REQUIRED — read password from stdin (one line);
                             this is the ONLY password-input path. AP-7
                             forbids accepting the password as an argv arg.
@@ -87,6 +92,7 @@ while [ $# -gt 0 ]; do
     --auth-flow)       auth_flow="$2";     shift 2 ;;
     --enable-totp)     enable_totp=1;      shift ;;
     --yes-i-know-totp) yes_totp=1;         shift ;;
+    --totp-secret-stdin) totp_secret_stdin=1; shift ;;
     --password-stdin)  read_stdin=1;       shift ;;
     --yes-i-know-plaintext) yes_plaintext=1; shift ;;
     --dry-run)         dry_run=1;          shift ;;
@@ -115,8 +121,18 @@ esac
 if [ "${enable_totp}" = "1" ] && [ "${yes_totp}" = "0" ]; then
   die "${EXIT_USAGE_ERROR}" "--enable-totp requires --yes-i-know-totp (TOTP shared secrets are highly sensitive)"
 fi
+if [ "${totp_secret_stdin}" = "1" ] && [ "${enable_totp}" = "0" ]; then
+  die "${EXIT_USAGE_ERROR}" "--totp-secret-stdin requires --enable-totp"
+fi
 
 assert_safe_name "${as}" "credential-name"
+
+# Phase 5 part 4-ii: prevent collisions with internal TOTP slot names.
+# Internal slots use `<as>__totp` suffix; if a user picks a cred name ending
+# in `__totp`, that user's password slot would alias another cred's TOTP slot.
+case "${as}" in
+  *__totp) die "${EXIT_USAGE_ERROR}" "credential name '${as}' reserved suffix '__totp' (collides with TOTP slot of cred '${as%__totp}')" ;;
+esac
 [ -z "${account}" ] && account="${site}@example.com"
 
 if ! site_exists "${site}"; then
@@ -162,9 +178,23 @@ if [ "${backend}" = "plaintext" ]; then
   fi
 fi
 
-# Read the password from stdin. `cat` consumes everything; trailing newlines
-# are preserved verbatim (some users intentionally include them).
-password="$(cat)"
+# Read stdin. When --totp-secret-stdin is set, stdin is `password\0totp_secret`
+# (NUL-separated, AP-7: secrets never on argv); otherwise it's just the password.
+# Bash `$(cat)` strips embedded NULs ("warning: ignored null byte"), so use
+# `read -r -d ''` which reads up to a NUL delimiter without losing bytes.
+totp_secret=""
+if [ "${totp_secret_stdin}" = "1" ]; then
+  IFS= read -r -d '' password || \
+    die "${EXIT_USAGE_ERROR}" "--totp-secret-stdin: stdin must be 'password\\0totp_secret' (no NUL found)"
+  # Second chunk: EOF-terminated (no trailing NUL required); `read` returns
+  # non-zero on EOF-before-delim but still populates the variable.
+  IFS= read -r -d '' totp_secret || true
+  if [ -z "${totp_secret}" ]; then
+    die "${EXIT_USAGE_ERROR}" "--totp-secret-stdin: stdin must be 'password\\0totp_secret' (got only one chunk)"
+  fi
+else
+  password="$(cat)"
+fi
 
 started_at_ms="$(now_ms)"
 
@@ -204,6 +234,12 @@ credential_save "${as}" "${meta_json}"
 
 # Pipe the password into the backend via stdin (AP-7 — never argv).
 printf '%s' "${password}" | credential_set_secret "${as}"
+
+# Phase 5 part 4-ii: store TOTP shared secret in the same backend at the
+# `<as>:totp` slot when --totp-secret-stdin was provided.
+if [ -n "${totp_secret}" ]; then
+  printf '%s' "${totp_secret}" | credential_set_totp_secret "${as}"
+fi
 
 if [ "${backend}" = "plaintext" ]; then
   warn "credential '${as}' stored via plaintext backend at ${CREDENTIALS_DIR}/${as}.secret (mode 0600)"

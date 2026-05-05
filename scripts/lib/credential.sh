@@ -129,6 +129,36 @@ credential_get_secret() {
   _credential_dispatch_backend "$1" get
 }
 
+# Phase 5 part 4-ii: TOTP shared secret stored in the SAME backend as the
+# password but under a sibling slot named "<NAME>__totp". The double-
+# underscore suffix is allowed by assert_safe_name's regex
+# (^[A-Za-z0-9_-]+$) so backends can validate the slot name through their
+# normal path. Each cred's metadata still has only one entry; the backend
+# has two secret slots (password + TOTP). Edge: a user-facing cred named
+# `<X>__totp` would collide with `<X>`'s TOTP slot — `creds-add` rejects
+# names containing `__totp` to prevent this.
+
+credential_set_totp_secret() {
+  _credential_dispatch_backend_internal "$1__totp" set "$1"
+}
+
+credential_get_totp_secret() {
+  _credential_dispatch_backend_internal "$1__totp" get "$1"
+}
+
+# Internal: dispatch with a slot name SLOT_NAME but read backend from
+# CRED_NAME's metadata. Used by TOTP slot operations where the slot name
+# differs from the cred name but they share the backend.
+_credential_dispatch_backend_internal() {
+  local slot_name="$1" op="$2" cred_name="$3"
+  shift 3
+
+  local meta backend
+  meta="$(credential_load "${cred_name}")"
+  backend="$(printf '%s' "${meta}" | jq -r '.backend')"
+  _credential_dispatch_to "${backend}" "${op}" "${slot_name}" "$@"
+}
+
 # Internal: dispatch a secret op (set/get/delete/exists) to the backend
 # named by the credential's metadata.backend field. Backend lib is sourced
 # on-demand to keep the parent shell's namespace clean.

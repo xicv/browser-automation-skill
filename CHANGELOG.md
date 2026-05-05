@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 4-ii — TOTP code generation + secret persistence
+
+- [feat] new `scripts/lib/node/totp.mjs` — pure-node RFC 6238 TOTP code generator. Uses node's `crypto.createHmac` (no external deps). Reads base32-encoded shared secret from stdin; emits 6-digit code on stdout for the current 30s window. Supports env-var overrides for tests: `TOTP_TIME_T` (override "now"), `TOTP_DIGITS`, `TOTP_PERIOD`, `TOTP_ALG`. **Validated against all 5 RFC 6238 §A test vectors** for SHA1.
+- [feat] `scripts/lib/credential.sh` — new `credential_set_totp_secret NAME` + `credential_get_totp_secret NAME` API. TOTP shared secret stored in the same backend as the password but under a sibling slot named `<NAME>__totp` (double-underscore suffix is allowed by `assert_safe_name`'s regex `^[A-Za-z0-9_-]+$` so backends validate the slot name through their normal path). Each cred's metadata still has only one entry; the backend has two secret slots (password + TOTP).
+- [feat] `scripts/browser-creds-add.sh` — new `--totp-secret-stdin` flag. Reads `password\0totp_secret` from stdin (NUL-separated, AP-7: secrets never on argv). Requires `--enable-totp`. Uses `read -r -d ''` because `$(cat)` strips embedded NUL bytes ("warning: ignored null byte"). Stores TOTP secret via `credential_set_totp_secret` after the regular password write.
+- [feat] new `scripts/browser-creds-totp.sh` verb — `--as CRED_NAME` reads stored TOTP secret, pipes it to `totp.mjs`, emits 6-digit code on stdout. Refuses if cred is not totp_enabled. Refuses unknown cred (EXIT_SITE_NOT_FOUND). Privacy invariant: shared secret never appears in stdout. `--dry-run` skips code generation.
+- [security] Edge collision guard: `creds-add` rejects user-facing names matching `*__totp` to prevent collision with the internal slot naming convention. (E.g. user can't create a cred named `prod--admin__totp` because it would alias `prod--admin`'s TOTP slot.)
+- [internal] new `tests/totp-codegen.bats` (8 cases) — 5 RFC 6238 §A test vectors, default 6-digit length, empty-stdin rejection, invalid-base32 rejection.
+- [internal] new `tests/creds-totp.bats` (9 cases) — `--totp-secret-stdin` mutex with `--enable-totp`; missing-NUL-chunk rejection; happy-path stores in keychain stub at `<name>__totp` slot; `creds-totp` produces 6-digit code; refuses non-totp creds; `--as` required; unknown cred → EXIT_SITE_NOT_FOUND; `--dry-run` skips; **privacy canary** — shared secret never appears in stdout.
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-4-ii-totp-codegen.md` — phase plan.
+
+After this PR, an agent with a TOTP-enabled credential can run `bash scripts/browser-creds-totp.sh --as prod--admin` and get a current 6-digit code, then type/fill it into a 2FA challenge field. Auto-replay (login --auto generates the code automatically when 2FA detected) is **part 4-iii** — the final auth-track sub-part.
+
+**Out of scope (deferred):**
+- Auto-replay in `login --auto` after 2FA detection — part 4-iii. Wires `credential_get_totp_secret` + `totp.mjs` into the playwright-driver after `detect2FA` triggers.
+- `creds rotate-totp` verb — part 4-iv. Re-enrollment when service forces a new TOTP secret.
+- TTY-only / `--allow-non-tty` gate on `creds-totp` stdout — codes are short-lived (30s) but could leak via shell history. Could land as a 4-ii cont.
+
+Untouched per scope discipline: `scripts/browser-login.sh` (auto-replay is part 4-iii), every other verb script, all adapters, router rules.
+
 ### Phase 5 part 4-i — TOTP foundation: `--enable-totp` flag at `creds add` time
 
 - [feat] `scripts/browser-creds-add.sh` — new `--enable-totp` flag persists `totp_enabled: true` in cred metadata. Required co-flags: `--yes-i-know-totp` (typed acknowledgment that TOTP shared secrets are highly sensitive). Refuses `--backend plaintext` (TOTP secrets must go through OS keychain / libsecret per parent spec §1 — plaintext on-disk storage of a TOTP shared secret means anyone with read access can generate auth codes for the lifetime of the secret).
