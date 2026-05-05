@@ -115,8 +115,10 @@ async function realDispatch(args) {
   if (verb === 'daemon-stop')   return runDaemonStop();
   if (verb === 'daemon-status') return runDaemonStatus();
 
-  // Stateful verbs (click / fill / select / hover) require a running daemon.
-  if (verb === 'click' || verb === 'fill' || verb === 'select' || verb === 'hover') {
+  // Stateful verbs (click / fill / select / hover / drag) require a running
+  // daemon — refMap precondition.
+  if (verb === 'click' || verb === 'fill' || verb === 'select'
+      || verb === 'hover' || verb === 'drag') {
     return await runStatefulViaDaemon(verb, verbArgs);
   }
 
@@ -230,6 +232,19 @@ async function runStatefulViaDaemon(verb, verbArgs) {
         `(run: node chrome-devtools-bridge.mjs daemon-start)\n`
     );
     process.exit(41);
+  }
+
+  // Drag has 2-ref argv shape: `drag <src-ref> <dst-ref>`; all other stateful
+  // verbs use the single-ref shape `<verb> <ref> [...rest]`.
+  if (verb === 'drag') {
+    const srcRef = verbArgs[0];
+    const dstRef = verbArgs[1];
+    if (!srcRef || !dstRef) {
+      throw withExit(2, "drag requires both <src-ref> and <dst-ref> (eN values)");
+    }
+    const reply = await ipcCall({ verb: 'drag', src_ref: srcRef, dst_ref: dstRef });
+    emitReply(reply);
+    process.exit(reply.status === 'error' ? 30 : 0);
   }
 
   const ref = verbArgs[0];
@@ -931,6 +946,50 @@ async function daemonChildMain() {
           timeout: msg.timeout ?? null,
           message: extractText(result),
           attached_to_daemon: true,
+        };
+      }
+      case 'drag': {
+        // Phase-6 part 5: pointer drag from src → dst. Both refs translated
+        // via refMap to uids. MCP `drag` tool accepts {src_uid, dst_uid}.
+        if (!refMap) {
+          return {
+            event: 'error',
+            verb: 'drag',
+            status: 'error',
+            message: 'no refs (run snapshot first)',
+          };
+        }
+        const srcEntry = refMap.find((r) => r.id === msg.src_ref);
+        const dstEntry = refMap.find((r) => r.id === msg.dst_ref);
+        if (!srcEntry) {
+          return {
+            event: 'error',
+            verb: 'drag',
+            src_ref: msg.src_ref,
+            status: 'error',
+            message: `src ref '${msg.src_ref}' not found in last snapshot (${refMap.length} refs available)`,
+          };
+        }
+        if (!dstEntry) {
+          return {
+            event: 'error',
+            verb: 'drag',
+            dst_ref: msg.dst_ref,
+            status: 'error',
+            message: `dst ref '${msg.dst_ref}' not found in last snapshot`,
+          };
+        }
+        const result = await mcpCall('drag', { src_uid: srcEntry.uid, dst_uid: dstEntry.uid });
+        return {
+          verb: 'drag',
+          tool: 'chrome-devtools-mcp',
+          why: 'mcp/drag',
+          status: result?.isError ? 'error' : 'ok',
+          src_ref: srcEntry.id,
+          src_uid: srcEntry.uid,
+          dst_ref: dstEntry.id,
+          dst_uid: dstEntry.uid,
+          message: extractText(result),
         };
       }
       case 'hover': {
