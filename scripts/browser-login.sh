@@ -122,6 +122,7 @@ if [ "${auto}" -eq 1 ]; then
   cred_account="$(printf '%s' "${cred_meta}" | jq -r .account)"
   cred_auto="$(printf '%s' "${cred_meta}" | jq -r .auto_relogin)"
   cred_auth_flow="$(printf '%s' "${cred_meta}" | jq -r '.auth_flow // "single-step-username-password"')"
+  cred_totp_enabled="$(printf '%s' "${cred_meta}" | jq -r '.totp_enabled // false')"
 
   if [ "${cred_site}" != "${site}" ]; then
     die "${EXIT_USAGE_ERROR}" "credential ${as} is bound to site '${cred_site}', not '${site}'"
@@ -155,19 +156,32 @@ if [ "${auto}" -eq 1 ]; then
   ok "auto-relogin: launching headless Chromium at ${site_url} as ${cred_account}"
 
   # Pipe `account\0password` to driver stdin. AP-7: secret never on argv.
+  # Phase-5 part 4-iii: when cred is totp_enabled, append `\0totp_secret` so
+  # the driver can replay TOTP automatically after detect2FA fires.
   set +e
-  { printf '%s\0' "${cred_account}"; credential_get_secret "${as}"; } | \
-    node "${SCRIPT_DIR}/lib/node/playwright-driver.mjs" auto-relogin \
-      --url "${site_url}" --output-path "${ss_file}"
+  if [ "${cred_totp_enabled}" = "true" ]; then
+    {
+      printf '%s\0' "${cred_account}"
+      credential_get_secret "${as}"
+      printf '\0'
+      credential_get_totp_secret "${as}"
+    } | node "${SCRIPT_DIR}/lib/node/playwright-driver.mjs" auto-relogin \
+          --url "${site_url}" --output-path "${ss_file}"
+  else
+    { printf '%s\0' "${cred_account}"; credential_get_secret "${as}"; } | \
+      node "${SCRIPT_DIR}/lib/node/playwright-driver.mjs" auto-relogin \
+        --url "${site_url}" --output-path "${ss_file}"
+  fi
   driver_rc=${PIPESTATUS[1]}
   set -e
   if [ "${driver_rc}" = "${EXIT_AUTH_INTERACTIVE_REQUIRED}" ]; then
-    # Phase-5 part 3-iv: driver detected a 2FA challenge. Tell the user to
-    # use --interactive (the only path that supports human-driven 2FA
-    # entry today; TOTP support is part 4).
+    # Phase-5 part 3-iv: driver detected a 2FA challenge that it couldn't
+    # auto-replay (no totp_enabled cred OR replay failed). Tell the user to
+    # either store a TOTP secret (creds-add --enable-totp) or fall back to
+    # --interactive.
     rm -f "${ss_file}"
     die "${EXIT_AUTH_INTERACTIVE_REQUIRED}" \
-        "site requires 2FA / interactive challenge — re-run with --interactive (or wait for phase-5 part 4 TOTP)"
+        "site requires 2FA / interactive challenge — re-run with --interactive (or store a TOTP secret with creds-add --enable-totp --totp-secret-stdin)"
   fi
   if [ "${driver_rc}" -ne 0 ]; then
     rm -f "${ss_file}"

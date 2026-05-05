@@ -13,6 +13,20 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 4-iii — `login --auto` TOTP auto-replay (closes auth track)
+
+- [feat] `scripts/lib/node/totp-core.mjs` — extracted from `totp.mjs` so other modules can import the same `totpAt` / `base32Decode` primitives. CLI `totp.mjs` is now a thin shim. Both share zero-dep RFC 6238 logic; existing 8 RFC test vectors still pass.
+- [feat] `scripts/lib/node/playwright-driver.mjs::runAutoRelogin` — when stdin includes a 3rd NUL-separated chunk (TOTP shared secret), and `detect2FA(page)` fires after the username+password submit, the driver imports `totpAt` from `totp-core.mjs`, generates the current code, fills the OTP field via best-effort selectors (`input[autocomplete="one-time-code"]`, `input[name*="otp" i]`, etc.), submits, awaits navigation, then captures `storageState` (the normal happy path). When TOTP secret absent: existing exit-25 path.
+- [feat] `scripts/browser-login.sh::--auto` — when cred metadata `totp_enabled: true`, appends `\0` + TOTP secret to the stdin pipe. Fully transparent — non-totp creds preserve the 2-chunk stdin protocol unchanged.
+- [feat] **End-to-end auto-relogin for 2FA-protected sites.** Agent registers a TOTP-enabled cred once (`creds-add --enable-totp --yes-i-know-totp --totp-secret-stdin`). On any session-aware verb that hits `EXIT_SESSION_EXPIRED`, the verb's transparent retry (part 3-ii) → `login --auto` → driver detects 2FA → driver auto-replays TOTP → captures fresh storageState → verb retries successfully. **Zero agent intervention** for sites with TOTP-only 2FA.
+- [internal] Driver test-mode hook `BROWSER_SKILL_DRIVER_TEST_TOTP_REPLAY=1` short-circuits to a "totp-replayed" path that exercises the totp-core import + emits an `auto-relogin-totp-replayed` event without launching a real Chrome. Lets bats verify the bash-side stdin-mux + totp-core wiring.
+- [internal] `tests/login.bats` (+2 cases) — `_seed_totp_cred` helper creates a totp_enabled cred via `credential_set_totp_secret`. Test 1: totp_enabled cred → driver receives 3rd stdin chunk + emits totp-replayed event. Test 2: non-totp cred → 2 chunks (regression dry-run path).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-4-iii-totp-auto-replay.md` — phase plan.
+
+After this PR, the **auth track is fully end-to-end**: passwords-only sites work via part 3 + 3-ii; 2FA sites with stored TOTP work via 4-iii. The only remaining auth-track item is `creds rotate-totp` (part 4-iv) for service-forced TOTP re-enrollment.
+
+Untouched per scope discipline: `scripts/lib/credential.sh` (already had `credential_get_totp_secret` from part 4-ii), `scripts/lib/secret/*.sh`, every other verb script, all adapters, router rules.
+
 ### Phase 5 part 4-ii — TOTP code generation + secret persistence
 
 - [feat] new `scripts/lib/node/totp.mjs` — pure-node RFC 6238 TOTP code generator. Uses node's `crypto.createHmac` (no external deps). Reads base32-encoded shared secret from stdin; emits 6-digit code on stdout for the current 30s window. Supports env-var overrides for tests: `TOTP_TIME_T` (override "now"), `TOTP_DIGITS`, `TOTP_PERIOD`, `TOTP_ALG`. **Validated against all 5 RFC 6238 §A test vectors** for SHA1.

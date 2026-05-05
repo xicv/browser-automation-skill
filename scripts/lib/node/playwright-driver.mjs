@@ -305,16 +305,52 @@ async function runAutoRelogin(flags) {
     process.exit(25);
   }
 
+  // Phase-5 part 4-iii test hook: BROWSER_SKILL_DRIVER_TEST_TOTP_REPLAY=1
+  // short-circuits the browser launch with an artificial "TOTP auto-replay
+  // succeeded" path — generates the code via totp-core (so the import path
+  // is wired correctly), writes an empty storageState, exits 0. Lets bats
+  // verify the bash side passes the 3rd stdin chunk.
+  if (process.env.BROWSER_SKILL_DRIVER_TEST_TOTP_REPLAY === '1') {
+    const credsBlobTest = await readAllStdin();
+    const chunks = credsBlobTest.split('\0');
+    if (chunks.length < 3 || !chunks[2]) {
+      process.stderr.write(
+        'playwright-driver.mjs::auto-relogin (test-totp): 3rd stdin chunk (totp_secret) missing\n'
+      );
+      process.exit(2);
+    }
+    const { totpAt } = await import('./totp-core.mjs');
+    const tTest = process.env.TOTP_TIME_T
+      ? parseInt(process.env.TOTP_TIME_T, 10)
+      : Math.floor(Date.now() / 1000);
+    const code = totpAt(chunks[2], tTest);
+    mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
+    writeFileSync(outputPath, JSON.stringify({ cookies: [], origins: [] }));
+    chmodSync(outputPath, 0o600);
+    process.stdout.write(JSON.stringify({
+      event: 'auto-relogin-totp-replayed',
+      output_path: outputPath,
+      totp_code_length: code.length,
+    }) + '\n');
+    process.exit(0);
+  }
+
   const credsBlob = await readAllStdin();
   const sep = credsBlob.indexOf('\0');
   if (sep === -1) {
     process.stderr.write(
-      "playwright-driver.mjs::auto-relogin: stdin must be 'username\\0password'\n"
+      "playwright-driver.mjs::auto-relogin: stdin must be 'username\\0password' (or 'username\\0password\\0totp_secret' for totp-enabled creds)\n"
     );
     process.exit(2);
   }
   const username = credsBlob.slice(0, sep);
-  const password = credsBlob.slice(sep + 1);
+  // After password — find optional 3rd chunk (TOTP shared secret) for
+  // phase-5 part 4-iii auto-replay. When present, after detect2FA fires the
+  // driver fills the OTP field with the generated code instead of exiting 25.
+  const afterUser = credsBlob.slice(sep + 1);
+  const sep2 = afterUser.indexOf('\0');
+  const password = sep2 === -1 ? afterUser : afterUser.slice(0, sep2);
+  const totpSecret = sep2 === -1 ? null : afterUser.slice(sep2 + 1);
 
   const { chromium } = loadPlaywright();
   const browser = await chromium.launch({ headless: true });
@@ -360,17 +396,56 @@ async function runAutoRelogin(flags) {
     // one-time-code input or 2FA-related text. Best-effort — non-standard
     // 2FA flows won't be caught and will fall through to the normal capture
     // path (which will likely return an unauthenticated session).
+    // Phase-5 part 4-iii: if a TOTP shared secret was provided in stdin
+    // (3rd NUL chunk), generate the current code, fill the OTP field, submit,
+    // and continue to capture storageState. Otherwise exit 25 as before.
     if (await detect2FA(page)) {
-      try { await browser.close(); } catch (_) { /* ignore */ }
-      process.stderr.write(
-        'playwright-driver.mjs::auto-relogin: 2FA challenge detected — interactive login required\n'
-      );
-      process.stdout.write(JSON.stringify({
-        event: 'auto-relogin-2fa-required',
-        reason: 'site requires interactive 2FA / one-time-code',
-        url: page.url(),
-      }) + '\n');
-      process.exit(25);
+      if (totpSecret) {
+        try {
+          const { totpAt } = await import('./totp-core.mjs');
+          const t = process.env.TOTP_TIME_T
+            ? parseInt(process.env.TOTP_TIME_T, 10)
+            : Math.floor(Date.now() / 1000);
+          const code = totpAt(totpSecret, t);
+          const otpSelectors = [
+            'input[autocomplete="one-time-code"]',
+            'input[name*="otp" i]',
+            'input[name*="code" i]',
+            'input[name*="verification" i]',
+            'input#otp', 'input#code',
+          ];
+          await fillFirstMatch(page, otpSelectors, code, 'OTP');
+          await clickFirstMatch(page, [
+            'button[type=submit]',
+            'input[type=submit]',
+            'button:has-text("Verify")',
+            'button:has-text("Continue")',
+            'button:has-text("Submit")',
+          ], 'OTP-submit');
+          await Promise.race([
+            page.waitForLoadState('networkidle', { timeout: 15000 }),
+            page.waitForURL(() => true, { timeout: 15000 }),
+          ]).catch(() => { /* both timed out */ });
+          // Fall through to the normal storageState capture below.
+        } catch (err) {
+          try { await browser.close(); } catch (_) { /* ignore */ }
+          process.stderr.write(
+            `playwright-driver.mjs::auto-relogin: TOTP replay failed: ${err && err.message ? err.message : err}\n`
+          );
+          process.exit(30);
+        }
+      } else {
+        try { await browser.close(); } catch (_) { /* ignore */ }
+        process.stderr.write(
+          'playwright-driver.mjs::auto-relogin: 2FA challenge detected — interactive login required (or store a TOTP secret with creds-add --enable-totp)\n'
+        );
+        process.stdout.write(JSON.stringify({
+          event: 'auto-relogin-2fa-required',
+          reason: 'site requires interactive 2FA / one-time-code',
+          url: page.url(),
+        }) + '\n');
+        process.exit(25);
+      }
     }
 
     const state = await ctx.storageState();
