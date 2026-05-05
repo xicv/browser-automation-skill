@@ -32,11 +32,33 @@ for traceability.
 
 | Verb | Real-mode behavior |
 |---|---|
-| `open` | `navigate_page {url}` — works |
-| `snapshot` | `take_snapshot` — works; refs translated to `eN` |
+| `open` | `navigate_page {url}` — works (one-shot, or via daemon when running) |
+| `snapshot` | `take_snapshot` — works; refs translated to `eN`. When daemon is running, refMap is cached server-side so subsequent `click` / `fill` resolve `eN → uid` |
 | `eval` | `evaluate_script {script}` — works |
 | `audit` | `lighthouse_audit` — works (60s timeout) |
-| `click`, `fill`, `inspect`, `extract` | exit 41 — needs `eN → uid` persistence across calls (deferred to part **1c-ii**, likely daemonizes the bridge mirroring playwright-lib's IPC daemon) |
+| `click`, `fill` | works **via daemon** (phase-05 part 1c-ii) — `daemon-start` first, then `snapshot`, then `click eN` / `fill eN ...`. Without daemon → exit 41 with hint |
+| `inspect`, `extract` | exit 41 — bundled with their verb scripts in phase-05 part 1e |
+
+### Daemon mode (phase-05 part 1c-ii)
+
+`daemon-start` spawns a detached node child that holds ONE long-lived MCP
+server child + the `eN ↔ uid` ref map + a TCP loopback IPC server. Verb
+clients connect over loopback (Unix sun_path 104-char cap on macOS bats temp
+paths — TCP loopback with ephemeral port sidesteps it). State written to
+`${BROWSER_SKILL_HOME}/cdt-mcp-daemon.json` (mode 0600, dir 0700).
+
+```bash
+node scripts/lib/node/chrome-devtools-bridge.mjs daemon-start
+node scripts/lib/node/chrome-devtools-bridge.mjs open https://example.com
+node scripts/lib/node/chrome-devtools-bridge.mjs snapshot
+node scripts/lib/node/chrome-devtools-bridge.mjs click e1
+node scripts/lib/node/chrome-devtools-bridge.mjs daemon-stop
+```
+
+`daemon-status` reports `daemon-running` / `daemon-not-running`. `daemon-stop`
+when none is a no-op success. Idempotent `daemon-start` returns
+`daemon-already-running`. Daemon stderr lands at
+`${BROWSER_SKILL_HOME}/cdt-mcp-daemon.log` (mode 0600).
 
 Stub mode (`BROWSER_SKILL_LIB_STUB=1`) still works exactly as part-1b — used by the bats suite + CI for adapter contract tests without spawning anything.
 
@@ -160,13 +182,12 @@ node -e "const{createHash}=require('crypto'); \
 
 ## Limitations (current state)
 
-- **Real MCP transport deferred to part 1c.** Bridge throws on real-mode
-  invocation; only stub mode works today.
 - **No router promotion.** Per anti-pattern AP-4, this PR ships dark only.
   Promotion is part 1d.
-- **No verb scripts yet.** `scripts/browser-audit.sh` and
+- **No `inspect` / `extract` verbs yet.** `scripts/browser-audit.sh` and
   `scripts/browser-extract.sh` don't exist; `tests/browser-inspect.bats` is
-  still skipped. Verb-side wiring is phase-05 part 1e.
+  still skipped. Verb-side wiring (and daemon dispatch for these two) is
+  phase-05 part 1e.
 - **No session loading.** Chrome's `--user-data-dir` mechanism (different
   from playwright-lib's `storageState`) is phase-05 part 1f.
 
