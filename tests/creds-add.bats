@@ -187,3 +187,30 @@ run_creds_add() {
   [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR, got ${status}"
   printf '%s' "${output}" | grep -q "must be one of" || fail "error should list valid values"
 }
+
+# --- Phase 5 part 4-i: --enable-totp plumbing ----------------------------
+
+@test "creds-add (4-i): --enable-totp without --yes-i-know-totp fails EXIT_USAGE_ERROR" {
+  run bash -c "printf 'pw' | bash '${SCRIPTS_DIR}/browser-creds-add.sh' --site prod --as prod--totp --backend keychain --password-stdin --enable-totp"
+  [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR, got ${status}"
+  printf '%s' "${output}" | grep -q "yes-i-know-totp" || fail "error should mention --yes-i-know-totp ack"
+}
+
+@test "creds-add (4-i): --enable-totp + --backend plaintext fails EXIT_USAGE_ERROR" {
+  run bash -c "printf 'pw' | bash '${SCRIPTS_DIR}/browser-creds-add.sh' --site prod --as prod--totp --backend plaintext --password-stdin --enable-totp --yes-i-know-totp"
+  [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR, got ${status}"
+  printf '%s' "${output}" | grep -q "forbids --backend plaintext" || fail "error should explain plaintext refusal"
+}
+
+@test "creds-add (4-i): --enable-totp + keychain + --yes-i-know-totp persists totp_enabled=true" {
+  printf 'pw' | run_creds_add --site prod --as prod--totp --backend keychain --password-stdin --enable-totp --yes-i-know-totp
+  [ -f "${BROWSER_SKILL_HOME}/credentials/prod--totp.json" ] || fail "cred metadata not written"
+  enabled="$(jq -r .totp_enabled "${BROWSER_SKILL_HOME}/credentials/prod--totp.json")"
+  [ "${enabled}" = "true" ] || fail "totp_enabled should be true, got ${enabled}"
+}
+
+@test "creds-add (4-i): no --enable-totp → totp_enabled defaults to false (regression)" {
+  printf 'pw' | run_creds_add --site prod --as prod--no-totp --backend plaintext --password-stdin
+  enabled="$(jq -r .totp_enabled "${BROWSER_SKILL_HOME}/credentials/prod--no-totp.json")"
+  [ "${enabled}" = "false" ] || fail "totp_enabled should default to false, got ${enabled}"
+}
