@@ -115,10 +115,10 @@ async function realDispatch(args) {
   if (verb === 'daemon-stop')   return runDaemonStop();
   if (verb === 'daemon-status') return runDaemonStatus();
 
-  // Stateful verbs (click / fill / select / hover / drag) require a running
-  // daemon — refMap precondition.
+  // Stateful verbs (click / fill / select / hover / drag / upload) require a
+  // running daemon — refMap precondition.
   if (verb === 'click' || verb === 'fill' || verb === 'select'
-      || verb === 'hover' || verb === 'drag') {
+      || verb === 'hover' || verb === 'drag' || verb === 'upload') {
     return await runStatefulViaDaemon(verb, verbArgs);
   }
 
@@ -249,6 +249,17 @@ async function runStatefulViaDaemon(verb, verbArgs) {
 
   const ref = verbArgs[0];
   if (!ref) throw withExit(2, `verb '${verb}' requires a ref (eN)`);
+
+  if (verb === 'upload') {
+    // Phase-6 part 6: argv shape is `upload <ref> <path>` (path comes second).
+    // Security validation already done bash-side (existence, regular-file,
+    // sensitive-pattern reject); bridge just forwards.
+    const path = verbArgs[1];
+    if (!path) throw withExit(2, "upload requires <path>");
+    const reply = await ipcCall({ verb: 'upload', ref, path });
+    emitReply(reply);
+    process.exit(reply.status === 'error' ? 30 : 0);
+  }
 
   if (verb === 'click') {
     const reply = await ipcCall({ verb: 'click', ref });
@@ -946,6 +957,41 @@ async function daemonChildMain() {
           timeout: msg.timeout ?? null,
           message: extractText(result),
           attached_to_daemon: true,
+        };
+      }
+      case 'upload': {
+        // Phase-6 part 6: file upload to <input type=file>. eN→uid translation
+        // + path forwarded to MCP `upload_file` tool. Bash-side validates the
+        // path before reaching the daemon (existence + regular-file + reject
+        // sensitive patterns); bridge just forwards.
+        if (!refMap) {
+          return {
+            event: 'error',
+            verb: 'upload',
+            status: 'error',
+            message: 'no refs (run snapshot first)',
+          };
+        }
+        const entry = refMap.find((r) => r.id === msg.ref);
+        if (!entry) {
+          return {
+            event: 'error',
+            verb: 'upload',
+            ref: msg.ref,
+            status: 'error',
+            message: `ref '${msg.ref}' not found in last snapshot (${refMap.length} refs available)`,
+          };
+        }
+        const result = await mcpCall('upload_file', { uid: entry.uid, path: msg.path });
+        return {
+          verb: 'upload',
+          tool: 'chrome-devtools-mcp',
+          why: 'mcp/upload_file',
+          status: result?.isError ? 'error' : 'ok',
+          ref: entry.id,
+          uid: entry.uid,
+          path: msg.path,
+          message: extractText(result),
         };
       }
       case 'drag': {

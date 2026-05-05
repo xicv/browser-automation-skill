@@ -13,6 +13,28 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 6 — `upload` verb (`<input type=file>` upload with path security)
+
+- [feat] new `scripts/browser-upload.sh` verb — `--ref eN` + `--path PATH`. Routes to chrome-devtools-mcp via new `rule_upload_default`. Stateful (refMap precondition).
+- [security] **Path security validation, bash-side BEFORE adapter dispatch:**
+  1. Path must exist and be a regular file (not dir, not device).
+  2. Path must be readable by the current user.
+  3. Path must NOT match common sensitive patterns (`*.ssh/*`, `*/.aws/credentials`, `*.env`, `*credentials*`, `*/private_key*`, `*/id_rsa*`/`id_ed25519*`/`id_ecdsa*`).
+  4. Override sensitive-pattern reject via `--allow-sensitive` ack flag (covers legit "upload my GPG key" use cases).
+  5. Resolve to canonical path via `realpath`/`readlink -f` (eliminates symlink shenanigans) before forwarding to MCP.
+- [feat] `scripts/lib/router.sh::rule_upload_default` — verb=`upload` → chrome-devtools-mcp.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `upload` declared in capabilities (`flags: ["--ref", "--path"]`); new `tool_upload` dispatcher.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs::runStatefulViaDaemon` — `upload` early-return branch (parallel to drag's 2-arg shape) parses `<ref> <path>`. Daemon dispatch resolves ref → uid, calls MCP `upload_file` with `{uid, path}`. Path is forwarded as-is (already validated bash-side).
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `upload_file` handler echoes `uploaded <path> to <uid>`.
+- [internal] new `tests/browser-upload.bats` (12 cases) — missing-ref, missing-path, nonexistent-path, dir-not-file, unreadable-file, SSH-key reject, .env reject, --allow-sensitive bypass, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+2) — daemon happy via uid translation, no-daemon exit-41.
+- [docs] `SKILL.md` — `upload` row added (auto-regenerated).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-06-part-6-upload.md` — phase plan.
+
+After this PR, `bash scripts/browser-upload.sh --ref e3 --path ~/Downloads/file.pdf` works end-to-end (with daemon). Sensitive-path defense protects against agent-misdirection attacks where a webpage's instructions try to coerce uploading SSH keys / .env files / credentials.
+
+Phase 6 progress: **6 of 8 verbs** (press / select / hover / wait / drag / upload). Remaining: route / tab-*.
+
 ### Phase 6 part 5 — `drag` verb (pointer drag from src → dst by refs)
 
 - [feat] new `scripts/browser-drag.sh` verb — `--src-ref eA` + `--dst-ref eB` (both required). Routes to chrome-devtools-mcp via new `rule_drag_default`. Stateful — refMap precondition for **both** refs (mirrors click/select shape, with two-ref translation).

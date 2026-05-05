@@ -175,6 +175,15 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'upload_file': {
+      const uid = args.uid ?? '<missing>';
+      const path = args.path ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `uploaded ${path} to ${uid}` }],
+        isError: false,
+      });
+      break;
+    }
     case 'select_option': {
       const uid = args.uid ?? '<missing>';
       let by;
