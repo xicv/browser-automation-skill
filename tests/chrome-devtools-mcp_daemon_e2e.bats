@@ -46,7 +46,10 @@ teardown() {
   # State file written 0600 under BROWSER_SKILL_HOME.
   state_file="${BROWSER_SKILL_HOME}/cdt-mcp-daemon.json"
   [ -f "${state_file}" ] || fail "state file not written: ${state_file}"
-  perms="$(stat -f '%Lp' "${state_file}" 2>/dev/null || stat -c '%a' "${state_file}")"
+  # GNU first (Linux), BSD fallback (macOS). Reverse order is broken on Linux:
+  # `stat -f` there means "filesystem status" — succeeds and dumps verbose
+  # filesystem block instead of failing → fallback never runs (see common.sh:186).
+  perms="$(stat -c '%a' "${state_file}" 2>/dev/null || stat -f '%Lp' "${state_file}" 2>/dev/null)"
   [ "${perms}" = "600" ] || fail "expected mode 600, got ${perms}"
 }
 
