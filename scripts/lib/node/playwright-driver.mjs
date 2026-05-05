@@ -292,6 +292,19 @@ async function runAutoRelogin(flags) {
     process.exit(2);
   }
 
+  // Phase-5 part 3-iv test hook: bats sets BROWSER_SKILL_DRIVER_TEST_2FA=1
+  // to short-circuit the browser launch and exit 25 (EXIT_AUTH_INTERACTIVE_
+  // REQUIRED). Lets bats verify the bash-side propagation without a real
+  // Chrome + 2FA challenge page. Production callers never set this.
+  if (process.env.BROWSER_SKILL_DRIVER_TEST_2FA === '1') {
+    process.stderr.write('playwright-driver.mjs::auto-relogin: 2FA challenge detected (test-mode)\n');
+    process.stdout.write(JSON.stringify({
+      event: 'auto-relogin-2fa-required',
+      reason: 'site requires interactive 2FA / one-time-code',
+    }) + '\n');
+    process.exit(25);
+  }
+
   const credsBlob = await readAllStdin();
   const sep = credsBlob.indexOf('\0');
   if (sep === -1) {
@@ -342,6 +355,24 @@ async function runAutoRelogin(flags) {
       page.waitForURL((u) => u.toString() !== url, { timeout: 15000 }),
     ]).catch(() => { /* both timed out — capture whatever state we have */ });
 
+    // Phase-5 part 3-iv: detect 2FA challenge pages and exit 25 instead of
+    // capturing a useless storageState. Heuristic: post-submit landing has a
+    // one-time-code input or 2FA-related text. Best-effort — non-standard
+    // 2FA flows won't be caught and will fall through to the normal capture
+    // path (which will likely return an unauthenticated session).
+    if (await detect2FA(page)) {
+      try { await browser.close(); } catch (_) { /* ignore */ }
+      process.stderr.write(
+        'playwright-driver.mjs::auto-relogin: 2FA challenge detected — interactive login required\n'
+      );
+      process.stdout.write(JSON.stringify({
+        event: 'auto-relogin-2fa-required',
+        reason: 'site requires interactive 2FA / one-time-code',
+        url: page.url(),
+      }) + '\n');
+      process.exit(25);
+    }
+
     const state = await ctx.storageState();
     mkdirSync(dirname(outputPath), { recursive: true, mode: 0o700 });
     writeFileSync(outputPath, JSON.stringify(state, null, 2));
@@ -363,6 +394,45 @@ async function runAutoRelogin(flags) {
     );
     process.exit(30);
   }
+}
+
+// detect2FA — best-effort heuristic for whether the current page is a 2FA
+// challenge. Checks (in order): one-time-code autocomplete attribute, common
+// OTP/code field names, page text matching 2FA keywords. Returns true on
+// any match. Does NOT cover SMS-prompt fallbacks or push-notification flows
+// (those typically show a "waiting" UI rather than an input field).
+async function detect2FA(page) {
+  // 1. Standard autocomplete attribute (RFC).
+  if ((await page.locator('input[autocomplete="one-time-code"]').count()) > 0) {
+    return true;
+  }
+  // 2. Common OTP/code field names.
+  const otpSelectors = [
+    'input[name*="otp" i]',
+    'input[name*="code" i]',
+    'input[name*="verification" i]',
+    'input[name*="two_factor" i]',
+    'input[name*="2fa" i]',
+    'input#otp',
+    'input#code',
+  ];
+  for (const sel of otpSelectors) {
+    if ((await page.locator(sel).count()) > 0) return true;
+  }
+  // 3. Page text heuristics.
+  const bodyText = await page.locator('body').textContent({ timeout: 2000 }).catch(() => '');
+  if (!bodyText) return false;
+  const lower = bodyText.toLowerCase();
+  const phrases = [
+    'two-factor', 'two factor', '2fa',
+    'verification code', 'one-time code', 'one-time password',
+    'authenticator app', 'authenticator code',
+    'enter the code', 'enter code',
+  ];
+  for (const p of phrases) {
+    if (lower.includes(p)) return true;
+  }
+  return false;
 }
 
 async function fillFirstMatch(page, selectors, value, label) {

@@ -270,6 +270,21 @@ _seed_auto_cred() {
   assert_output_contains "auth_flow=custom"
 }
 
+# --- Phase 5 part 3-iv: 2FA detection → exit 25 ---------------------------
+
+@test "login --auto (3-iv): driver returning 25 propagates as EXIT_AUTH_INTERACTIVE_REQUIRED with hint" {
+  _setup_auto_test
+  _seed_auto_cred prod--2fa alice@example.com true prod
+  # Test hook: driver short-circuits to exit 25 before launching browser.
+  BROWSER_SKILL_DRIVER_TEST_2FA=1 \
+    run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as prod--2fa --auto
+  teardown_temp_home
+  [ "${status}" = "${EXIT_AUTH_INTERACTIVE_REQUIRED}" ] \
+    || fail "expected status ${EXIT_AUTH_INTERACTIVE_REQUIRED}, got ${status}"
+  printf '%s' "${output}" | grep -q "2FA" || fail "error must mention 2FA"
+  printf '%s' "${output}" | grep -q "interactive" || fail "error must hint --interactive"
+}
+
 @test "login --auto (3-iii): single-step-username-password still works (regression — dry-run path)" {
   _setup_auto_test
   _seed_auto_cred prod--ss alice@example.com true prod single-step-username-password

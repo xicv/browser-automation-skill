@@ -13,6 +13,23 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 3-iv — 2FA detection in `login --auto` → exit 25
+
+- [feat] `scripts/lib/node/playwright-driver.mjs::runAutoRelogin` — new `detect2FA(page)` heuristic runs after the submit-form-and-wait sequence. Checks (in order): `input[autocomplete="one-time-code"]`, common OTP/code field name attributes (`input[name*="otp" i]`, etc.), and page text for 2FA keywords (`two-factor`, `verification code`, `authenticator app`, etc.). On match: closes the browser, emits `auto-relogin-2fa-required` JSON, exits 25 (matches bash `EXIT_AUTH_INTERACTIVE_REQUIRED`).
+- [feat] `scripts/browser-login.sh::--auto` — propagates driver exit 25 as `EXIT_AUTH_INTERACTIVE_REQUIRED` with hint `"site requires 2FA / interactive challenge — re-run with --interactive (or wait for phase-5 part 4 TOTP)"`. Other non-zero exit codes from the driver still propagate as `EXIT_TOOL_CRASHED`.
+- [internal] `scripts/lib/node/playwright-driver.mjs` — test-mode env var `BROWSER_SKILL_DRIVER_TEST_2FA=1` short-circuits the driver to exit 25 immediately (no browser launch). Lets bats verify the bash-side propagation without a real Chrome + 2FA challenge page. Production callers never set this.
+- [internal] `tests/login.bats` (+1 case) — driver returning 25 propagates as `EXIT_AUTH_INTERACTIVE_REQUIRED` with the hint mentioning "2FA" and "interactive".
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-3-iv-2fa-detection.md` — phase plan.
+
+**Heuristic limitations (out of scope):**
+- Push-notification 2FA flows (no input field, just a "waiting" UI) — won't be caught by selectors. The driver will time out at the navigate-after-submit wait and capture an unauthenticated session. User sees the failure later when verbs return EXIT_SESSION_EXPIRED.
+- SMS-prompt fallbacks where the page asks "did you receive a code?" before showing the input — depends on text-keyword match; coverage varies.
+- Real-world detection coverage validated by users; the heuristic is best-effort.
+
+After this PR, an agent that triggers `login --auto` against a 2FA-protected site sees a clean `EXIT_AUTH_INTERACTIVE_REQUIRED` (25) within seconds rather than a 15s timeout + cryptic "no matching submit button" error. TOTP-driven 2FA (where the agent itself can produce the code) is part 4.
+
+Untouched per scope discipline: every other adapter, router rules, common.sh exit codes (already had `EXIT_AUTH_INTERACTIVE_REQUIRED=25`), `scripts/browser-creds-*.sh`, all verb scripts other than `browser-login.sh`.
+
 ### Phase 5 part 3-iii — `--auth-flow` declaration at `creds add` time
 
 - [feat] `scripts/browser-creds-add.sh` — new `--auth-flow STR` flag. Allowed values: `single-step-username-password` (default — backwards compatible), `multi-step-username-password`, `username-only`, `custom`. Persisted in cred metadata. Pre-3-iii the field was hardcoded to `single-step-username-password` regardless of the actual site flow.

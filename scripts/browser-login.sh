@@ -155,11 +155,23 @@ if [ "${auto}" -eq 1 ]; then
   ok "auto-relogin: launching headless Chromium at ${site_url} as ${cred_account}"
 
   # Pipe `account\0password` to driver stdin. AP-7: secret never on argv.
-  if ! { printf '%s\0' "${cred_account}"; credential_get_secret "${as}"; } | \
-       node "${SCRIPT_DIR}/lib/node/playwright-driver.mjs" auto-relogin \
-         --url "${site_url}" --output-path "${ss_file}"; then
+  set +e
+  { printf '%s\0' "${cred_account}"; credential_get_secret "${as}"; } | \
+    node "${SCRIPT_DIR}/lib/node/playwright-driver.mjs" auto-relogin \
+      --url "${site_url}" --output-path "${ss_file}"
+  driver_rc=${PIPESTATUS[1]}
+  set -e
+  if [ "${driver_rc}" = "${EXIT_AUTH_INTERACTIVE_REQUIRED}" ]; then
+    # Phase-5 part 3-iv: driver detected a 2FA challenge. Tell the user to
+    # use --interactive (the only path that supports human-driven 2FA
+    # entry today; TOTP support is part 4).
     rm -f "${ss_file}"
-    die "${EXIT_TOOL_CRASHED}" "auto-relogin failed (driver returned non-zero)"
+    die "${EXIT_AUTH_INTERACTIVE_REQUIRED}" \
+        "site requires 2FA / interactive challenge — re-run with --interactive (or wait for phase-5 part 4 TOTP)"
+  fi
+  if [ "${driver_rc}" -ne 0 ]; then
+    rm -f "${ss_file}"
+    die "${EXIT_TOOL_CRASHED}" "auto-relogin failed (driver returned ${driver_rc})"
   fi
 fi
 
