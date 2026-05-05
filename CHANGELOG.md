@@ -13,6 +13,22 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 2 — `select` verb (`<select>` option pick by ref)
+
+- [feat] new `scripts/browser-select.sh` verb — `--ref eN` (required) + exactly one of `--value VAL` / `--label LABEL` / `--index N`. Mode-flag mutex enforced (uses-counter idiom).
+- [feat] `scripts/lib/router.sh::rule_select_default` — verb=`select` → chrome-devtools-mcp. Slotted between `rule_press_default` and `rule_default_navigation`.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `select` declared in capabilities (`flags: ["--ref", "--value", "--label", "--index"]`); new `tool_select` dispatcher.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs::runStatefulViaDaemon` — extended to handle `select`. New daemon dispatch case translates `eN → uid` from refMap, calls MCP `select_option` with `uid` + value/label/index. Stateful — refMap precondition (mirrors click/fill).
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `select_option` handler echoes `selected <uid> by <mode>=<val>`.
+- [internal] new `tests/browser-select.bats` (7 cases) — missing-ref, missing-mode, mode mutex, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+5) — daemon-routed select via value / label / index, no-daemon exit-41, unknown-ref error.
+- [docs] `SKILL.md` — `select` row added (auto-regenerated).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-06-part-2-select.md` — phase plan.
+
+After this PR, `bash scripts/browser-select.sh --ref e3 --value alpha` works end-to-end (with a running daemon) against a real upstream chrome-devtools-mcp server.
+
+Untouched per scope discipline: every other adapter / verb / lib / test (only Phase 6 part 2 surface).
+
 ### Phase 6 part 1 — `press` verb (keyboard input via cdt-mcp)
 
 Phase 6 begins. Bulk verbs (press / select / hover / wait / drag / upload / route / tab-*) round out the interaction surface per parent spec Appendix A. Smallest first: pure stateless keyboard input.

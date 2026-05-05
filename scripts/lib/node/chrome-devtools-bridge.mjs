@@ -115,8 +115,8 @@ async function realDispatch(args) {
   if (verb === 'daemon-stop')   return runDaemonStop();
   if (verb === 'daemon-status') return runDaemonStatus();
 
-  // Stateful verbs (click / fill) require a running daemon.
-  if (verb === 'click' || verb === 'fill') {
+  // Stateful verbs (click / fill / select) require a running daemon.
+  if (verb === 'click' || verb === 'fill' || verb === 'select') {
     return await runStatefulViaDaemon(verb, verbArgs);
   }
 
@@ -240,6 +240,30 @@ async function runStatefulViaDaemon(verb, verbArgs) {
     emitReply(reply);
     process.exit(reply.status === 'error' ? 30 : 0);
   }
+
+  if (verb === 'select') {
+    // Phase-6 part 2: select an <option> by value | label | index. Exactly
+    // one of these must be supplied. Argv shape from the adapter:
+    //   select <ref> --value VAL
+    //   select <ref> --label LABEL
+    //   select <ref> --index N
+    const msg = { verb: 'select', ref };
+    for (let i = 1; i < verbArgs.length; i++) {
+      switch (verbArgs[i]) {
+        case '--value': msg.value = verbArgs[++i]; break;
+        case '--label': msg.label = verbArgs[++i]; break;
+        case '--index': msg.index = verbArgs[++i]; break;
+        default: break;
+      }
+    }
+    if (msg.value === undefined && msg.label === undefined && msg.index === undefined) {
+      throw withExit(2, "select requires one of --value, --label, or --index");
+    }
+    const reply = await ipcCall(msg);
+    emitReply(reply);
+    process.exit(reply.status === 'error' ? 30 : 0);
+  }
+
   // fill
   let text = '';
   if (verbArgs[1] === '--secret-stdin') {
@@ -869,6 +893,46 @@ async function daemonChildMain() {
           key: msg.key,
           message: extractText(result),
           attached_to_daemon: true,
+        };
+      }
+      case 'select': {
+        // Phase-6 part 2: pick an <option> from a <select> element. Stateful
+        // — needs eN→uid translation from the most recent snapshot. Exactly
+        // one of value/label/index drives the choice (caller-validated).
+        if (!refMap) {
+          return {
+            event: 'error',
+            verb: 'select',
+            status: 'error',
+            message: 'no refs (run snapshot first)',
+          };
+        }
+        const entry = refMap.find((r) => r.id === msg.ref);
+        if (!entry) {
+          return {
+            event: 'error',
+            verb: 'select',
+            ref: msg.ref,
+            status: 'error',
+            message: `ref '${msg.ref}' not found in last snapshot (${refMap.length} refs available)`,
+          };
+        }
+        const callArgs = { uid: entry.uid };
+        if (msg.value !== undefined) callArgs.value = msg.value;
+        if (msg.label !== undefined) callArgs.label = msg.label;
+        if (msg.index !== undefined) callArgs.index = parseInt(msg.index, 10);
+        const result = await mcpCall('select_option', callArgs);
+        return {
+          verb: 'select',
+          tool: 'chrome-devtools-mcp',
+          why: 'mcp/select_option',
+          status: result?.isError ? 'error' : 'ok',
+          ref: entry.id,
+          uid: entry.uid,
+          value: msg.value ?? null,
+          label: msg.label ?? null,
+          index: msg.index !== undefined ? parseInt(msg.index, 10) : null,
+          message: extractText(result),
         };
       }
       default:

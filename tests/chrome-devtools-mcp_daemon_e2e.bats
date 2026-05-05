@@ -206,6 +206,60 @@ teardown() {
 
 # --- Phase 5 part 1f: CHROME_USER_DATA_DIR passthrough -----------------------
 
+@test "daemon (Phase 6 part 2): select --value via daemon translates ref → uid + select_option" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" select e1 --value alpha
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "select"' >/dev/null
+  printf '%s' "${output}" | jq -e '.ref == "e1"' >/dev/null
+  printf '%s' "${output}" | jq -e '.uid == "cdp-uid-1234"' >/dev/null
+  printf '%s' "${output}" | jq -e '.value == "alpha"' >/dev/null
+  grep -q '"name":"select_option"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=select_option"
+  grep -q '"value":"alpha"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing value passthrough"
+}
+
+@test "daemon (Phase 6 part 2): select --label routes correctly" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" select e1 --label "Big Beta"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.label == "Big Beta"' >/dev/null
+  grep -q '"label":"Big Beta"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing label passthrough"
+}
+
+@test "daemon (Phase 6 part 2): select --index routes correctly" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" select e1 --index 2
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.index == 2' >/dev/null
+  grep -q '"index":2' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing index passthrough"
+}
+
+@test "daemon (Phase 6 part 2): select without daemon → exit 41 with daemon hint" {
+  run bash -c "node '${BRIDGE}' select e1 --value alpha"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "stderr must mention 'requires running daemon'"
+}
+
+@test "daemon (Phase 6 part 2): select on unknown ref returns error event (no MCP call)" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" select e99 --value alpha
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when ref unknown"
+  printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing ref"
+}
+
 @test "daemon (Phase 6): press --key Enter routes through daemon → press_key MCP tool" {
   node "${BRIDGE}" daemon-start >/dev/null
   run node "${BRIDGE}" press Enter
