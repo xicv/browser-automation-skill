@@ -29,6 +29,7 @@ ROUTING_RULES=(
   rule_wait_default
   rule_drag_default
   rule_upload_default
+  rule_route_default
   rule_default_navigation
 )
 
@@ -197,6 +198,17 @@ rule_upload_default() {
   case "${verb}" in
     upload)
       printf 'chrome-devtools-mcp\t%s\n' "upload default (only cdt-mcp declares upload today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 7: network-route rule (request interception/mocking).
+# Daemon-state-mutating (routeRules array). Routes to chrome-devtools-mcp.
+rule_route_default() {
+  local verb="$1"
+  case "${verb}" in
+    route)
+      printf 'chrome-devtools-mcp\t%s\n' "route default (only cdt-mcp declares route today)"
       ;;
   esac
 }

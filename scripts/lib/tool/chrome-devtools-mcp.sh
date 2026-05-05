@@ -76,6 +76,7 @@ tool_capabilities() {
     "wait":     { "flags": ["--selector", "--state", "--timeout"] },
     "drag":     { "flags": ["--src-ref", "--dst-ref"] },
     "upload":   { "flags": ["--ref", "--path"] },
+    "route":    { "flags": ["--pattern", "--action"] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -279,4 +280,19 @@ tool_upload() {
   [ -n "${ref}" ]  || return 41
   [ -n "${path}" ] || return 41
   _drive upload "${ref}" "${path}" "${rest[@]}"
+}
+
+tool_route() {
+  local pattern="" action=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --pattern) pattern="$2"; shift 2 ;;
+      --action)  action="$2";  shift 2 ;;
+      *)         rest+=("$1"); shift ;;
+    esac
+  done
+  [ -n "${pattern}" ] || return 41
+  [ -n "${action}" ]  || return 41
+  _drive route "${pattern}" "${action}" "${rest[@]}"
 }

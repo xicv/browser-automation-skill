@@ -184,6 +184,15 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'route_url': {
+      const pattern = args.pattern ?? '<missing>';
+      const action = args.action ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `routed ${pattern} → ${action}` }],
+        isError: false,
+      });
+      break;
+    }
     case 'select_option': {
       const uid = args.uid ?? '<missing>';
       let by;
