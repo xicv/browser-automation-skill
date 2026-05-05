@@ -28,6 +28,7 @@ ROUTING_RULES=(
   rule_hover_default
   rule_wait_default
   rule_drag_default
+  rule_upload_default
   rule_default_navigation
 )
 
@@ -184,6 +185,18 @@ rule_drag_default() {
   case "${verb}" in
     drag)
       printf 'chrome-devtools-mcp\t%s\n' "drag default (only cdt-mcp declares drag today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 6: file upload (<input type=file>). Stateful — requires
+# daemon (refMap precondition). MCP `upload_file` tool accepts {uid, path}.
+# Bash-side validates path security before reaching the daemon.
+rule_upload_default() {
+  local verb="$1"
+  case "${verb}" in
+    upload)
+      printf 'chrome-devtools-mcp\t%s\n' "upload default (only cdt-mcp declares upload today)"
       ;;
   esac
 }

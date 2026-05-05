@@ -75,6 +75,7 @@ tool_capabilities() {
     "hover":    { "flags": ["--ref"] },
     "wait":     { "flags": ["--selector", "--state", "--timeout"] },
     "drag":     { "flags": ["--src-ref", "--dst-ref"] },
+    "upload":   { "flags": ["--ref", "--path"] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -263,4 +264,19 @@ tool_drag() {
   [ -n "${src_ref}" ] || return 41
   [ -n "${dst_ref}" ] || return 41
   _drive drag "${src_ref}" "${dst_ref}" "${rest[@]}"
+}
+
+tool_upload() {
+  local ref="" path=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ref)  ref="$2";  shift 2 ;;
+      --path) path="$2"; shift 2 ;;
+      *)      rest+=("$1"); shift ;;
+    esac
+  done
+  [ -n "${ref}" ]  || return 41
+  [ -n "${path}" ] || return 41
+  _drive upload "${ref}" "${path}" "${rest[@]}"
 }
