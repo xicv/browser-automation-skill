@@ -203,3 +203,12 @@ teardown() {
   printf '%s' "${output}" | jq -e '.verb == "extract"' >/dev/null
   printf '%s' "${output}" | jq -e '.value | contains("document.title")' >/dev/null
 }
+
+# --- Phase 5 part 1f: CHROME_USER_DATA_DIR passthrough -----------------------
+
+@test "daemon (1f): CHROME_USER_DATA_DIR forwards --user-data-dir DIR to daemon's MCP child" {
+  CHROME_USER_DATA_DIR=/tmp/test-profile-daemon-1f \
+    node "${BRIDGE}" daemon-start >/dev/null
+  grep -- '--user-data-dir' "${MCP_STUB_LOG_FILE}" | grep -q '/tmp/test-profile-daemon-1f' \
+    || fail "stub spawn-argv did not contain --user-data-dir for daemon"
+}

@@ -150,7 +150,7 @@ async function runStatelessOneShot(verb, verbArgs) {
   const bin = process.env.CHROME_DEVTOOLS_MCP_BIN || 'chrome-devtools-mcp';
   let child;
   try {
-    child = spawn(bin, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+    child = spawn(bin, mcpSpawnArgs(), { stdio: ['pipe', 'pipe', 'inherit'] });
   } catch (err) {
     throw withExit(41, `failed to spawn MCP server '${bin}': ${err.message}`);
   }
@@ -397,7 +397,7 @@ async function withMcpClient(fn) {
   const bin = process.env.CHROME_DEVTOOLS_MCP_BIN || 'chrome-devtools-mcp';
   let child;
   try {
-    child = spawn(bin, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+    child = spawn(bin, mcpSpawnArgs(), { stdio: ['pipe', 'pipe', 'inherit'] });
   } catch (err) {
     throw withExit(41, `failed to spawn MCP server '${bin}': ${err.message}`);
   }
@@ -447,6 +447,19 @@ async function withMcpClient(fn) {
       );
     }
   }
+}
+
+// mcpSpawnArgs — CLI args forwarded to the spawned upstream MCP server child.
+// Phase-5 part 1f: when CHROME_USER_DATA_DIR is set, append `--user-data-dir
+// DIR` so the upstream Chrome reuses the profile directory (cookies,
+// localStorage, extensions persist). User provides the directory; capturing
+// or automating user-data-dir creation is out of scope.
+function mcpSpawnArgs() {
+  const args = [];
+  if (process.env.CHROME_USER_DATA_DIR) {
+    args.push('--user-data-dir', process.env.CHROME_USER_DATA_DIR);
+  }
+  return args;
 }
 
 // makeMcpCall — id-tracking factory for repeated tools/call invocations on a
@@ -633,7 +646,7 @@ async function daemonChildMain() {
 
   let mcpChild;
   try {
-    mcpChild = spawn(bin, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+    mcpChild = spawn(bin, mcpSpawnArgs(), { stdio: ['pipe', 'pipe', 'inherit'] });
   } catch (err) {
     process.stderr.write(`daemon: failed to spawn MCP server '${bin}': ${err.message}\n`);
     process.exit(41);
