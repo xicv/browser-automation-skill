@@ -12,15 +12,19 @@
 # `inspect`, `audit`, and capture-flag variants of primitives (per parent spec
 # Appendix B) is deferred to phase-05 part 1d.
 #
-# Architecture (phase-05 part 1b — bridge scaffold):
+# Architecture (phase-05 parts 1b / 1c / 1c-ii):
 # Verb-dispatch shells to a node ESM bridge at
 # scripts/lib/node/chrome-devtools-bridge.mjs which mirrors playwright-lib's
 # playwright-driver.mjs:
 # - Stub mode (BROWSER_SKILL_LIB_STUB=1): bridge looks up sha256(argv) in
 #   tests/fixtures/chrome-devtools-mcp/<sha>.json and echoes the contents.
-# - Real mode: bridge spawns ${CHROME_DEVTOOLS_MCP_BIN:-chrome-devtools-mcp}
-#   (typically `npx chrome-devtools-mcp@latest`) and speaks MCP JSON-RPC over
-#   stdio. NOT implemented this PR — deferred to phase-05 part 1c.
+# - Real mode (one-shot): bridge spawns ${CHROME_DEVTOOLS_MCP_BIN} per call,
+#   does the MCP initialize handshake, dispatches one tools/call, exits.
+#   Used for stateless verbs (open / snapshot / eval / audit) when no daemon.
+# - Real mode (daemon, part 1c-ii): bridge daemon-start spawns a long-lived
+#   MCP child, holds the eN↔uid ref map, exposes verb dispatch over TCP
+#   loopback IPC. Stateful verbs (click / fill) require a running daemon and
+#   route through it. State at ${BROWSER_SKILL_HOME}/cdt-mcp-daemon.json.
 #
 # CHROME_DEVTOOLS_MCP_BIN env var semantics: in part 1 this was "the binary
 # the adapter shells to (real or stub)"; in part 1b it shifts to "the upstream
@@ -90,7 +94,7 @@ EOF
   fi
   local node_version
   node_version="$("${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" --version 2>/dev/null || printf 'unknown')"
-  printf '{"ok":true,"binary":"%s","node_version":"%s","mcp_server_bin":"%s","note":"real-mode MCP transport deferred to phase-05 part 1c"}\n' \
+  printf '{"ok":true,"binary":"%s","node_version":"%s","mcp_server_bin":"%s","note":"real-mode MCP transport: stateless verbs one-shot; click/fill via daemon-start"}\n' \
     "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" "${node_version}" "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_MCP_SERVER_BIN}"
 }
 

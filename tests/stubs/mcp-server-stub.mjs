@@ -11,6 +11,8 @@
 //   - tools/call name=take_snapshot    → canned 2-element accessibility tree
 //   - tools/call name=evaluate_script  → echoes the script back
 //   - tools/call name=lighthouse_audit → canned score object
+//   - tools/call name=click            → "clicked <uid>" content (phase-5 part 1c-ii)
+//   - tools/call name=fill             → "filled <uid> with <text>" content (phase-5 part 1c-ii)
 //   - any other method/tool            → JSON-RPC error -32601
 //
 // Logs each received message (one JSON per line) to ${MCP_STUB_LOG_FILE}
@@ -79,6 +81,23 @@ function handleToolsCall(id, params) {
       reply(id, {
         content: [{ type: 'text', text: 'lighthouse score: 0.95' }],
         scores: { performance: 0.95, accessibility: 1.0 },
+        isError: false,
+      });
+      break;
+    }
+    case 'click': {
+      const uid = args.uid ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `clicked ${uid}` }],
+        isError: false,
+      });
+      break;
+    }
+    case 'fill': {
+      const uid = args.uid ?? '<missing>';
+      const text = typeof args.text === 'string' ? args.text : '';
+      reply(id, {
+        content: [{ type: 'text', text: `filled ${uid} with ${text}` }],
         isError: false,
       });
       break;

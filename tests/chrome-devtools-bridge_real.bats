@@ -69,15 +69,18 @@ run_real() {
   printf '%s' "${out}" | jq -e '.scores.performance == 0.95' >/dev/null
 }
 
-@test "bridge real-mode: stateful verb 'click' returns exit 41 with 1c-ii hint" {
+@test "bridge real-mode: click without daemon returns exit 41 with daemon hint" {
   run bash -c "CHROME_DEVTOOLS_MCP_BIN='${STUB}' node '${BRIDGE}' click e1"
   [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
-  printf '%s' "${output}" | grep -q "1c-ii" || fail "error must mention part 1c-ii"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "error must mention 'requires running daemon'"
 }
 
-@test "bridge real-mode: stateful verb 'fill' returns exit 41" {
+@test "bridge real-mode: fill without daemon returns exit 41 with daemon hint" {
   run bash -c "CHROME_DEVTOOLS_MCP_BIN='${STUB}' node '${BRIDGE}' fill e3 hello"
   [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "error must mention 'requires running daemon'"
 }
 
 @test "bridge real-mode: stateful verb 'inspect' returns exit 41" {

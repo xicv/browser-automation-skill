@@ -13,6 +13,23 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 1c-ii — chrome-devtools-mcp daemon + ref persistence (click/fill)
+
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — daemon mode lands. New verbs `daemon-start` / `daemon-stop` / `daemon-status` mirror `playwright-driver.mjs`'s lifecycle precedent. The daemon spawns ONE long-lived MCP server child, performs the `initialize` handshake once, holds the `eN ↔ uid` ref map, and exposes verb dispatch over a TCP loopback IPC server (`127.0.0.1:0` ephemeral port — Unix sun_path 104-char cap on macOS bats temp paths). State persisted at `${BROWSER_SKILL_HOME}/cdt-mcp-daemon.json` (mode 0600, dir 0700).
+- [feat] **Stateful verbs `click` and `fill` work end-to-end via real MCP** when daemon is running. `bridge.mjs click eN` resolves `eN → uid` from the cached refMap (populated by the prior `snapshot`) and calls MCP `tools/call name=click args={uid}`. Without daemon → exit 41 with hint pointing at `daemon-start`. The remaining stateful verbs (`inspect` / `extract`) still exit 41 — bundled with their verb scripts in part 1e.
+- [feat] **Stateless verbs route through the daemon when one is running** so the same MCP server child + Chrome state are reused across calls. Without daemon, the original part-1c one-shot path runs unchanged.
+- [security] Privacy: `fill --secret-stdin` reads the secret from stdin only (never argv per AP-7). Daemon-side reply scrubs any echoed text from the MCP error path (`<redacted>` substitution mirroring `playwright-driver.mjs`). Sentinel canary `sekret-do-not-leak-CDT-1c-ii` verified absent from the skill's stdout summary.
+- [internal] new `tests/chrome-devtools-mcp_daemon_e2e.bats` (12 cases) — daemon lifecycle (status / start / running / idempotent start / stop / stop-when-none), click via daemon (no-daemon hint, ref-translation happy path, unknown-ref error), fill via daemon (happy path, secret-stdin canary, no-daemon hint). Defensive setup: `CHROME_DEVTOOLS_MCP_BIN=${STUBS_DIR}/mcp-server-stub.mjs` exported in `setup()` (HANDOFF §60 pattern); `teardown()` always runs `daemon-stop || true`.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — added `click` and `fill` `tools/call` handlers (echo `uid` + `text` in their content text). The stub log captures the wire so bats can assert `eN → uid` translation server-side.
+- [internal] `tests/chrome-devtools-bridge_real.bats` — updated 2 stateful exit-41 tests: now asserts the new `requires running daemon` hint (replaces the part 1c "deferred to 1c-ii" wording).
+- [docs] `references/chrome-devtools-mcp-cheatsheet.md` — Status section + per-verb table updated; new "Daemon mode (phase-05 part 1c-ii)" subsection with copy-paste recipe; Limitations section trimmed (real MCP transport no longer "deferred").
+- [docs] `scripts/lib/tool/chrome-devtools-mcp.sh::tool_doctor_check` — note bumped: stateless verbs one-shot, click/fill via daemon-start.
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-1c-ii-cdt-mcp-daemon.md` — phase plan.
+
+After this PR, the cdt-mcp adapter unblocks downstream work: `--tool=chrome-devtools-mcp` exposes 6 of 8 verbs in real mode (4 stateless + click + fill). The remaining 2 (`inspect` / `extract`) wait for part 1e where the verb scripts and daemon dispatch land together. Path B router promotion (part 1d) and Chrome `--user-data-dir` session loading (part 1f) remain queued.
+
+Untouched per scope discipline: `scripts/lib/router.sh` (Path A still — promotion deferred to part 1d), `scripts/lib/common.sh`, `scripts/lib/output.sh`, `scripts/lib/credential.sh`, `scripts/lib/secret/*.sh`, `scripts/lib/site.sh`, `scripts/lib/session.sh`, `scripts/lib/secret_backend_select.sh`, `scripts/lib/mask.sh`, `scripts/lib/verb_helpers.sh`, every `scripts/browser-*.sh` (verb scripts unchanged — they shell to the adapter; the adapter shells to the bridge; the bridge handles IPC), every other adapter file, `tests/lint.sh`.
+
 ### Phase 5 part 3 — `login --auto` auto-relogin from stored credentials
 
 - [feat] `scripts/browser-login.sh --auto` — programmatic headless login using the credential set via `creds-add`. Reads username from credential metadata, password via `credential_get_secret` (dispatches to whichever backend the cred uses — plaintext / keychain / libsecret). Sends `username\0password` to the driver via stdin per AP-7 (secret never on argv). Mutually exclusive with `--interactive` and `--storage-state-file`. Validates: cred exists, cred bound to `--site`, `auto_relogin=true`, `account` non-empty.
