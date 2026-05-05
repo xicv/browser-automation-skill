@@ -129,6 +129,16 @@ run_real() {
   printf '%s' "${out}" | jq -e '.message | contains("pressed Enter")' >/dev/null
 }
 
+@test "bridge real-mode (Phase 6 part 4): wait --selector --state --timeout dispatches wait_for (one-shot)" {
+  out="$(run_real wait ".x" --state hidden --timeout 3000)"
+  printf '%s' "${out}" | jq -e '.verb == "wait"' >/dev/null
+  printf '%s' "${out}" | jq -e '.tool == "chrome-devtools-mcp"' >/dev/null
+  printf '%s' "${out}" | jq -e '.why == "mcp/wait_for"' >/dev/null
+  printf '%s' "${out}" | jq -e '.selector == ".x"' >/dev/null
+  printf '%s' "${out}" | jq -e '.state == "hidden"' >/dev/null
+  printf '%s' "${out}" | jq -e '.timeout == 3000' >/dev/null
+}
+
 @test "bridge real-mode: open with no URL exits non-zero" {
   run bash -c "CHROME_DEVTOOLS_MCP_BIN='${STUB}' node '${BRIDGE}' open"
   [ "${status}" -ne 0 ] || fail "expected non-zero exit when --url missing"

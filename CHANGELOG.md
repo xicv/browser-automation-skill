@@ -13,6 +13,21 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 4 — `wait` verb (explicit element-state wait)
+
+- [feat] new `scripts/browser-wait.sh` verb — `--selector CSS` + `--state visible|hidden|attached|detached` (default visible) + `--timeout MS` (default: MCP server's default). Routes to chrome-devtools-mcp via new `rule_wait_default`. Stateless — works one-shot or daemon-routed (parallel to eval/audit).
+- [feat] `scripts/lib/router.sh::rule_wait_default` — verb=`wait` → chrome-devtools-mcp.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `wait` declared in capabilities (`flags: ["--selector", "--state", "--timeout"]`); new `tool_wait` dispatcher.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — `translateVerb`/`shapeResponse`/`runStatelessViaDaemon`/daemon dispatch all gain `wait` cases. Passes `{selector, state?, timeout?}` to MCP `wait_for` tool.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `wait_for` handler echoes `waited for <selector> to be <state>`.
+- [internal] new `tests/browser-wait.bats` (6 cases) — missing-selector, invalid-state, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-bridge_real.bats` (+1) — one-shot real-mode wait dispatches `wait_for`.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+1) — daemon-routed wait emits `attached_to_daemon: true`.
+- [docs] `SKILL.md` — `wait` row added (auto-regenerated).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-06-part-4-wait.md` — phase plan.
+
+After this PR, `bash scripts/browser-wait.sh --selector ".dashboard" --state visible --timeout 5000` works end-to-end. Phase 6 progress: 4 of 8 verbs (press / select / hover / wait). Remaining: drag / upload / route / tab-*.
+
 ### Phase 6 part 3 — `hover` verb (pointer hover by ref)
 
 - [feat] new `scripts/browser-hover.sh` verb — `--ref eN`. Routes to chrome-devtools-mcp via new `rule_hover_default`. Stateful (refMap precondition; mirrors click/select).

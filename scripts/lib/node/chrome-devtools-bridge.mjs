@@ -318,6 +318,16 @@ async function runStatelessViaDaemon(verb, verbArgs) {
       msg = { verb: 'press', key };
       break;
     }
+    case 'wait': {
+      const selector = verbArgs[0] ?? '';
+      if (!selector) throw withExit(2, "verb 'wait' requires a --selector value");
+      msg = { verb: 'wait', selector };
+      for (let i = 1; i < verbArgs.length; i++) {
+        if (verbArgs[i] === '--state')   msg.state   = verbArgs[++i];
+        if (verbArgs[i] === '--timeout') msg.timeout = parseInt(verbArgs[++i], 10);
+      }
+      break;
+    }
     default:
       throw withExit(2, `unknown verb: ${verb}`);
   }
@@ -903,6 +913,26 @@ async function daemonChildMain() {
           attached_to_daemon: true,
         };
       }
+      case 'wait': {
+        // Phase-6 part 4: explicit wait for an element to reach a state.
+        // MCP `wait_for` accepts {selector, state?, timeout?}. State defaults
+        // to "visible"; timeout defaults to MCP server's default.
+        const callArgs = { selector: msg.selector };
+        if (msg.state)   callArgs.state   = msg.state;
+        if (msg.timeout) callArgs.timeout = msg.timeout;
+        const result = await mcpCall('wait_for', callArgs);
+        return {
+          verb: 'wait',
+          tool: 'chrome-devtools-mcp',
+          why: 'mcp/wait_for',
+          status: result?.isError ? 'error' : 'ok',
+          selector: msg.selector,
+          state: msg.state ?? 'visible',
+          timeout: msg.timeout ?? null,
+          message: extractText(result),
+          attached_to_daemon: true,
+        };
+      }
       case 'hover': {
         // Phase-6 part 3: pointer hover. eN→uid translation; calls MCP
         // `hover` tool with the resolved uid. Stateful (refMap precondition
@@ -1045,6 +1075,17 @@ function translateVerb(verb, args) {
       if (!key) throw withExit(2, "verb 'press' requires a --key value");
       return { tool: 'press_key', args: { key }, verb };
     }
+    case 'wait': {
+      // Argv shape from adapter: wait <selector> [--state STATE] [--timeout MS]
+      const selector = args[0] ?? '';
+      if (!selector) throw withExit(2, "verb 'wait' requires a --selector value");
+      const callArgs = { selector };
+      for (let i = 1; i < args.length; i++) {
+        if (args[i] === '--state')   callArgs.state   = args[++i];
+        if (args[i] === '--timeout') callArgs.timeout = parseInt(args[++i], 10);
+      }
+      return { tool: 'wait_for', args: callArgs, verb };
+    }
     case 'click':
     case 'fill':
     case 'inspect':
@@ -1090,6 +1131,16 @@ function shapeResponse(verb, tx, result) {
     case 'press': {
       const text = extractText(result);
       return { ...base, key: tx.args.key, message: text };
+    }
+    case 'wait': {
+      const text = extractText(result);
+      return {
+        ...base,
+        selector: tx.args.selector,
+        state: tx.args.state ?? 'visible',
+        timeout: tx.args.timeout ?? null,
+        message: text,
+      };
     }
     default:
       return { ...base, raw: result };
