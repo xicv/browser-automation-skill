@@ -13,6 +13,27 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 4-iv — `creds rotate-totp` verb (Phase 5 FEATURE-COMPLETE)
+
+- [feat] new `scripts/browser-creds-rotate-totp.sh` — re-enroll TOTP shared secret for an existing totp_enabled credential. Use case: service forces a new TOTP secret (re-issued QR code during account recovery, security-incident rotation, etc.). Replaces the `<name>__totp` backend slot with a new value; metadata.totp_enabled stays true; password slot UNCHANGED.
+- [security] **AP-7 strict** — new TOTP secret comes via stdin only (`--totp-secret-stdin` required). Refuses argv-based secrets.
+- [security] **Typed-phrase confirmation** mirrors `creds-migrate` and `creds-remove` patterns. Default: prompts for cred name; `--yes-i-know` skips for scripted use.
+- [security] Refuses non-totp_enabled creds (use `creds-add --enable-totp` for first-time enrollment).
+- [security] Privacy invariant: new TOTP secret NEVER appears in stdout/stderr. Sentinel canary tested (`sekret-do-not-leak-rotate-totp`).
+- [internal] new `tests/creds-rotate-totp.bats` (11 cases) — `--as` required, `--totp-secret-stdin` required (AP-7 enforcement), unknown cred → EXIT_SITE_NOT_FOUND, non-totp refusal, empty-stdin refusal, `--dry-run` skips mutation, confirmation mismatch aborts, `--yes-i-know` happy path overwrites, **privacy canary**, password slot regression guard (untouched), metadata regression guard (totp_enabled stays true).
+- [docs] `SKILL.md` — new `creds totp` and `creds rotate-totp` rows.
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-4-iv-rotate-totp.md` — phase plan.
+
+**🎉 Phase 5 is FEATURE-COMPLETE.** All HANDOFF queue items shipped:
+- Part 1 (cdt-mcp track): adapter + bridge + daemon + 8/8 verbs real-mode + Path B router + verb scripts + session loading.
+- Part 2 (creds track): 5 verbs + 3 backends + smart auto-detect + masked reveal + first-use plaintext gate.
+- Part 3 (auth track): login --auto + transparent verb-retry + auth-flow declaration + 2FA detection.
+- Part 4 (TOTP track): foundation flag + codegen + auto-replay + rotation. **End-to-end auto-relogin for 2FA-protected sites.**
+
+Next phases (per parent spec): 6 (bulk verbs), 7 (capture pipeline), 8 (obscura adapter), 9 (flow runner), 10 (schema migration tooling).
+
+Untouched per scope discipline: every other verb script, all adapters, router rules, common.sh, all session/site/credential libs (uses existing `credential_set_totp_secret` API from part 4-ii).
+
 ### Phase 5 part 4-iii — `login --auto` TOTP auto-replay (closes auth track)
 
 - [feat] `scripts/lib/node/totp-core.mjs` — extracted from `totp.mjs` so other modules can import the same `totpAt` / `base32Decode` primitives. CLI `totp.mjs` is now a thin shim. Both share zero-dep RFC 6238 logic; existing 8 RFC test vectors still pass.
