@@ -87,7 +87,7 @@ source_picked_adapter "${tool_name}"
 # stdin (if --secret-stdin) flows through to tool_fill -> adapter binary.
 # Capture stdout in subshell; stdin inherits naturally.
 set +e
-adapter_out="$(tool_fill "${verb_argv[@]}")"
+adapter_out="$(invoke_with_retry fill "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 

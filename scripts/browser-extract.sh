@@ -74,7 +74,7 @@ why="${picked#*$'\t'}"
 source_picked_adapter "${tool_name}"
 
 set +e
-adapter_out="$(tool_extract "${verb_argv[@]}")"
+adapter_out="$(invoke_with_retry extract "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 

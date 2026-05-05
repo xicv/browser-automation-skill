@@ -88,7 +88,7 @@ why="${picked#*$'\t'}"
 source_picked_adapter "${tool_name}"
 
 set +e
-adapter_out="$(tool_inspect "${verb_argv[@]}")"
+adapter_out="$(invoke_with_retry inspect "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 
