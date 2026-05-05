@@ -24,6 +24,7 @@ ROUTING_RULES=(
   rule_inspect_default
   rule_extract_default
   rule_press_default
+  rule_select_default
   rule_default_navigation
 )
 
@@ -133,6 +134,18 @@ rule_press_default() {
   case "${verb}" in
     press)
       printf 'chrome-devtools-mcp\t%s\n' "press default (only cdt-mcp declares press today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 2: <select> option pick routes to chrome-devtools-mcp.
+# Stateful — requires daemon (refMap precondition). MCP `select_option` tool
+# accepts uid + one of value/label/index.
+rule_select_default() {
+  local verb="$1"
+  case "${verb}" in
+    select)
+      printf 'chrome-devtools-mcp\t%s\n' "select default (only cdt-mcp declares select today)"
       ;;
   esac
 }

@@ -149,6 +149,19 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'select_option': {
+      const uid = args.uid ?? '<missing>';
+      let by;
+      if (args.value !== undefined)      by = `value=${args.value}`;
+      else if (args.label !== undefined) by = `label=${args.label}`;
+      else if (args.index !== undefined) by = `index=${args.index}`;
+      else                                by = 'no-mode';
+      reply(id, {
+        content: [{ type: 'text', text: `selected ${uid} by ${by}` }],
+        isError: false,
+      });
+      break;
+    }
     default:
       replyError(id, -32601, `tool not found: ${name}`);
   }

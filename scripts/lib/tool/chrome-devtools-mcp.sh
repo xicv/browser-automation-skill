@@ -71,6 +71,7 @@ tool_capabilities() {
     "fill":     { "flags": ["--ref", "--text", "--secret-stdin"] },
     "snapshot": { "flags": ["--depth"] },
     "press":    { "flags": ["--key"] },
+    "select":   { "flags": ["--ref", "--value", "--label", "--index"] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -201,4 +202,21 @@ tool_press() {
   done
   [ -n "${key}" ] || return 41
   _drive press "${key}" "${rest[@]}"
+}
+
+tool_select() {
+  local ref=""
+  local mode_flag="" mode_val=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ref)               ref="$2"; shift 2 ;;
+      --value|--label|--index)
+        mode_flag="$1"; mode_val="$2"; shift 2 ;;
+      *)                   rest+=("$1"); shift ;;
+    esac
+  done
+  [ -n "${ref}" ] || return 41
+  [ -n "${mode_flag}" ] || return 41
+  _drive select "${ref}" "${mode_flag}" "${mode_val}" "${rest[@]}"
 }
