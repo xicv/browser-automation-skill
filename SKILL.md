@@ -38,7 +38,9 @@ Real browser launches arrive in Phase 3.
 | `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |
 | `click`         | Click an element by `--ref eN` or `--selector CSS` | `… click --ref e3` |
 | `fill`          | Fill an input — `--text VALUE` or `--secret-stdin` | `… fill --ref e3 --text "search query"` |
-| `inspect`       | Inspect an element by `--selector CSS` | `… inspect --selector "h1"` |
+| `inspect`       | Page inspection — `--capture-console`, `--capture-network`, `--screenshot`, or `--selector CSS` (router → cdt-mcp; real-mode dispatch deferred to part 1e-ii) | `… inspect --capture-console` |
+| `audit`         | Lighthouse / perf-trace audit (router → cdt-mcp; real-mode end-to-end) | `… audit --lighthouse` |
+| `extract`       | Selector or JS extraction — `--selector CSS` or `--eval JS` (router → cdt-mcp; real-mode dispatch deferred to part 1e-ii) | `… extract --selector ".title"` |
 
 `${CLAUDE_SKILL_DIR}` is the absolute path that Claude Code injects when it
 invokes the skill — it points at the symlink under `~/.claude/skills/`. Use it

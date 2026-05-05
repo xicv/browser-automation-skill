@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
-# scripts/browser-inspect.sh — inspect an element by --selector CSS.
-# Usage: bash scripts/browser-inspect.sh [--site NAME] [--tool NAME] [--dry-run]
-#                                        [--raw] --selector CSS
+# scripts/browser-inspect.sh — inspect a page (console, network, screenshot,
+# or selector text). Usage:
+#   bash scripts/browser-inspect.sh [--site NAME] [--tool NAME] [--dry-run]
+#                                   [--raw]
+#                                   (--capture-console | --capture-network
+#                                    | --screenshot | --selector CSS)
+#
+# Routes to chrome-devtools-mcp by default (post-1d router promotion — only
+# adapter with dedicated console + network MCP tools per parent spec
+# Appendix B). At least one of --capture-* / --screenshot / --selector is
+# required so the adapter has something to do.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -26,7 +34,9 @@ SUMMARY_T0="$(now_ms)"; export SUMMARY_T0
 
 parse_verb_globals "$@"
 
-selector=""
+resolve_session_storage_state
+
+selector="" capture_console=0 capture_network=0 screenshot=0
 verb_argv=()
 i=0
 while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
@@ -37,6 +47,21 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       verb_argv+=(--selector "${selector}")
       i=$((i + 2))
       ;;
+    --capture-console)
+      capture_console=1
+      verb_argv+=(--capture-console)
+      i=$((i + 1))
+      ;;
+    --capture-network)
+      capture_network=1
+      verb_argv+=(--capture-network)
+      i=$((i + 1))
+      ;;
+    --screenshot)
+      screenshot=1
+      verb_argv+=(--screenshot)
+      i=$((i + 1))
+      ;;
     *)
       verb_argv+=("${REMAINING_ARGV[i]}")
       i=$((i + 1))
@@ -44,10 +69,14 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
   esac
 done
 
-[ -n "${selector}" ] || die "${EXIT_USAGE_ERROR}" "inspect requires --selector CSS"
+if [ -z "${selector}" ] && [ "${capture_console}" = 0 ] \
+   && [ "${capture_network}" = 0 ] && [ "${screenshot}" = 0 ]; then
+  die "${EXIT_USAGE_ERROR}" \
+      "inspect requires one of --capture-console / --capture-network / --screenshot / --selector CSS"
+fi
 
 if [ "${ARG_DRY_RUN:-0}" = "1" ]; then
-  ok "dry-run: would inspect ${selector}"
+  ok "dry-run: would inspect (${selector:-<no-selector>})"
   emit_summary verb=inspect tool=none why=dry-run status=ok selector="${selector}" dry_run=true
   exit 0
 fi

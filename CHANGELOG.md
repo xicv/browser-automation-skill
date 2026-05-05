@@ -13,6 +13,21 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 1e-i — Verb scripts: browser-audit + browser-extract (un-skip browser-inspect.bats)
+
+- [feat] new `scripts/browser-audit.sh` — `audit` verb script. Flags: `--lighthouse` (default when no flag given), `--perf-trace`. Routes to chrome-devtools-mcp by default per 1d's `rule_audit_or_perf`. **Ships real-mode end-to-end** because the bridge already supports `audit` → `lighthouse_audit` (part 1c). Bare `bash scripts/browser-audit.sh` runs the default lighthouse path.
+- [feat] new `scripts/browser-extract.sh` — `extract` verb script. Flags: `--selector CSS`, `--eval JS` (one required, both acceptable). Routes to chrome-devtools-mcp by default per 1d's `rule_extract_default`. Real-mode dispatch (no `BROWSER_SKILL_LIB_STUB=1`) still exits 41 — bridge daemon dispatch for `extract` lands in **part 1e-ii**.
+- [feat] `scripts/browser-inspect.sh` — flag set updated to match cdt-mcp's declared `inspect` capabilities: `--capture-console`, `--capture-network`, `--screenshot`, `--selector CSS`. At least one is required. Pre-1e-i, the script required `--selector` (a Phase-2 assumption from when only playwright-cli existed). Real-mode dispatch still exits 41 — also part 1e-ii.
+- [internal] new `tests/browser-audit.bats` (5 cases) — lib-stub mode coverage via existing `audit --lighthouse` fixture. Covers happy path, summary shape, ghost-tool rejection, dry-run, capability-filter rejection of `--tool=playwright-cli` for audit.
+- [internal] new `tests/browser-extract.bats` (6 cases) — same shape via existing `extract --selector .title` fixture. Adds the missing-flag (`extract` with neither `--selector` nor `--eval`) usage error.
+- [internal] `tests/browser-inspect.bats` un-skipped (was skipped pre-Phase-5 with comment "no adapter until Phase 5"). Re-aimed at cdt-mcp lib-stub mode using existing `inspect --capture-console` fixture. 4 cases: happy path, summary shape, ghost-tool rejection, dry-run.
+- [docs] `SKILL.md` — new `audit` + `extract` rows; `inspect` row updated to reflect the broader flag set.
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-1e-i-audit-extract-scripts.md` — phase plan.
+
+After this PR, the CLI surface for `audit` / `extract` / `inspect` is first-class — no `--tool=` needed. Audit works real-mode end-to-end (lighthouse via the bridge's existing one-shot path); extract and inspect work in lib-stub mode (existing fixtures); their real-mode dispatch lands in part 1e-ii where the bridge daemon gains `inspect` and `extract` handlers. CI green on macos+ubuntu (490 tests; +11 over 1d's 479).
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/tool/*.sh` (no capability changes — adapter already declared all three verbs), `scripts/lib/node/chrome-devtools-bridge.mjs` (deferred to 1e-ii), `scripts/lib/common.sh`, every credentials/session/site lib, every existing verb script.
+
 ### Phase 5 part 1d — Router promotion (chrome-devtools-mcp Path B)
 
 - [feat] `scripts/lib/router.sh` — four new routing rules promote chrome-devtools-mcp from "opt-in via `--tool=`" to a router default per parent spec Appendix B:

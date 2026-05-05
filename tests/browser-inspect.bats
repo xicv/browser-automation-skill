@@ -1,50 +1,49 @@
 load helpers
 
-# inspect: deferred to Phase 5 (chrome-devtools-mcp adapter). playwright-cli has
-# no `inspect` subcommand and the snapshot+eval composition is non-trivial.
-# The verb script ships; tests are gated until an adapter declares inspect.
+# Phase 5 part 1e-i: un-skipped + re-aimed at chrome-devtools-mcp lib-stub mode.
+# Pre-1d, `pick_tool inspect` died EXIT_TOOL_MISSING (no rule). Post-1d the
+# router promotes inspect → chrome-devtools-mcp. The adapter shells to the
+# bridge; with BROWSER_SKILL_LIB_STUB=1 the bridge resolves a sha256(argv)
+# fixture under tests/fixtures/chrome-devtools-mcp/ instead of spawning a real
+# MCP server. Real-mode dispatch (no BROWSER_SKILL_LIB_STUB=1) for inspect is
+# still exit 41 — bridge daemon dispatch lands in part 1e-ii.
 
 setup() {
   setup_temp_home
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
-  skip "inspect verb has no adapter until Phase 5 (chrome-devtools-mcp)"
 }
-teardown() {
-  teardown_temp_home
-}
+teardown() { teardown_temp_home; }
 
-@test "browser-inspect: --selector h1 passes through to adapter via stub" {
-  STUB_LOG_FILE="$(mktemp)"
-  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
-  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
-  STUB_LOG_FILE="${STUB_LOG_FILE}" \
-    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --selector h1
+@test "browser-inspect: --capture-console routes to cdt-mcp via lib-stub fixture" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console
   assert_status 0
-  grep -q '^inspect$'    "${STUB_LOG_FILE}"
-  grep -q '^--selector$' "${STUB_LOG_FILE}"
-  grep -q '^h1$'         "${STUB_LOG_FILE}"
-  rm -f "${STUB_LOG_FILE}"
+  printf '%s\n' "${lines[@]}" | grep -q '"event":"inspect"' \
+    || fail "expected inspect event in output"
 }
 
-@test "browser-inspect: emits summary with verb=inspect, selector=h1, status=ok" {
-  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
-  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
-    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --selector h1
+@test "browser-inspect: emits summary with verb=inspect, tool=chrome-devtools-mcp, status=ok" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console
   assert_status 0
   local last_line
   last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
-  printf '%s' "${last_line}" | jq -e '.verb == "inspect" and .selector == "h1" and .status == "ok"' >/dev/null
-}
-
-@test "browser-inspect: missing --selector fails EXIT_USAGE_ERROR" {
-  run bash "${SCRIPTS_DIR}/browser-inspect.sh"
-  assert_status "$EXIT_USAGE_ERROR"
-  assert_output_contains "selector"
+  printf '%s' "${last_line}" | jq -e '.verb == "inspect" and .tool == "chrome-devtools-mcp" and .status == "ok"' >/dev/null
+  printf '%s' "${last_line}" | jq -e '.duration_ms | type == "number"' >/dev/null
 }
 
 @test "browser-inspect: --tool=ghost-tool fails EXIT_USAGE_ERROR" {
-  run bash "${SCRIPTS_DIR}/browser-inspect.sh" --tool ghost-tool --selector h1
+  run bash "${SCRIPTS_DIR}/browser-inspect.sh" --tool ghost-tool --capture-console
   assert_status "$EXIT_USAGE_ERROR"
   assert_output_contains "no such adapter"
+}
+
+@test "browser-inspect: --dry-run prints planned action and skips adapter" {
+  run bash "${SCRIPTS_DIR}/browser-inspect.sh" --dry-run --capture-console
+  assert_status 0
+  assert_output_contains "dry-run"
+  local last_line
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.verb == "inspect" and .dry_run == true' >/dev/null
 }
