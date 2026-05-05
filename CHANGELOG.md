@@ -13,6 +13,34 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 8-i — `tab-list` verb foundation (multi-tab daemon-state slot)
+
+- [feat] new `scripts/browser-tab-list.sh` verb — no required flags. Routes to chrome-devtools-mcp via new `rule_tab_list_default`. **Daemon-required** (mirrors route precedent — caches tabs in the daemon's new `tabs` slot so 8-ii / 8-iii can mutate the same shape). Without daemon → exit 41 with hint.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — new `runTabListViaDaemon` (parallel to `runRouteViaDaemon`, no args). Daemon child gains `tabs` state slot (array of `{tab_id, url, title}`). Dispatch case `'tab-list'` calls upstream MCP `list_pages` (best-effort name; real upstream may use a different tool — binding hardening tracked in 8-ii / 8-iii), normalizes to `[{tab_id, url, title}]`, **replaces** (not appends) the cache, returns it with `tab_count`.
+- [feat] `scripts/lib/router.sh::rule_tab_list_default` — verb=`tab-list` → chrome-devtools-mcp.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `tab-list` capability declared (`flags: []`); new `tool_tab-list` dispatcher.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `list_pages` handler returns canned 2-page array (`example.com/`, `example.org/news`).
+- [internal] new `tests/browser-tab-list.bats` (5 cases) — ghost-tool, capability filter rejects (playwright-cli has no `tab-list`), dry-run shape, router routing, capability declaration.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+3) — daemon happy (`tab_count==2` + `tab_id`/`url`/`title` shape + `list_pages` MCP call observed), idempotent (second call replaces cache, doesn't accumulate), no-daemon exit-41.
+- [docs] `SKILL.md` — chrome-devtools-mcp adapter row auto-bumped to 16 verbs.
+- [docs] `docs/superpowers/plans/2026-05-06-phase-06-part-8-i-tab-list.md` — phase plan.
+
+**Sub-scope (8-i — minimal):**
+- Read-only enumeration. `tab_id` is bridge-assigned (1-based, stable per `list_pages` call). Upstream's CDP target id never escapes the bridge — agents only see the stable `tab_id` contract.
+- Foundation: `tabs[]` daemon slot ships before any verb mutates it.
+
+**Deferred to part 8-ii (`tab-switch`):**
+- `--by-index N` ⊕ `--by-url-pattern STR` (mutex). Updates a new `currentTab` pointer in the daemon.
+- Active-tab annotation in `tab-list` output.
+
+**Deferred to part 8-iii (`tab-close`):**
+- `--tab-id N` ⊕ `--by-url-pattern STR`. Splices the matching entry out of `tabs[]` + closes the page upstream.
+
+**Deferred (part 7-ii is independent):**
+- Real upstream binding (canonical MCP tool name; `list_pages` is the bridge's best-effort convention — upstream may use `pages.list`, `targets.list`, etc.).
+
+Phase 6 progress: **8 of 8 verbs declared** (press / select / hover / wait / drag / upload / route / tab-list); tab-switch + tab-close (8-ii / 8-iii) and route fulfill (7-ii) remain as separate sub-PRs.
+
 ### Phase 6 part 7-i — `route` verb foundation (block + allow only; fulfill deferred)
 
 - [feat] new `scripts/browser-route.sh` verb — `--pattern URL_PATTERN` + `--action allow|block` (required). Routes to chrome-devtools-mcp via new `rule_route_default`. **Daemon-state-mutating** (registers `{pattern, action}` in daemon's `routeRules` array). Daemon-required.

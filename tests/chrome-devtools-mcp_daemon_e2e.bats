@@ -327,6 +327,39 @@ teardown() {
     || fail "stderr must mention 'requires running daemon'"
 }
 
+@test "daemon (Phase 6 part 8-i): tab-list via daemon returns tabs[] from list_pages" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" tab-list
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "tab-list"' >/dev/null
+  printf '%s' "${output}" | jq -e '.tab_count == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs | length == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs[0].tab_id == 1' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs[0].url | type == "string"' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs[0].title | type == "string"' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs[1].tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.attached_to_daemon == true' >/dev/null
+  grep -q '"name":"list_pages"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=list_pages"
+}
+
+@test "daemon (Phase 6 part 8-i): tab-list is idempotent (cache replaced, not appended)" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-list
+  assert_status 0
+  # Second call must still return tab_count=2 (replaced, not 4 from accumulation).
+  printf '%s' "${output}" | jq -e '.tab_count == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs | length == 2' >/dev/null
+}
+
+@test "daemon (Phase 6 part 8-i): tab-list without daemon → exit 41 with daemon hint" {
+  run bash -c "node '${BRIDGE}' tab-list"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "stderr must mention 'requires running daemon'"
+}
+
 @test "daemon (Phase 6 part 6): upload via daemon translates ref → uid + upload_file MCP tool" {
   node "${BRIDGE}" daemon-start >/dev/null
   node "${BRIDGE}" open https://example.com >/dev/null

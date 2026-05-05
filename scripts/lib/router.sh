@@ -30,6 +30,7 @@ ROUTING_RULES=(
   rule_drag_default
   rule_upload_default
   rule_route_default
+  rule_tab_list_default
   rule_default_navigation
 )
 
@@ -209,6 +210,17 @@ rule_route_default() {
   case "${verb}" in
     route)
       printf 'chrome-devtools-mcp\t%s\n' "route default (only cdt-mcp declares route today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 8-i: tab enumeration. Read-only; daemon caches tabs[] slot
+# so 8-ii (tab-switch) / 8-iii (tab-close) can reference the same shape.
+rule_tab_list_default() {
+  local verb="$1"
+  case "${verb}" in
+    tab-list)
+      printf 'chrome-devtools-mcp\t%s\n' "tab-list default (only cdt-mcp declares tab-list today)"
       ;;
   esac
 }

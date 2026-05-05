@@ -77,6 +77,7 @@ tool_capabilities() {
     "drag":     { "flags": ["--src-ref", "--dst-ref"] },
     "upload":   { "flags": ["--ref", "--path"] },
     "route":    { "flags": ["--pattern", "--action"] },
+    "tab-list": { "flags": [] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -295,4 +296,10 @@ tool_route() {
   [ -n "${pattern}" ] || return 41
   [ -n "${action}" ]  || return 41
   _drive route "${pattern}" "${action}" "${rest[@]}"
+}
+
+# Phase-6 part 8-i: read-only tab enumeration. No flags. Bridge dispatches
+# to runTabListViaDaemon which caches the result in the daemon's `tabs` slot.
+tool_tab-list() {
+  _drive tab-list "$@"
 }
