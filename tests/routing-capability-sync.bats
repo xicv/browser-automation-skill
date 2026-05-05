@@ -5,7 +5,7 @@ load helpers
 # A mismatch is a CI-failing drift signal.
 
 @test "routing-capability-sync: every rule's tool declares support for the verb it targets" {
-  for verb in open click fill snapshot; do
+  for verb in open click fill snapshot audit inspect extract; do
     run bash -c "
       source '${LIB_DIR}/common.sh'; init_paths
       source '${LIB_DIR}/router.sh'

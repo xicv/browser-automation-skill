@@ -13,6 +13,24 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 1d — Router promotion (chrome-devtools-mcp Path B)
+
+- [feat] `scripts/lib/router.sh` — four new routing rules promote chrome-devtools-mcp from "opt-in via `--tool=`" to a router default per parent spec Appendix B:
+  - `rule_capture_flags` — `--capture-console` / `--capture-network` on any verb routes to chrome-devtools-mcp.
+  - `rule_audit_or_perf` — verb=`audit` OR `--lighthouse` / `--perf-trace` flags route to chrome-devtools-mcp.
+  - `rule_inspect_default` — verb=`inspect` routes to chrome-devtools-mcp.
+  - `rule_extract_default` — verb=`extract` routes to chrome-devtools-mcp. (`--scrape <urls...>` → obscura when it lands in Phase 8 — prepend a higher-precedence rule above; no edits needed here.)
+- [feat] `ROUTING_RULES` reordered: session_required → capture_flags → audit_or_perf → inspect_default → extract_default → default_navigation. session_required still wins above the capture rules (preserves existing playwright-lib behavior for site/session use); the new rules slot above `default_navigation` so capture-flag combos on `open` / `click` / `fill` / `snapshot` route to chrome-devtools-mcp instead of playwright-cli.
+- [internal] `tests/router.bats` (+10 cases) — capture-console / capture-network on snapshot, audit no-flag, --lighthouse and --perf-trace on snapshot, inspect default, extract default, capture wins over default-navigation, plain `open` regression guard, session-required wins over capture-flag, --tool=playwright-cli for inspect still rejected by capability filter.
+- [internal] `tests/routing-capability-sync.bats` — drift guard extended to cover `audit` / `inspect` / `extract` (was: open / click / fill / snapshot only). Catches future regressions where a rule routes to a tool that doesn't declare the verb.
+- [internal] Existing test "pick_tool audit (no --tool) falls through, dies EXIT_TOOL_MISSING" replaced with the new "verb=audit routes to chrome-devtools-mcp" (the pre-1d fall-through was the absence of this rule).
+- [docs] `references/chrome-devtools-mcp-cheatsheet.md` — "When the router picks this adapter" table reflects the new defaults; documents the session+capture limitation (session wins; capture flags silently ignored — resolution path is part 1f).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-1d-router-promotion.md` — phase plan.
+
+After this PR, `bash scripts/browser-snapshot.sh --capture-console` (or any verb with `--capture-*`) routes to chrome-devtools-mcp without `--tool=`. `bash scripts/browser-audit.sh` (when part 1e ships the script) will dispatch via the router automatically. The promotion is now meaningful because part 1c-ii made chrome-devtools-mcp's stateful verbs work via daemon — the router can confidently send click/fill traffic there too. No adapter changes; no verb script changes; the routing change is transparent to callers.
+
+Untouched per scope discipline: every adapter file (`scripts/lib/tool/*.sh` capabilities unchanged), every verb script (`scripts/browser-*.sh` — they call `pick_tool VERB` and pick up the new routing for free), `scripts/lib/node/chrome-devtools-bridge.mjs`, `scripts/lib/common.sh`, `scripts/lib/output.sh`, every credentials/session/site lib, `tests/lint.sh`.
+
 ### Phase 5 part 1c-ii — chrome-devtools-mcp daemon + ref persistence (click/fill)
 
 - [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — daemon mode lands. New verbs `daemon-start` / `daemon-stop` / `daemon-status` mirror `playwright-driver.mjs`'s lifecycle precedent. The daemon spawns ONE long-lived MCP server child, performs the `initialize` handshake once, holds the `eN ↔ uid` ref map, and exposes verb dispatch over a TCP loopback IPC server (`127.0.0.1:0` ephemeral port — Unix sun_path 104-char cap on macOS bats temp paths). State persisted at `${BROWSER_SKILL_HOME}/cdt-mcp-daemon.json` (mode 0600, dir 0700).
