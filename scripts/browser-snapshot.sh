@@ -46,8 +46,13 @@ why="${picked#*$'\t'}"
 
 source_picked_adapter "${tool_name}"
 
+# invoke_with_retry wraps tool_snapshot in transparent retry-on-EXIT_SESSION_
+# EXPIRED (phase-5 part 3-ii). When the adapter detects runtime session
+# expiry (rc=22) AND a credential with auto_relogin: true exists for the
+# current --site / --as, the helper silently re-logins via login --auto and
+# retries the verb once. No-op when no session context (--site unset).
 set +e
-adapter_out="$(tool_snapshot "${verb_argv[@]}")"
+adapter_out="$(invoke_with_retry snapshot "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 
