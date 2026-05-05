@@ -28,6 +28,8 @@ account=""
 backend=""
 auto_relogin="true"
 auth_flow="single-step-username-password"
+enable_totp=0
+yes_totp=0
 read_stdin=0
 dry_run=0
 yes_plaintext=0
@@ -51,6 +53,13 @@ Usage: creds-add --site SITE --as CRED_NAME --password-stdin [options]
                             supported by login --auto today; others persist
                             metadata for documentation but require --interactive
                             for relogin.
+  --enable-totp            mark this credential as TOTP-enabled (phase-5 part
+                            4-i: plumbing only — codegen/replay/rotation land
+                            in parts 4-ii/iii/iv). Requires --yes-i-know-totp
+                            (typed-phrase ack) and forbids --backend plaintext
+                            (TOTP shared secrets MUST go through OS keychain /
+                            libsecret per parent spec §1).
+  --yes-i-know-totp        acknowledgment for --enable-totp.
   --password-stdin         REQUIRED — read password from stdin (one line);
                             this is the ONLY password-input path. AP-7
                             forbids accepting the password as an argv arg.
@@ -76,6 +85,8 @@ while [ $# -gt 0 ]; do
     --backend)         backend="$2";       shift 2 ;;
     --auto-relogin)    auto_relogin="$2";  shift 2 ;;
     --auth-flow)       auth_flow="$2";     shift 2 ;;
+    --enable-totp)     enable_totp=1;      shift ;;
+    --yes-i-know-totp) yes_totp=1;         shift ;;
     --password-stdin)  read_stdin=1;       shift ;;
     --yes-i-know-plaintext) yes_plaintext=1; shift ;;
     --dry-run)         dry_run=1;          shift ;;
@@ -98,6 +109,13 @@ case "${auth_flow}" in
   *) die "${EXIT_USAGE_ERROR}" "--auth-flow must be one of {single-step-username-password, multi-step-username-password, username-only, custom} (got: ${auth_flow})" ;;
 esac
 
+# Phase 5 part 4-i: --enable-totp requires explicit ack + forbids plaintext.
+# Per parent spec §1, TOTP shared secrets are even more sensitive than
+# passwords (they generate codes for the lifetime of the secret).
+if [ "${enable_totp}" = "1" ] && [ "${yes_totp}" = "0" ]; then
+  die "${EXIT_USAGE_ERROR}" "--enable-totp requires --yes-i-know-totp (TOTP shared secrets are highly sensitive)"
+fi
+
 assert_safe_name "${as}" "credential-name"
 [ -z "${account}" ] && account="${site}@example.com"
 
@@ -117,6 +135,14 @@ case "${backend}" in
   keychain|libsecret|plaintext) ;;
   *) die "${EXIT_USAGE_ERROR}" "--backend must be one of {keychain, libsecret, plaintext} (got: ${backend})" ;;
 esac
+
+# Phase 5 part 4-i: TOTP-enabled creds MUST go through OS keychain / libsecret.
+# plaintext on-disk storage of a TOTP shared secret means anyone with read
+# access to the file can generate auth codes forever — that's worse than
+# plaintext password (passwords expire/rotate; TOTP secrets typically don't).
+if [ "${enable_totp}" = "1" ] && [ "${backend}" = "plaintext" ]; then
+  die "${EXIT_USAGE_ERROR}" "--enable-totp forbids --backend plaintext (TOTP secrets must go through keychain or libsecret)"
+fi
 
 # First-use plaintext gate (per parent spec §1: plaintext is paper security
 # without disk encryption — gate the first add behind an explicit ack).
@@ -152,6 +178,7 @@ if [ "${dry_run}" -eq 1 ]; then
 fi
 
 now_ts="$(now_iso)"
+totp_json="$([ "${enable_totp}" = "1" ] && printf 'true' || printf 'false')"
 meta_json="$(jq -nc \
   --arg n "${as}" \
   --arg s "${site}" \
@@ -159,6 +186,7 @@ meta_json="$(jq -nc \
   --arg b "${backend}" \
   --argjson ar "${auto_relogin}" \
   --arg af "${auth_flow}" \
+  --argjson tt "${totp_json}" \
   --arg now "${now_ts}" \
   '{
     schema_version: 1,
@@ -168,7 +196,7 @@ meta_json="$(jq -nc \
     backend: $b,
     auth_flow: $af,
     auto_relogin: $ar,
-    totp_enabled: false,
+    totp_enabled: $tt,
     created_at: $now
   }')"
 

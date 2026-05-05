@@ -13,6 +13,27 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 4-i — TOTP foundation: `--enable-totp` flag at `creds add` time
+
+- [feat] `scripts/browser-creds-add.sh` — new `--enable-totp` flag persists `totp_enabled: true` in cred metadata. Required co-flags: `--yes-i-know-totp` (typed acknowledgment that TOTP shared secrets are highly sensitive). Refuses `--backend plaintext` (TOTP secrets must go through OS keychain / libsecret per parent spec §1 — plaintext on-disk storage of a TOTP shared secret means anyone with read access can generate auth codes for the lifetime of the secret).
+- [security] Even gated, the plaintext refusal stands: TOTP shared secrets are categorically more sensitive than passwords because they don't expire/rotate (typical service issues one secret valid until manually re-enrolled). Plaintext storage of such secrets violates parent spec §1 in spirit even if the password gate were satisfied.
+- [internal] `tests/creds-add.bats` (+4 cases) — `--enable-totp` requires `--yes-i-know-totp`; refuses plaintext; happy path persists `totp_enabled=true`; regression — no `--enable-totp` defaults to false.
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-4-i-totp-plumbing.md` — phase plan.
+
+**Sub-scope (4-i — plumbing only):**
+- Marks the cred as TOTP-enabled in metadata.
+- Forbids plaintext backend for TOTP creds.
+- Doesn't yet store TOTP shared secret, generate codes, or replay during login.
+
+**Deferred to follow-up sub-parts of part 4:**
+- **4-ii (codegen)** — `creds totp` verb produces a current code via `oathtool` (or node port). Manual replay path: user reads code, types into browser.
+- **4-iii (auto-replay)** — `login --auto` reads TOTP secret + generates code + fills 2FA field after detecting the challenge page. Closes the loop.
+- **4-iv (rotation)** — `creds rotate-totp` verb for re-enrollment when service forces a new TOTP secret.
+
+After this PR, the TOTP track has its declaration foundation. Codegen and replay can layer on top without metadata-schema churn — part 4-ii's TOTP secret-storage uses the existing `credential.sh` backend dispatcher with a name-suffix convention (e.g. `<name>:totp` for the second slot).
+
+Untouched per scope discipline: `scripts/lib/credential.sh` (no schema changes — `totp_enabled` field already in metadata template since part 2d), `scripts/lib/secret/*.sh` (no backend ABI changes), every other verb script, all adapters.
+
 ### Phase 5 part 3-iv — 2FA detection in `login --auto` → exit 25
 
 - [feat] `scripts/lib/node/playwright-driver.mjs::runAutoRelogin` — new `detect2FA(page)` heuristic runs after the submit-form-and-wait sequence. Checks (in order): `input[autocomplete="one-time-code"]`, common OTP/code field name attributes (`input[name*="otp" i]`, etc.), and page text for 2FA keywords (`two-factor`, `verification code`, `authenticator app`, etc.). On match: closes the browser, emits `auto-relogin-2fa-required` JSON, exits 25 (matches bash `EXIT_AUTH_INTERACTIVE_REQUIRED`).
