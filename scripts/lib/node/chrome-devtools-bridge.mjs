@@ -115,8 +115,8 @@ async function realDispatch(args) {
   if (verb === 'daemon-stop')   return runDaemonStop();
   if (verb === 'daemon-status') return runDaemonStatus();
 
-  // Stateful verbs (click / fill / select) require a running daemon.
-  if (verb === 'click' || verb === 'fill' || verb === 'select') {
+  // Stateful verbs (click / fill / select / hover) require a running daemon.
+  if (verb === 'click' || verb === 'fill' || verb === 'select' || verb === 'hover') {
     return await runStatefulViaDaemon(verb, verbArgs);
   }
 
@@ -237,6 +237,14 @@ async function runStatefulViaDaemon(verb, verbArgs) {
 
   if (verb === 'click') {
     const reply = await ipcCall({ verb: 'click', ref });
+    emitReply(reply);
+    process.exit(reply.status === 'error' ? 30 : 0);
+  }
+
+  if (verb === 'hover') {
+    // Phase-6 part 3: pointer hover. Refs only for now; --selector path is
+    // a follow-up sub-part if user demand surfaces.
+    const reply = await ipcCall({ verb: 'hover', ref });
     emitReply(reply);
     process.exit(reply.status === 'error' ? 30 : 0);
   }
@@ -893,6 +901,39 @@ async function daemonChildMain() {
           key: msg.key,
           message: extractText(result),
           attached_to_daemon: true,
+        };
+      }
+      case 'hover': {
+        // Phase-6 part 3: pointer hover. eN→uid translation; calls MCP
+        // `hover` tool with the resolved uid. Stateful (refMap precondition
+        // mirrors click/fill/select).
+        if (!refMap) {
+          return {
+            event: 'error',
+            verb: 'hover',
+            status: 'error',
+            message: 'no refs (run snapshot first)',
+          };
+        }
+        const entry = refMap.find((r) => r.id === msg.ref);
+        if (!entry) {
+          return {
+            event: 'error',
+            verb: 'hover',
+            ref: msg.ref,
+            status: 'error',
+            message: `ref '${msg.ref}' not found in last snapshot (${refMap.length} refs available)`,
+          };
+        }
+        const result = await mcpCall('hover', { uid: entry.uid });
+        return {
+          verb: 'hover',
+          tool: 'chrome-devtools-mcp',
+          why: 'mcp/hover',
+          status: result?.isError ? 'error' : 'ok',
+          ref: entry.id,
+          uid: entry.uid,
+          message: extractText(result),
         };
       }
       case 'select': {

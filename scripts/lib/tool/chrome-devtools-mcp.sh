@@ -72,6 +72,7 @@ tool_capabilities() {
     "snapshot": { "flags": ["--depth"] },
     "press":    { "flags": ["--key"] },
     "select":   { "flags": ["--ref", "--value", "--label", "--index"] },
+    "hover":    { "flags": ["--ref"] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -219,4 +220,17 @@ tool_select() {
   [ -n "${ref}" ] || return 41
   [ -n "${mode_flag}" ] || return 41
   _drive select "${ref}" "${mode_flag}" "${mode_val}" "${rest[@]}"
+}
+
+tool_hover() {
+  local ref=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --ref) ref="$2"; shift 2 ;;
+      *)     rest+=("$1"); shift ;;
+    esac
+  done
+  [ -n "${ref}" ] || return 41
+  _drive hover "${ref}" "${rest[@]}"
 }

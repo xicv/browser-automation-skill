@@ -260,6 +260,37 @@ teardown() {
   printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing ref"
 }
 
+@test "daemon (Phase 6 part 3): hover via daemon translates ref → uid + hover MCP tool" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" hover e1
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "hover"' >/dev/null
+  printf '%s' "${output}" | jq -e '.ref == "e1"' >/dev/null
+  printf '%s' "${output}" | jq -e '.uid == "cdp-uid-1234"' >/dev/null
+  grep -q '"name":"hover"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=hover"
+  grep -q '"uid":"cdp-uid-1234"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing uid passthrough"
+}
+
+@test "daemon (Phase 6 part 3): hover without daemon → exit 41 with daemon hint" {
+  run bash -c "node '${BRIDGE}' hover e1"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "stderr must mention 'requires running daemon'"
+}
+
+@test "daemon (Phase 6 part 3): hover on unknown ref returns error event (no MCP call)" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" hover e99
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when ref unknown"
+  printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing ref"
+}
+
 @test "daemon (Phase 6): press --key Enter routes through daemon → press_key MCP tool" {
   node "${BRIDGE}" daemon-start >/dev/null
   run node "${BRIDGE}" press Enter

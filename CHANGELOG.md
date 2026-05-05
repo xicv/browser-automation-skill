@@ -13,6 +13,20 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 3 — `hover` verb (pointer hover by ref)
+
+- [feat] new `scripts/browser-hover.sh` verb — `--ref eN`. Routes to chrome-devtools-mcp via new `rule_hover_default`. Stateful (refMap precondition; mirrors click/select).
+- [feat] `scripts/lib/router.sh::rule_hover_default` — verb=`hover` → chrome-devtools-mcp. Slotted between `rule_select_default` and `rule_default_navigation`.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `hover` declared in capabilities (`flags: ["--ref"]`); new `tool_hover` dispatcher.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs::runStatefulViaDaemon` — extended for `hover` (parallel to click). Daemon dispatch `case 'hover'` resolves ref → uid, calls MCP `hover` tool.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `hover` handler echoes `hovered <uid>`.
+- [internal] new `tests/browser-hover.bats` (5 cases) — missing-ref, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+3) — daemon happy path (uid translation), no-daemon exit-41, unknown-ref error.
+- [docs] `SKILL.md` — `hover` row added (auto-regenerated).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-06-part-3-hover.md` — phase plan.
+
+`--selector` path deferred to follow-up if user demand surfaces (current shape is `--ref`-only mirroring click/select).
+
 ### Phase 6 part 2 — `select` verb (`<select>` option pick by ref)
 
 - [feat] new `scripts/browser-select.sh` verb — `--ref eN` (required) + exactly one of `--value VAL` / `--label LABEL` / `--index N`. Mode-flag mutex enforced (uses-counter idiom).

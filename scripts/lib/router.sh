@@ -25,6 +25,7 @@ ROUTING_RULES=(
   rule_extract_default
   rule_press_default
   rule_select_default
+  rule_hover_default
   rule_default_navigation
 )
 
@@ -146,6 +147,17 @@ rule_select_default() {
   case "${verb}" in
     select)
       printf 'chrome-devtools-mcp\t%s\n' "select default (only cdt-mcp declares select today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 3: pointer hover routes to chrome-devtools-mcp. Stateful —
+# requires daemon (refMap precondition). MCP `hover` tool accepts uid.
+rule_hover_default() {
+  local verb="$1"
+  case "${verb}" in
+    hover)
+      printf 'chrome-devtools-mcp\t%s\n' "hover default (only cdt-mcp declares hover today)"
       ;;
   esac
 }
