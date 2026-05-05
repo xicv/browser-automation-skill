@@ -13,6 +13,22 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 5 — `drag` verb (pointer drag from src → dst by refs)
+
+- [feat] new `scripts/browser-drag.sh` verb — `--src-ref eA` + `--dst-ref eB` (both required). Routes to chrome-devtools-mcp via new `rule_drag_default`. Stateful — refMap precondition for **both** refs (mirrors click/select shape, with two-ref translation).
+- [feat] `scripts/lib/router.sh::rule_drag_default` — verb=`drag` → chrome-devtools-mcp.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `drag` declared in capabilities (`flags: ["--src-ref", "--dst-ref"]`); new `tool_drag` dispatcher.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs::runStatefulViaDaemon` — drag has 2-ref argv shape (`drag <src-ref> <dst-ref>`), special-cased above the single-ref shape used by click/fill/select/hover. Daemon dispatch `case 'drag'` resolves both refs → uids, calls MCP `drag` tool with `{src_uid, dst_uid}`.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `drag` handler echoes `dragged <src> → <dst>`.
+- [internal] new `tests/browser-drag.bats` (6 cases) — missing-src-ref, missing-dst-ref, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+4) — daemon happy (both refs translated), no-daemon exit-41, unknown src ref error, unknown dst ref error.
+- [docs] `SKILL.md` — `drag` row added (auto-regenerated).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-06-part-5-drag.md` — phase plan.
+
+After this PR, `bash scripts/browser-drag.sh --src-ref e3 --dst-ref e7` works end-to-end (with daemon). Phase 6 progress: 5 of 8 verbs (press / select / hover / wait / drag). Remaining: upload / route / tab-*.
+
+Selector-based drag (`--src-selector`/`--dst-selector`) deferred to follow-up.
+
 ### Phase 6 part 4 — `wait` verb (explicit element-state wait)
 
 - [feat] new `scripts/browser-wait.sh` verb — `--selector CSS` + `--state visible|hidden|attached|detached` (default visible) + `--timeout MS` (default: MCP server's default). Routes to chrome-devtools-mcp via new `rule_wait_default`. Stateless — works one-shot or daemon-routed (parallel to eval/audit).

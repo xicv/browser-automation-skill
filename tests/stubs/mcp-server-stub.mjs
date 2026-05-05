@@ -166,6 +166,15 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'drag': {
+      const src = args.src_uid ?? '<missing>';
+      const dst = args.dst_uid ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `dragged ${src} → ${dst}` }],
+        isError: false,
+      });
+      break;
+    }
     case 'select_option': {
       const uid = args.uid ?? '<missing>';
       let by;

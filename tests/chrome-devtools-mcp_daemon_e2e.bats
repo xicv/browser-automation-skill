@@ -291,6 +291,50 @@ teardown() {
   printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing ref"
 }
 
+@test "daemon (Phase 6 part 5): drag via daemon translates both refs → uids + drag MCP tool" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" drag e1 e2
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "drag"' >/dev/null
+  printf '%s' "${output}" | jq -e '.src_ref == "e1"' >/dev/null
+  printf '%s' "${output}" | jq -e '.dst_ref == "e2"' >/dev/null
+  printf '%s' "${output}" | jq -e '.src_uid == "cdp-uid-1234"' >/dev/null
+  printf '%s' "${output}" | jq -e '.dst_uid == "cdp-uid-5678"' >/dev/null
+  grep -q '"name":"drag"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=drag"
+  grep -q '"src_uid":"cdp-uid-1234"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing src_uid passthrough"
+  grep -q '"dst_uid":"cdp-uid-5678"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing dst_uid passthrough"
+}
+
+@test "daemon (Phase 6 part 5): drag without daemon → exit 41 with daemon hint" {
+  run bash -c "node '${BRIDGE}' drag e1 e2"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "stderr must mention 'requires running daemon'"
+}
+
+@test "daemon (Phase 6 part 5): drag with unknown src ref returns error event" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" drag e99 e2
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when src ref unknown"
+  printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing src ref"
+}
+
+@test "daemon (Phase 6 part 5): drag with unknown dst ref returns error event" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" open https://example.com >/dev/null
+  node "${BRIDGE}" snapshot >/dev/null
+  run node "${BRIDGE}" drag e1 e99
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when dst ref unknown"
+  printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing dst ref"
+}
+
 @test "daemon (Phase 6 part 4): wait --selector via daemon dispatches wait_for" {
   node "${BRIDGE}" daemon-start >/dev/null
   run node "${BRIDGE}" wait ".x" --state hidden

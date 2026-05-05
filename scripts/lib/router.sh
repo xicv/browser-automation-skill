@@ -27,6 +27,7 @@ ROUTING_RULES=(
   rule_select_default
   rule_hover_default
   rule_wait_default
+  rule_drag_default
   rule_default_navigation
 )
 
@@ -171,6 +172,18 @@ rule_wait_default() {
   case "${verb}" in
     wait)
       printf 'chrome-devtools-mcp\t%s\n' "wait default (only cdt-mcp declares wait today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 5: pointer drag (src → dst by refs). Stateful — requires
+# daemon (refMap precondition for both src + dst). MCP `drag` tool accepts
+# {src_uid, dst_uid}.
+rule_drag_default() {
+  local verb="$1"
+  case "${verb}" in
+    drag)
+      printf 'chrome-devtools-mcp\t%s\n' "drag default (only cdt-mcp declares drag today)"
       ;;
   esac
 }
