@@ -64,16 +64,22 @@ Stub mode (`BROWSER_SKILL_LIB_STUB=1`) still works exactly as part-1b — used b
 
 ## When the router picks this adapter
 
-| Verb | Default? | Why |
+After Phase 5 part 1d, four routing rules promote chrome-devtools-mcp to a default for verbs and flags where it's the only sensible adapter (per parent spec Appendix B):
+
+| Verb / flag | Default? | Why |
 |---|---|---|
-| `open` | no — opt-in via `--tool=` | router default is playwright-cli |
-| `click` | no — opt-in | playwright-cli |
-| `fill` | no — opt-in | playwright-cli (or playwright-lib for `--secret-stdin`) |
-| `snapshot` | no — opt-in | playwright-cli |
-| `inspect` | **future default** (part 1d) | dedicated console + network MCP tools |
-| `audit` | **future default** (part 1d) | only adapter with `lighthouse_audit` + `performance_*` |
-| `extract` | **future default** (part 1d, with `--scrape` exception) | `evaluate_script` + `list_network_requests` |
+| `open` (no flags) | no | router default is playwright-cli |
+| `click` (no flags) | no | playwright-cli |
+| `fill` (no flags) | no | playwright-cli (or playwright-lib for `--secret-stdin`) |
+| `snapshot` (no flags) | no | playwright-cli |
+| `--capture-console` / `--capture-network` (any verb) | **YES** (part 1d) | `rule_capture_flags` — only adapter with console + network MCP tools |
+| `--lighthouse` / `--perf-trace` (any verb) | **YES** (part 1d) | `rule_audit_or_perf` — only adapter with `lighthouse_audit` + `performance_*` |
+| `audit` (any flags) | **YES** (part 1d) | `rule_audit_or_perf` |
+| `inspect` | **YES** (part 1d) | `rule_inspect_default` |
+| `extract` | **YES** (part 1d) | `rule_extract_default`. With `--scrape <urls...>` → obscura (when Phase 8 lands) |
 | `eval` | no — opt-in | playwright-cli/lib both support it |
+
+`session_required` (storage-state loaded) still wins above all capture-flag rules; that path keeps routing through playwright-lib, so flag combos like `--site app --capture-console` route to playwright-lib (capture flags silently ignored). Limitation tracked for part 1f (Chrome `--user-data-dir` lets cdt-mcp do session loading too).
 
 ## Capabilities declared
 

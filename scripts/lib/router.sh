@@ -19,6 +19,10 @@ readonly BROWSER_SKILL_ROUTER_LOADED=1
 # Adding a tool that's NEVER the default for any verb = ZERO edits to this array.
 ROUTING_RULES=(
   rule_session_required
+  rule_capture_flags
+  rule_audit_or_perf
+  rule_inspect_default
+  rule_extract_default
   rule_default_navigation
 )
 
@@ -64,6 +68,59 @@ rule_session_required() {
         ;;
     esac
   fi
+}
+
+# Capture flags require the dedicated console + network MCP tools that only
+# chrome-devtools-mcp exposes (per parent spec Appendix B). Triggered by
+# `--capture-console` or `--capture-network` on any verb.
+rule_capture_flags() {
+  local verb="$1"
+  shift
+  if _has_flag --capture-console "$@" || _has_flag --capture-network "$@"; then
+    printf 'chrome-devtools-mcp\t%s\n' "--capture-* requested (only cdt-mcp exposes console/network MCP tools)"
+  fi
+}
+
+# Lighthouse + perf-trace verbs/flags route to chrome-devtools-mcp — only
+# adapter with `lighthouse_audit` and `performance_*` MCP tools (Appendix B).
+rule_audit_or_perf() {
+  local verb="$1"
+  shift
+  case "${verb}" in
+    audit)
+      printf 'chrome-devtools-mcp\t%s\n' "verb=audit (only cdt-mcp has lighthouse/perf)"
+      return 0
+      ;;
+  esac
+  if _has_flag --lighthouse "$@" || _has_flag --perf-trace "$@"; then
+    printf 'chrome-devtools-mcp\t%s\n' "--lighthouse/--perf-trace requested (only cdt-mcp has them)"
+  fi
+}
+
+# Default tool for `inspect` per parent spec Appendix B — chrome-devtools-mcp
+# is the only adapter with dedicated console + network + screenshot MCP tools
+# bundled into a single inspection surface.
+rule_inspect_default() {
+  local verb="$1"
+  case "${verb}" in
+    inspect)
+      printf 'chrome-devtools-mcp\t%s\n' "inspect default per Appendix B"
+      ;;
+  esac
+}
+
+# Default tool for `extract` per parent spec Appendix B — chrome-devtools-mcp
+# pairs `evaluate_script` with `list_network_requests` for selector/eval +
+# multi-URL inspection. NOTE: `--scrape <urls...>` should route to obscura
+# when it lands (Phase 8); prepend a higher-precedence obscura rule above
+# this one then — no edits needed here.
+rule_extract_default() {
+  local verb="$1"
+  case "${verb}" in
+    extract)
+      printf 'chrome-devtools-mcp\t%s\n' "extract default per Appendix B"
+      ;;
+  esac
 }
 
 # Default for navigation/inspection verbs — playwright-cli is the cheap,
