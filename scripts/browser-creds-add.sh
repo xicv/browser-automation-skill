@@ -27,6 +27,7 @@ as=""
 account=""
 backend=""
 auto_relogin="true"
+auth_flow="single-step-username-password"
 read_stdin=0
 dry_run=0
 yes_plaintext=0
@@ -42,8 +43,14 @@ Usage: creds-add --site SITE --as CRED_NAME --password-stdin [options]
                             (default: smart auto-detect per OS — keychain on
                              Darwin, libsecret on Linux when secret-tool is
                              reachable, plaintext fallback otherwise)
-  --auto-relogin BOOL      true | false (default: true; honest until phase-5
-                            part 3's auth-flow detection lands)
+  --auto-relogin BOOL      true | false (default: true; relogin via login --auto
+                            requires auth_flow=single-step-username-password)
+  --auth-flow FLOW         single-step-username-password | multi-step-username-
+                            password | username-only | custom (default:
+                            single-step-username-password). Only single-step is
+                            supported by login --auto today; others persist
+                            metadata for documentation but require --interactive
+                            for relogin.
   --password-stdin         REQUIRED — read password from stdin (one line);
                             this is the ONLY password-input path. AP-7
                             forbids accepting the password as an argv arg.
@@ -68,6 +75,7 @@ while [ $# -gt 0 ]; do
     --account)         account="$2";       shift 2 ;;
     --backend)         backend="$2";       shift 2 ;;
     --auto-relogin)    auto_relogin="$2";  shift 2 ;;
+    --auth-flow)       auth_flow="$2";     shift 2 ;;
     --password-stdin)  read_stdin=1;       shift ;;
     --yes-i-know-plaintext) yes_plaintext=1; shift ;;
     --dry-run)         dry_run=1;          shift ;;
@@ -83,6 +91,11 @@ done
 case "${auto_relogin}" in
   true|false) ;;
   *) die "${EXIT_USAGE_ERROR}" "--auto-relogin must be 'true' or 'false' (got: ${auto_relogin})" ;;
+esac
+
+case "${auth_flow}" in
+  single-step-username-password|multi-step-username-password|username-only|custom) ;;
+  *) die "${EXIT_USAGE_ERROR}" "--auth-flow must be one of {single-step-username-password, multi-step-username-password, username-only, custom} (got: ${auth_flow})" ;;
 esac
 
 assert_safe_name "${as}" "credential-name"
@@ -145,6 +158,7 @@ meta_json="$(jq -nc \
   --arg a "${account}" \
   --arg b "${backend}" \
   --argjson ar "${auto_relogin}" \
+  --arg af "${auth_flow}" \
   --arg now "${now_ts}" \
   '{
     schema_version: 1,
@@ -152,7 +166,7 @@ meta_json="$(jq -nc \
     site: $s,
     account: $a,
     backend: $b,
-    auth_flow: "single-step-username-password",
+    auth_flow: $af,
     auto_relogin: $ar,
     totp_enabled: false,
     created_at: $now
