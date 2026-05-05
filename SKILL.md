@@ -33,6 +33,8 @@ Real browser launches arrive in Phase 3.
 | `creds show` (reveal) | After typed-phrase confirmation, include secret + masked preview | `printf 'prod--admin\n' \| … creds-show --as prod--admin --reveal` |
 | `creds remove`  | Typed-name confirmed delete of a credential | `… creds-remove --as prod--admin --yes-i-know` |
 | `creds migrate` | Move credential to a different backend (fail-safe ordering) | `… creds-migrate --as prod--admin --to keychain --yes-i-know` |
+| `creds totp`    | Generate current 6-digit TOTP code from stored shared secret (RFC 6238) | `… creds-totp --as prod--admin` |
+| `creds rotate-totp` | Re-enroll TOTP shared secret (service forced new QR) | `printf '%s' NEW_BASE32 \| … creds-rotate-totp --as prod--admin --totp-secret-stdin --yes-i-know` |
 | `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
 | `open` w/ session | Apply a stored storageState before navigating | `… open --site prod --as prod--admin --url …` |
 | `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |
