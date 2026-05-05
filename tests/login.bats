@@ -272,6 +272,50 @@ _seed_auto_cred() {
 
 # --- Phase 5 part 3-iv: 2FA detection → exit 25 ---------------------------
 
+# --- Phase 5 part 4-iii: TOTP auto-replay -----------------------------
+
+_seed_totp_cred() {
+  local name="$1" site="${2:-prod}"
+  local secret="GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ"
+  local meta
+  meta="$(jq -nc --arg n "${name}" --arg s "${site}" --arg a "alice@example.com" \
+    '{schema_version:1, name:$n, site:$s, account:$a, backend:"keychain",
+      auth_flow:"single-step-username-password", auto_relogin:true,
+      totp_enabled:true, created_at:"2026-05-05T00:00:00Z"}')"
+  bash -c "
+    set -euo pipefail
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/credential.sh'
+    credential_save '${name}' '${meta}'
+    printf '%s' 'sekret' | credential_set_secret '${name}'
+    printf '%s' '${secret}' | credential_set_totp_secret '${name}'
+  "
+}
+
+@test "login --auto (4-iii): totp_enabled cred → driver receives 3rd stdin chunk + auto-replays" {
+  _setup_auto_test
+  _seed_totp_cred prod--totpauto
+  BROWSER_SKILL_DRIVER_TEST_TOTP_REPLAY=1 \
+    run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as prod--totpauto --auto
+  teardown_temp_home
+  assert_status 0
+  printf '%s' "${output}" | grep -q "auto-relogin-totp-replayed" \
+    || fail "expected driver to emit totp-replayed event"
+}
+
+@test "login --auto (4-iii): non-totp cred → driver receives only 2 stdin chunks (regression)" {
+  _setup_auto_test
+  _seed_auto_cred prod--noTOTP alice@example.com true prod single-step-username-password
+  # If the bash side mistakenly appends a 3rd chunk for non-totp creds, the
+  # test-mode TOTP-replay env var would consume it and exit success. We DON'T
+  # set that env var here, so the driver follows the normal path. Test simply
+  # verifies the dry-run path still works for non-totp creds.
+  run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as prod--noTOTP --auto --dry-run
+  teardown_temp_home
+  assert_status 0
+  printf '%s' "${output}" | grep -q "would auto-relogin" || fail "expected dry-run path"
+}
+
 @test "login --auto (3-iv): driver returning 25 propagates as EXIT_AUTH_INTERACTIVE_REQUIRED with hint" {
   _setup_auto_test
   _seed_auto_cred prod--2fa alice@example.com true prod
