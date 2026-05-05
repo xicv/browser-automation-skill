@@ -291,6 +291,42 @@ teardown() {
   printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing ref"
 }
 
+@test "daemon (Phase 6 part 7): route block via daemon registers rule + emits ack" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" route "https://*.tracking.com/*" block
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "route"' >/dev/null
+  printf '%s' "${output}" | jq -e '.pattern == "https://*.tracking.com/*"' >/dev/null
+  printf '%s' "${output}" | jq -e '.action == "block"' >/dev/null
+  printf '%s' "${output}" | jq -e '.rule_count == 1' >/dev/null
+  printf '%s' "${output}" | jq -e '.attached_to_daemon == true' >/dev/null
+  grep -q '"name":"route_url"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=route_url"
+}
+
+@test "daemon (Phase 6 part 7): two route calls accumulate in daemon's routeRules" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" route "https://a.com/*" block >/dev/null
+  run node "${BRIDGE}" route "https://b.com/*" allow
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.rule_count == 2' >/dev/null
+}
+
+@test "daemon (Phase 6 part 7): route with invalid action returns error event" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" route "https://x.com/*" ghost
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when action invalid"
+  printf '%s' "${output}" | jq -e '.event == "error"' >/dev/null
+  printf '%s' "${output}" | grep -q "ghost" || fail "error must name the bad action"
+}
+
+@test "daemon (Phase 6 part 7): route without daemon → exit 41 with daemon hint" {
+  run bash -c "node '${BRIDGE}' route 'https://x.com/*' block"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "stderr must mention 'requires running daemon'"
+}
+
 @test "daemon (Phase 6 part 6): upload via daemon translates ref → uid + upload_file MCP tool" {
   node "${BRIDGE}" daemon-start >/dev/null
   node "${BRIDGE}" open https://example.com >/dev/null

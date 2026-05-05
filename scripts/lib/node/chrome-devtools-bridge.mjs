@@ -122,6 +122,13 @@ async function realDispatch(args) {
     return await runStatefulViaDaemon(verb, verbArgs);
   }
 
+  // route is daemon-state-mutating (registers rules in the daemon's
+  // routeRules slot). Daemon-required (like the stateful verbs above) but
+  // doesn't depend on refMap.
+  if (verb === 'route') {
+    return await runRouteViaDaemon(verbArgs);
+  }
+
   // Multi-call verbs (inspect / extract) — phase-05 part 1e-ii. Route through
   // daemon if running (shared long-lived MCP child); otherwise spawn one-shot
   // and run all sub-calls before shutdown.
@@ -224,6 +231,26 @@ async function runStatelessOneShot(verb, verbArgs) {
 // ----------------------------------------------------------------------------
 // Stateful verbs via daemon IPC
 // ----------------------------------------------------------------------------
+
+// runRouteViaDaemon — register a network-route rule in the daemon. Args
+// shape from adapter: `route <pattern> <action>`. Daemon-side stores
+// {pattern, action} in routeRules and best-effort calls MCP route_url tool.
+async function runRouteViaDaemon(verbArgs) {
+  if (!isDaemonAlive()) {
+    process.stderr.write(
+      'chrome-devtools-bridge: route requires running daemon ' +
+        '(run: node chrome-devtools-bridge.mjs daemon-start)\n'
+    );
+    process.exit(41);
+  }
+  const pattern = verbArgs[0];
+  const action = verbArgs[1];
+  if (!pattern) throw withExit(2, "route requires <pattern>");
+  if (!action) throw withExit(2, "route requires <action>");
+  const reply = await ipcCall({ verb: 'route', pattern, action });
+  emitReply(reply);
+  process.exit(reply.status === 'error' ? 30 : 0);
+}
 
 async function runStatefulViaDaemon(verb, verbArgs) {
   if (!isDaemonAlive()) {
@@ -755,6 +782,7 @@ async function daemonChildMain() {
 
   // Daemon-side state.
   let refMap = null;
+  const routeRules = [];  // Phase-6 part 7: array of {pattern, action} entries.
   const mcpCall = makeMcpCall(mcpChild, reader, 100);
 
   // IPC server (TCP loopback, ephemeral port — sun_path 104-char cap workaround).
@@ -956,6 +984,43 @@ async function daemonChildMain() {
           state: msg.state ?? 'visible',
           timeout: msg.timeout ?? null,
           message: extractText(result),
+          attached_to_daemon: true,
+        };
+      }
+      case 'route': {
+        // Phase-6 part 7: register a network-route rule. Allowed actions
+        // for this sub-part: block | allow. fulfill (synthetic responses
+        // with --status / --body) deferred to part 7-ii.
+        const allowed = ['block', 'allow'];
+        if (!allowed.includes(msg.action)) {
+          return {
+            event: 'error',
+            verb: 'route',
+            status: 'error',
+            message: `route action must be one of ${allowed.join(', ')} (got: ${msg.action}); fulfill is part 7-ii`,
+          };
+        }
+        const rule = { pattern: msg.pattern, action: msg.action };
+        routeRules.push(rule);
+        // Best-effort MCP `route_url` invocation. Real upstream may use a
+        // different tool name (e.g. network.setRequestInterception); upstream
+        // binding hardening is part 7-ii.
+        let mcpAck = null;
+        try {
+          const result = await mcpCall('route_url', { pattern: msg.pattern, action: msg.action });
+          mcpAck = extractText(result);
+        } catch (err) {
+          mcpAck = `mcp-route_url-failed: ${err && err.message ? err.message : err}`;
+        }
+        return {
+          verb: 'route',
+          tool: 'chrome-devtools-mcp',
+          why: 'mcp/route_url',
+          status: 'ok',
+          pattern: msg.pattern,
+          action: msg.action,
+          rule_count: routeRules.length,
+          mcp_ack: mcpAck,
           attached_to_daemon: true,
         };
       }

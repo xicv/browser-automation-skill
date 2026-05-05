@@ -13,6 +13,29 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 7-i — `route` verb foundation (block + allow only; fulfill deferred)
+
+- [feat] new `scripts/browser-route.sh` verb — `--pattern URL_PATTERN` + `--action allow|block` (required). Routes to chrome-devtools-mcp via new `rule_route_default`. **Daemon-state-mutating** (registers `{pattern, action}` in daemon's `routeRules` array). Daemon-required.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — new `runRouteViaDaemon` dispatcher (parallel to `runStatefulViaDaemon` but no refMap dependency). Daemon child gains `routeRules` state slot (array of `{pattern, action}` entries). Dispatch case `'route'` validates action against `{block, allow}`, appends rule, best-effort calls MCP `route_url` (real upstream tool name may differ — binding hardening is part 7-ii), emits ack with `rule_count`.
+- [feat] `scripts/lib/router.sh::rule_route_default` — verb=`route` → chrome-devtools-mcp.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `route` capability declared (`flags: ["--pattern", "--action"]`); new `tool_route` dispatcher.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `route_url` handler echoes `routed <pattern> → <action>`.
+- [internal] new `tests/browser-route.bats` (8 cases) — missing-pattern, missing-action, fulfill rejected with hint, invalid-action, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+4) — daemon block-action happy (rule registered, MCP ack), 2 calls accumulate (`rule_count == 2`), invalid-action error event, no-daemon exit-41.
+- [docs] `SKILL.md` — `route` row added (auto-regenerated).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-06-part-7-i-route.md` — phase plan.
+
+**Sub-scope (7-i — minimal):**
+- `block` and `allow` actions only.
+- Foundation for daemon-side rule storage; runtime application of rules to actual network requests is upstream MCP's responsibility.
+
+**Deferred to part 7-ii:**
+- `--action fulfill` with `--status N` and `--body BODY` (synthetic responses). Body via stdin per AP-7 since bodies can be arbitrary content.
+- Rule removal (`route remove --pattern X`) and listing (`route list`).
+- Real upstream binding (correct MCP tool name + canonical action verbs). Current `route_url` is a stub-only convention.
+
+Phase 6 progress: **7 of 8 verbs** (press / select / hover / wait / drag / upload / route). Remaining: tab-*.
+
 ### Phase 6 part 6 — `upload` verb (`<input type=file>` upload with path security)
 
 - [feat] new `scripts/browser-upload.sh` verb — `--ref eN` + `--path PATH`. Routes to chrome-devtools-mcp via new `rule_upload_default`. Stateful (refMap precondition).
