@@ -26,6 +26,7 @@ ROUTING_RULES=(
   rule_press_default
   rule_select_default
   rule_hover_default
+  rule_wait_default
   rule_default_navigation
 )
 
@@ -158,6 +159,18 @@ rule_hover_default() {
   case "${verb}" in
     hover)
       printf 'chrome-devtools-mcp\t%s\n' "hover default (only cdt-mcp declares hover today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 4: explicit wait for an element state. Stateless — no refMap
+# required (selector-based). MCP `wait_for` tool accepts {selector, state,
+# timeout}. Routes one-shot or daemon-routed (parallel to eval/audit).
+rule_wait_default() {
+  local verb="$1"
+  case "${verb}" in
+    wait)
+      printf 'chrome-devtools-mcp\t%s\n' "wait default (only cdt-mcp declares wait today)"
       ;;
   esac
 }

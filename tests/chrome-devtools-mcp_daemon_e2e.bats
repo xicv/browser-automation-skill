@@ -291,6 +291,20 @@ teardown() {
   printf '%s' "${output}" | grep -q "e99" || fail "error must name the missing ref"
 }
 
+@test "daemon (Phase 6 part 4): wait --selector via daemon dispatches wait_for" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" wait ".x" --state hidden
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "wait"' >/dev/null
+  printf '%s' "${output}" | jq -e '.selector == ".x"' >/dev/null
+  printf '%s' "${output}" | jq -e '.state == "hidden"' >/dev/null
+  printf '%s' "${output}" | jq -e '.attached_to_daemon == true' >/dev/null
+  grep -q '"name":"wait_for"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=wait_for"
+  grep -q '"selector":".x"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing selector passthrough"
+}
+
 @test "daemon (Phase 6): press --key Enter routes through daemon → press_key MCP tool" {
   node "${BRIDGE}" daemon-start >/dev/null
   run node "${BRIDGE}" press Enter

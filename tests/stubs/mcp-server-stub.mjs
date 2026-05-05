@@ -149,6 +149,15 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'wait_for': {
+      const selector = args.selector ?? '<missing>';
+      const state = args.state ?? 'visible';
+      reply(id, {
+        content: [{ type: 'text', text: `waited for ${selector} to be ${state}` }],
+        isError: false,
+      });
+      break;
+    }
     case 'hover': {
       const uid = args.uid ?? '<missing>';
       reply(id, {
