@@ -193,6 +193,19 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'list_pages': {
+      // Phase-6 part 8-i: canned 2-tab enumeration. Real upstream returns
+      // a pages array; bridge normalizes to {tab_id, url, title}.
+      reply(id, {
+        content: [{ type: 'text', text: 'list_pages: 2 pages' }],
+        pages: [
+          { url: 'https://example.com/',     title: 'Example Domain' },
+          { url: 'https://example.org/news', title: 'News' },
+        ],
+        isError: false,
+      });
+      break;
+    }
     case 'select_option': {
       const uid = args.uid ?? '<missing>';
       let by;

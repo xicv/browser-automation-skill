@@ -129,6 +129,14 @@ async function realDispatch(args) {
     return await runRouteViaDaemon(verbArgs);
   }
 
+  // tab-list is read-only enumeration but daemon-required so it can cache
+  // results in the daemon's `tabs` slot (8-ii / 8-iii will mutate the same
+  // slot — landing 8-i daemon-required avoids retroactively changing the
+  // contract later). No args.
+  if (verb === 'tab-list') {
+    return await runTabListViaDaemon(verbArgs);
+  }
+
   // Multi-call verbs (inspect / extract) — phase-05 part 1e-ii. Route through
   // daemon if running (shared long-lived MCP child); otherwise spawn one-shot
   // and run all sub-calls before shutdown.
@@ -231,6 +239,22 @@ async function runStatelessOneShot(verb, verbArgs) {
 // ----------------------------------------------------------------------------
 // Stateful verbs via daemon IPC
 // ----------------------------------------------------------------------------
+
+// runTabListViaDaemon — read-only enumeration of tabs/pages held by the
+// daemon. No args. Daemon-side dispatch calls upstream MCP `list_pages`,
+// normalizes to [{tab_id, url, title}], caches in `tabs` slot, returns.
+async function runTabListViaDaemon(_verbArgs) {
+  if (!isDaemonAlive()) {
+    process.stderr.write(
+      'chrome-devtools-bridge: tab-list requires running daemon ' +
+        '(run: node chrome-devtools-bridge.mjs daemon-start)\n'
+    );
+    process.exit(41);
+  }
+  const reply = await ipcCall({ verb: 'tab-list' });
+  emitReply(reply);
+  process.exit(reply.status === 'error' ? 30 : 0);
+}
 
 // runRouteViaDaemon — register a network-route rule in the daemon. Args
 // shape from adapter: `route <pattern> <action>`. Daemon-side stores
@@ -783,6 +807,9 @@ async function daemonChildMain() {
   // Daemon-side state.
   let refMap = null;
   const routeRules = [];  // Phase-6 part 7: array of {pattern, action} entries.
+  let tabs = [];          // Phase-6 part 8-i: array of {tab_id, url, title}.
+                          //   Replaced (not appended) on each tab-list call.
+                          //   8-ii will add a currentTab pointer; 8-iii will splice.
   const mcpCall = makeMcpCall(mcpChild, reader, 100);
 
   // IPC server (TCP loopback, ephemeral port — sun_path 104-char cap workaround).
@@ -984,6 +1011,39 @@ async function daemonChildMain() {
           state: msg.state ?? 'visible',
           timeout: msg.timeout ?? null,
           message: extractText(result),
+          attached_to_daemon: true,
+        };
+      }
+      case 'tab-list': {
+        // Phase-6 part 8-i: read-only enumeration. Calls upstream MCP
+        // `list_pages` (best-effort name; real upstream may use a different
+        // tool — binding hardening tracked in 8-ii/8-iii). Result normalized
+        // to [{tab_id, url, title}] where `tab_id` is bridge-assigned
+        // (1-based, stable per call). Replaces — not appends — the cache.
+        let result;
+        try {
+          result = await mcpCall('list_pages', {});
+        } catch (err) {
+          return {
+            event: 'error',
+            verb: 'tab-list',
+            status: 'error',
+            message: `mcp/list_pages failed: ${err && err.message ? err.message : err}`,
+          };
+        }
+        const raw = result?.pages ?? result?.tabs ?? [];
+        tabs = (Array.isArray(raw) ? raw : []).map((p, i) => ({
+          tab_id: i + 1,
+          url:    typeof p?.url   === 'string' ? p.url   : '',
+          title:  typeof p?.title === 'string' ? p.title : '',
+        }));
+        return {
+          verb: 'tab-list',
+          tool: 'chrome-devtools-mcp',
+          why:  'mcp/list_pages',
+          status: 'ok',
+          tabs,
+          tab_count: tabs.length,
           attached_to_daemon: true,
         };
       }
