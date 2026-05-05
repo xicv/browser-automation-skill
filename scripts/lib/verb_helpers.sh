@@ -121,3 +121,102 @@ resolve_session_storage_state() {
   BROWSER_SKILL_STORAGE_STATE="${SESSIONS_DIR}/${session_name}.json"
   export BROWSER_SKILL_STORAGE_STATE
 }
+
+# --- Phase 5 part 3-ii: transparent verb-retry on EXIT_SESSION_EXPIRED -------
+#
+# When a verb's adapter dispatch (tool_VERB) exits 22 (EXIT_SESSION_EXPIRED)
+# AND the current --site / --as has a credential with auto_relogin: true,
+# silently re-login via `bash browser-login.sh --auto` and retry the verb
+# EXACTLY ONCE. Per parent spec §4.4: every verb call → silent re-login →
+# retry, exactly one attempt. Wires into one verb (snapshot) in this PR;
+# remaining verbs in follow-ups.
+
+# invoke_with_retry VERB ARGS... — runs tool_${VERB} ARGS, returning its
+# stdout + exit code. On EXIT_SESSION_EXPIRED (22), if a credential with
+# auto_relogin: true exists for the resolved site/cred, runs login --auto
+# silently then retries the verb ONCE. Caller sees a single stdout + final rc.
+invoke_with_retry() {
+  local verb="$1"
+  shift
+
+  local out rc
+  set +e
+  out="$(tool_"${verb}" "$@")"
+  rc=$?
+  set -e
+
+  if [ "${rc}" -ne "${EXIT_SESSION_EXPIRED}" ]; then
+    printf '%s' "${out}"
+    return "${rc}"
+  fi
+  if ! _can_auto_relogin; then
+    printf '%s' "${out}"
+    return "${rc}"
+  fi
+  if ! _silent_relogin >/dev/null 2>&1; then
+    printf '%s' "${out}"
+    return "${rc}"
+  fi
+
+  # Re-resolve session storage state so the retry picks up the fresh file.
+  resolve_session_storage_state
+
+  set +e
+  out="$(tool_"${verb}" "$@")"
+  rc=$?
+  set -e
+  printf '%s' "${out}"
+  return "${rc}"
+}
+
+# _can_auto_relogin — returns 0 iff: ARG_SITE set + a credential exists
+# (resolved name = ARG_AS or site.default_session) + that credential's
+# metadata declares auto_relogin: true (default for new creds per part 2d).
+_can_auto_relogin() {
+  [ -n "${ARG_SITE:-}" ] || return 1
+  local cred_name
+  cred_name="$(_resolve_relogin_cred_name 2>/dev/null)" || return 1
+  [ -n "${cred_name}" ] || return 1
+
+  # credential.sh may not be sourced in every verb script. Source on demand.
+  if ! command -v credential_load >/dev/null 2>&1; then
+    # shellcheck source=credential.sh
+    # shellcheck disable=SC1091
+    source "$(dirname "${BASH_SOURCE[0]}")/credential.sh" 2>/dev/null || return 1
+  fi
+
+  local cred_meta auto_relogin
+  cred_meta="$(credential_load "${cred_name}" 2>/dev/null)" || return 1
+  auto_relogin="$(jq -r '.auto_relogin // false' <<<"${cred_meta}" 2>/dev/null)"
+  [ "${auto_relogin}" = "true" ]
+}
+
+# _resolve_relogin_cred_name — resolves the credential name for retry. Mirrors
+# session-resolution: prefer ARG_AS; fall back to site's default_session;
+# return non-zero if neither.
+_resolve_relogin_cred_name() {
+  if [ -n "${ARG_AS:-}" ]; then
+    printf '%s' "${ARG_AS}"
+    return 0
+  fi
+  if [ -n "${ARG_SITE:-}" ] && site_exists "${ARG_SITE}"; then
+    local profile default_session
+    profile="$(site_load "${ARG_SITE}")"
+    default_session="$(jq -r '.default_session // ""' <<<"${profile}" 2>/dev/null)"
+    if [ -n "${default_session}" ]; then
+      printf '%s' "${default_session}"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# _silent_relogin — runs `bash browser-login.sh --auto` for the resolved cred.
+# Stdout/stderr suppressed by caller (`>/dev/null 2>&1`). Returns its exit code.
+_silent_relogin() {
+  local cred_name
+  cred_name="$(_resolve_relogin_cred_name)" || return 1
+  local helpers_dir
+  helpers_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  bash "${helpers_dir}/../browser-login.sh" --auto --site "${ARG_SITE}" --as "${cred_name}"
+}

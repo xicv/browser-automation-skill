@@ -13,6 +13,22 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 3-ii — Transparent verb-retry on EXIT_SESSION_EXPIRED (helper + snapshot wired)
+
+- [feat] new `scripts/lib/verb_helpers.sh::invoke_with_retry VERB ARGS...` — wraps `tool_${VERB} ARGS`, returning its stdout + exit code. On `EXIT_SESSION_EXPIRED` (22), if a credential with `auto_relogin: true` exists for the resolved `--site` / `--as`, runs `bash browser-login.sh --auto` silently then retries the verb EXACTLY ONCE. Per parent spec §4.4 — every verb call → silent re-login → retry, exactly one attempt. Caller sees a single stdout + final rc.
+- [feat] new gating helpers: `_can_auto_relogin` (checks ARG_SITE + cred metadata.auto_relogin: true), `_resolve_relogin_cred_name` (mirrors session resolution: ARG_AS → site.default_session), `_silent_relogin` (shells to login --auto for the resolved cred). All composed inside `invoke_with_retry` so the call site is one line.
+- [feat] `scripts/browser-snapshot.sh` — wired into `invoke_with_retry` as exemplar. Other verbs (open / click / fill / inspect / audit / extract / login) deferred to follow-up sub-PR (mechanical churn, easier to review separately).
+- [internal] new `tests/verb-retry.bats` (6 cases) — unit-tests the helper via bash function mocking + counter file: tool returning 0 (no retry), tool returning rc≠22 (no retry), tool returning 22 + no auto-relogin context (no retry), tool returning 22 + relogin OK + retry succeeds (final rc=0), tool returning 22 + relogin fails (no retry, original error propagated), tool returning 22 twice (final rc=22 — no triple-call).
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-3-ii-verb-retry.md` — phase plan.
+
+After this PR, session expiry on `bash scripts/browser-snapshot.sh --site app` is invisible to the agent: cookie revoked → adapter exits 22 → verb re-logins via stored cred → retry succeeds → user sees the snapshot result. The pattern is now ready to replicate across the other 7 verbs.
+
+**Out of scope (deferred to 3-ii follow-ups):**
+- Wiring `invoke_with_retry` into `open` / `click` / `fill` / `inspect` / `audit` / `extract` / `login` — mechanical replication of the snapshot edit. Will land as a single PR.
+- End-to-end integration test (real adapter that detects expiry + real login --auto + real cred). Adapter-side detection logic (e.g. checking landed-on-login-page after navigate) is itself a separate concern; the helper is harness-ready when adapters start emitting 22.
+
+Untouched per scope discipline: adapters, router rules, common.sh, credential.sh (already had auto_relogin field default-true from part 2d), session/site libs, every verb script except snapshot.
+
 ### Phase 5 part 1f — Chrome `--user-data-dir` passthrough for cdt-mcp
 
 - [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — new `mcpSpawnArgs()` helper. When `CHROME_USER_DATA_DIR` env var is set, the bridge forwards `--user-data-dir DIR` to the spawned upstream MCP child. Used at all 3 spawn sites: `runStatelessOneShot`, `withMcpClient` (one-shot multi-call), and `daemonChildMain`. Without the env var: no flag is added (current behavior preserved).
