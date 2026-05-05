@@ -70,6 +70,7 @@ tool_capabilities() {
     "click":    { "flags": ["--ref"] },
     "fill":     { "flags": ["--ref", "--text", "--secret-stdin"] },
     "snapshot": { "flags": ["--depth"] },
+    "press":    { "flags": ["--key"] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -187,4 +188,17 @@ tool_eval() {
   else
     _drive eval "${rest[@]}"
   fi
+}
+
+tool_press() {
+  local key=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --key) key="$2"; shift 2 ;;
+      *)     rest+=("$1"); shift ;;
+    esac
+  done
+  [ -n "${key}" ] || return 41
+  _drive press "${key}" "${rest[@]}"
 }

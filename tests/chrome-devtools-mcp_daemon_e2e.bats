@@ -206,6 +206,19 @@ teardown() {
 
 # --- Phase 5 part 1f: CHROME_USER_DATA_DIR passthrough -----------------------
 
+@test "daemon (Phase 6): press --key Enter routes through daemon → press_key MCP tool" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" press Enter
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "press"' >/dev/null
+  printf '%s' "${output}" | jq -e '.key == "Enter"' >/dev/null
+  printf '%s' "${output}" | jq -e '.attached_to_daemon == true' >/dev/null
+  grep -q '"name":"press_key"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=press_key"
+  grep -q '"key":"Enter"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing key passthrough"
+}
+
 @test "daemon (1f): CHROME_USER_DATA_DIR forwards --user-data-dir DIR to daemon's MCP child" {
   CHROME_USER_DATA_DIR=/tmp/test-profile-daemon-1f \
     node "${BRIDGE}" daemon-start >/dev/null
