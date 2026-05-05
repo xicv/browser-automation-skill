@@ -186,6 +186,31 @@ node -e "const{createHash}=require('crypto'); \
 | `CHROME_DEVTOOLS_MCP_BIN` | Upstream MCP server binary the bridge spawns in real mode (part 1c) | `chrome-devtools-mcp` |
 | `CHROME_DEVTOOLS_MCP_FIXTURES_DIR` | Override fixture directory in stub mode | `tests/fixtures/chrome-devtools-mcp` (relative to bridge file) |
 | `STUB_LOG_FILE` | When set, bridge in stub mode appends each invocation's argv (one line per arg) here | unset |
+| `CHROME_USER_DATA_DIR` | When set (phase-5 part 1f), bridge forwards `--user-data-dir DIR` to the spawned upstream MCP child. Chrome reuses the profile (cookies, localStorage, extensions persist). | unset |
+
+## Session loading (phase-5 part 1f)
+
+cdt-mcp's session mechanism is **Chrome's native `--user-data-dir`**, NOT
+playwright-lib's `storageState` JSON. To reuse a logged-in profile:
+
+```bash
+# 1. Log in once with real Chrome at a known directory:
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --user-data-dir=/tmp/my-profile https://app.example.com
+
+# 2. Now point cdt-mcp at it:
+export CHROME_USER_DATA_DIR=/tmp/my-profile
+bash scripts/browser-snapshot.sh --capture-console
+```
+
+The bridge forwards the directory as `--user-data-dir DIR` to the upstream
+MCP server child. If upstream chrome-devtools-mcp accepts the flag (most
+versions do — it's a standard Chrome arg), Chrome reuses the profile.
+
+**Limitations:**
+- User provides the directory. Capture / automation of user-data-dir creation is out of scope (no `bash scripts/browser-login.sh --user-data-dir-mode` yet).
+- Concurrent runs sharing the same profile dir → Chrome lock conflicts. Serialize.
+- Upstream chrome-devtools-mcp version dictates whether the flag is honored.
 
 ## Limitations (current state)
 

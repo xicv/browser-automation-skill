@@ -129,3 +129,16 @@ run_real() {
   run bash -c "CHROME_DEVTOOLS_MCP_BIN='/nonexistent/mcp-bin-${RANDOM}' node '${BRIDGE}' open https://example.com"
   [ "${status}" -ne 0 ] || fail "expected non-zero exit when MCP bin missing"
 }
+
+@test "bridge real-mode (1f): CHROME_USER_DATA_DIR forwards --user-data-dir DIR to MCP child" {
+  CHROME_USER_DATA_DIR=/tmp/test-profile-1f run_real open https://example.com >/dev/null
+  grep -- '--user-data-dir' "${MCP_STUB_LOG_FILE}" | grep -q '/tmp/test-profile-1f' \
+    || fail "stub spawn-argv did not contain --user-data-dir /tmp/test-profile-1f"
+}
+
+@test "bridge real-mode (1f): no CHROME_USER_DATA_DIR set → no --user-data-dir arg in spawn" {
+  run_real open https://example.com >/dev/null
+  if grep -q -- '--user-data-dir' "${MCP_STUB_LOG_FILE}"; then
+    fail "stub spawn-argv unexpectedly contained --user-data-dir"
+  fi
+}

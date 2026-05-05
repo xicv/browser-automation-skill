@@ -33,6 +33,14 @@ function log(line) {
   }
 }
 
+// Log the spawn argv once so tests can verify the bridge forwards CLI args
+// (phase-5 part 1f: --user-data-dir passthrough).
+if (LOG) {
+  try {
+    appendFileSync(LOG, `--- spawn-argv: ${JSON.stringify(process.argv.slice(2))} ---\n`);
+  } catch (_) { /* ignore */ }
+}
+
 function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }

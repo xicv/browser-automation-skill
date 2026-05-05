@@ -13,6 +13,24 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 1f — Chrome `--user-data-dir` passthrough for cdt-mcp
+
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — new `mcpSpawnArgs()` helper. When `CHROME_USER_DATA_DIR` env var is set, the bridge forwards `--user-data-dir DIR` to the spawned upstream MCP child. Used at all 3 spawn sites: `runStatelessOneShot`, `withMcpClient` (one-shot multi-call), and `daemonChildMain`. Without the env var: no flag is added (current behavior preserved).
+- [feat] **Session loading for cdt-mcp.** Chrome's native session mechanism is `--user-data-dir` (a profile directory containing cookies, localStorage, extensions), not playwright-lib's `storageState` JSON. Users now have a path to use logged-in profiles with cdt-mcp: log in once with real Chrome at a known directory, then `export CHROME_USER_DATA_DIR=/path/to/profile` before running verb scripts.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — logs `process.argv.slice(2)` to MCP_STUB_LOG_FILE on startup, so bats can verify the bridge's spawn-arg forwarding.
+- [internal] `tests/chrome-devtools-bridge_real.bats` (+2 cases) — `CHROME_USER_DATA_DIR` forwards `--user-data-dir DIR`; absence → no flag in spawn (regression guard).
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+1 case) — daemon child also receives the forwarded flag.
+- [docs] `references/chrome-devtools-mcp-cheatsheet.md` — new "Session loading" subsection with copy-paste recipe; `CHROME_USER_DATA_DIR` row added to env-var table.
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-1f-user-data-dir.md` — phase plan.
+
+**Out of scope (1f-i minimal — passthrough only):**
+- `bash scripts/browser-login.sh --user-data-dir-mode` (capture a profile dir via cdt-mcp). User provides the directory themselves.
+- Session resolver hooks (`resolve_session_user_data_dir`) for verb scripts to auto-export the env var per `--site` / `--as`. Could land in a follow-up if user demand surfaces.
+
+After this PR, **Phase 5 part 1 (cdt-mcp track) is feature-complete**: 8/8 verbs real-mode, router promotion (Path B), verb scripts, daemon dispatch, session loading. The HANDOFF queue's remaining items are the auth track (parts 3-ii through 4: transparent verb-retry on session expiry, auth-flow detection, 2FA detection, TOTP).
+
+Untouched per scope discipline: all adapters' capability declarations (env var is bridge-internal), all verb scripts (no flag changes — env var is the surface), router rules, login flow, session/credential libs.
+
 ### Phase 5 part 1e-ii — Bridge dispatch for `inspect` + `extract` real-mode (8/8 cdt-mcp verbs)
 
 - [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — `inspect` and `extract` work real-mode end-to-end. Pre-1e-ii both verbs exited 41 with hint pointing at part 1e. Now they route through the daemon when one is running, or one-shot via the new `withMcpClient(fn)` helper otherwise. Both paths share `dispatchInspect(mcpCall, msg)` and `dispatchExtract(mcpCall, msg)`.
