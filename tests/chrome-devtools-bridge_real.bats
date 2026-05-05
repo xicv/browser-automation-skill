@@ -83,14 +83,41 @@ run_real() {
     || fail "error must mention 'requires running daemon'"
 }
 
-@test "bridge real-mode: stateful verb 'inspect' returns exit 41" {
-  run bash -c "CHROME_DEVTOOLS_MCP_BIN='${STUB}' node '${BRIDGE}' inspect --capture-console"
-  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+@test "bridge real-mode: inspect --capture-console emits console_messages (one-shot)" {
+  out="$(run_real inspect --capture-console)"
+  printf '%s' "${out}" | jq -e '.verb == "inspect"' >/dev/null
+  printf '%s' "${out}" | jq -e '.tool == "chrome-devtools-mcp"' >/dev/null
+  printf '%s' "${out}" | jq -e '.console_messages | length == 2' >/dev/null
 }
 
-@test "bridge real-mode: stateful verb 'extract' returns exit 41" {
-  run bash -c "CHROME_DEVTOOLS_MCP_BIN='${STUB}' node '${BRIDGE}' extract --selector .x"
-  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+@test "bridge real-mode: inspect --capture-network emits network_requests (one-shot)" {
+  out="$(run_real inspect --capture-network)"
+  printf '%s' "${out}" | jq -e '.network_requests | length == 1' >/dev/null
+}
+
+@test "bridge real-mode: inspect --screenshot returns screenshot_path (one-shot)" {
+  out="$(run_real inspect --screenshot)"
+  printf '%s' "${out}" | jq -e '.screenshot_path | type == "string"' >/dev/null
+}
+
+@test "bridge real-mode: inspect --capture-console --capture-network aggregates both (one-shot)" {
+  out="$(run_real inspect --capture-console --capture-network)"
+  printf '%s' "${out}" | jq -e '.console_messages | length == 2' >/dev/null
+  printf '%s' "${out}" | jq -e '.network_requests | length == 1' >/dev/null
+}
+
+@test "bridge real-mode: extract --selector .x emits value (one-shot)" {
+  out="$(run_real extract --selector .x)"
+  printf '%s' "${out}" | jq -e '.verb == "extract"' >/dev/null
+  printf '%s' "${out}" | jq -e '.tool == "chrome-devtools-mcp"' >/dev/null
+  printf '%s' "${out}" | jq -e '.selector == ".x"' >/dev/null
+  printf '%s' "${out}" | jq -e '.value | type == "string"' >/dev/null
+}
+
+@test "bridge real-mode: extract --eval document.title emits value (one-shot)" {
+  out="$(run_real extract --eval "document.title")"
+  printf '%s' "${out}" | jq -e '.verb == "extract"' >/dev/null
+  printf '%s' "${out}" | jq -e '.value | contains("document.title")' >/dev/null
 }
 
 @test "bridge real-mode: open with no URL exits non-zero" {

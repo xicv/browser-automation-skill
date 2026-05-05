@@ -158,3 +158,48 @@ teardown() {
   printf '%s' "${output}" | grep -q "requires running daemon" \
     || fail "stderr must mention 'requires running daemon'"
 }
+
+# --- Inspect via daemon (Phase 5 part 1e-ii) --------------------------------
+
+@test "daemon: inspect --capture-console via daemon emits console_messages" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" inspect --capture-console
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "inspect"' >/dev/null
+  printf '%s' "${output}" | jq -e '.console_messages | length == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.attached_to_daemon == true' >/dev/null
+}
+
+@test "daemon: inspect --capture-console --capture-network multi-flag aggregation" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" inspect --capture-console --capture-network
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.console_messages | length == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.network_requests | length == 1' >/dev/null
+}
+
+@test "daemon: inspect --screenshot returns screenshot_path" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" inspect --screenshot
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.screenshot_path | type == "string"' >/dev/null
+}
+
+# --- Extract via daemon -----------------------------------------------------
+
+@test "daemon: extract --selector .x returns value" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" extract --selector .x
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "extract"' >/dev/null
+  printf '%s' "${output}" | jq -e '.selector == ".x"' >/dev/null
+  printf '%s' "${output}" | jq -e '.value | type == "string"' >/dev/null
+}
+
+@test "daemon: extract --eval document.title returns value" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" extract --eval "document.title"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "extract"' >/dev/null
+  printf '%s' "${output}" | jq -e '.value | contains("document.title")' >/dev/null
+}

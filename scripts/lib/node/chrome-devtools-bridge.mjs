@@ -120,13 +120,11 @@ async function realDispatch(args) {
     return await runStatefulViaDaemon(verb, verbArgs);
   }
 
-  // Stateful verbs not yet wired (inspect / extract) — keep the part 1c hint.
+  // Multi-call verbs (inspect / extract) — phase-05 part 1e-ii. Route through
+  // daemon if running (shared long-lived MCP child); otherwise spawn one-shot
+  // and run all sub-calls before shutdown.
   if (verb === 'inspect' || verb === 'extract') {
-    process.stderr.write(
-      `chrome-devtools-bridge: real-mode verb '${verb}' deferred to phase-05 part 1e ` +
-        `(verb scripts + daemon dispatch land together)\n`
-    );
-    process.exit(41);
+    return await runInspectOrExtract(verb, verbArgs);
   }
 
   // Stateless verbs (open / snapshot / eval / audit). When daemon is running,
@@ -292,6 +290,185 @@ async function runStatelessViaDaemon(verb, verbArgs) {
 
 function emitReply(reply) {
   process.stdout.write(JSON.stringify(reply) + '\n');
+}
+
+// ----------------------------------------------------------------------------
+// Multi-call verbs: inspect / extract (phase-05 part 1e-ii)
+// ----------------------------------------------------------------------------
+
+async function runInspectOrExtract(verb, verbArgs) {
+  const msg = translateInspectExtract(verb, verbArgs);
+  let reply;
+  if (isDaemonAlive()) {
+    reply = await ipcCall(msg);
+  } else {
+    reply = await withMcpClient(async (mcpCall) => {
+      if (verb === 'inspect') return await dispatchInspect(mcpCall, msg);
+      return await dispatchExtract(mcpCall, msg);
+    });
+  }
+  emitReply(reply);
+  process.exit(reply.status === 'error' ? 30 : 0);
+}
+
+// translateInspectExtract VERB ARGS → daemon message shape.
+function translateInspectExtract(verb, args) {
+  const msg = { verb };
+  for (let i = 0; i < args.length; i++) {
+    switch (args[i]) {
+      case '--capture-console': msg.capture_console = true; break;
+      case '--capture-network': msg.capture_network = true; break;
+      case '--screenshot':       msg.screenshot       = true; break;
+      case '--selector':         msg.selector         = args[++i]; break;
+      case '--eval':             msg.eval             = args[++i]; break;
+      default: break;
+    }
+  }
+  return msg;
+}
+
+// dispatchInspect — sequential MCP calls aggregated into one summary.
+// Order: console → network → screenshot → selector. Each only runs if its
+// flag is set; absent flags produce no MCP call (and no result field).
+async function dispatchInspect(mcpCall, msg) {
+  const summary = {
+    verb: 'inspect',
+    tool: 'chrome-devtools-mcp',
+    why: 'mcp/inspect',
+    status: 'ok',
+  };
+  if (msg.capture_console) {
+    const r = await mcpCall('list_console_messages', {});
+    summary.console_messages = r?.messages ?? [];
+  }
+  if (msg.capture_network) {
+    const r = await mcpCall('list_network_requests', {});
+    summary.network_requests = r?.requests ?? [];
+  }
+  if (msg.screenshot) {
+    const r = await mcpCall('take_screenshot', {});
+    summary.screenshot_path = r?.path ?? null;
+  }
+  if (msg.selector) {
+    const safeSel = JSON.stringify(msg.selector);
+    const script =
+      `Array.from(document.querySelectorAll(${safeSel})).map(el => el.textContent ? el.textContent.trim() : '')`;
+    const r = await mcpCall('evaluate_script', { script });
+    summary.matches = extractText(r);
+  }
+  return summary;
+}
+
+// dispatchExtract — single evaluate_script tools/call. --selector wraps in
+// querySelectorAll → join textContent; --eval passes the raw script through.
+async function dispatchExtract(mcpCall, msg) {
+  let script;
+  if (msg.selector) {
+    const safeSel = JSON.stringify(msg.selector);
+    script =
+      `Array.from(document.querySelectorAll(${safeSel})).map(el => el.textContent ? el.textContent.trim() : '').join('\\n')`;
+  } else if (msg.eval) {
+    script = msg.eval;
+  } else {
+    return {
+      event: 'error',
+      verb: 'extract',
+      status: 'error',
+      message: 'extract requires --selector or --eval',
+    };
+  }
+  const r = await mcpCall('evaluate_script', { script });
+  return {
+    verb: 'extract',
+    tool: 'chrome-devtools-mcp',
+    why: 'mcp/evaluate_script',
+    status: 'ok',
+    selector: msg.selector ?? null,
+    eval: msg.eval ?? null,
+    value: extractText(r),
+  };
+}
+
+// withMcpClient — spawn the upstream MCP server, run the initialize handshake
+// once, hand the caller a ready `mcpCall(name, args, timeoutMs)` closure, and
+// shut the child down on return. Used for one-shot multi-call verbs (inspect/
+// extract when no daemon is running).
+async function withMcpClient(fn) {
+  const bin = process.env.CHROME_DEVTOOLS_MCP_BIN || 'chrome-devtools-mcp';
+  let child;
+  try {
+    child = spawn(bin, [], { stdio: ['pipe', 'pipe', 'inherit'] });
+  } catch (err) {
+    throw withExit(41, `failed to spawn MCP server '${bin}': ${err.message}`);
+  }
+
+  let childExited = false;
+  let childExitCode = null;
+  child.on('exit', (code) => { childExited = true; childExitCode = code; });
+  child.on('error', (err) => {
+    childExited = true;
+    process.stderr.write(`chrome-devtools-bridge: child error: ${err.message}\n`);
+  });
+
+  const reader = makeJsonRpcReader(child.stdout);
+
+  try {
+    await sendJsonRpc(child.stdin, {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: MCP_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: 'browser-skill', version: '0.13' },
+      },
+    });
+    const initResp = await reader.waitFor(1, INIT_TIMEOUT_MS);
+    if (initResp.error) {
+      throw withExit(42, `MCP initialize failed: ${initResp.error.message}`);
+    }
+    await sendJsonRpc(child.stdin, {
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+    });
+
+    const mcpCall = makeMcpCall(child, reader, 100);
+    return await fn(mcpCall);
+  } finally {
+    try { child.stdin.end(); } catch (_) { /* ignore */ }
+    if (!childExited) {
+      await waitForExit(child, SHUTDOWN_TIMEOUT_MS).catch(() => {
+        try { child.kill('SIGTERM'); } catch (_) { /* ignore */ }
+      });
+    }
+    if (childExitCode !== null && childExitCode !== 0) {
+      process.stderr.write(
+        `chrome-devtools-bridge: MCP server exited with code ${childExitCode}\n`
+      );
+    }
+  }
+}
+
+// makeMcpCall — id-tracking factory for repeated tools/call invocations on a
+// single MCP child + reader pair. Used by both daemonChildMain (long-lived)
+// and withMcpClient (one-shot). Starts at startId+1 (so init's id=1 doesn't
+// collide).
+function makeMcpCall(child, reader, startId = 100) {
+  let nextId = startId;
+  return async function mcpCall(name, args, timeoutMs) {
+    const id = ++nextId;
+    await sendJsonRpc(child.stdin, {
+      jsonrpc: '2.0',
+      id,
+      method: 'tools/call',
+      params: { name, arguments: args },
+    });
+    const resp = await reader.waitFor(id, timeoutMs ?? CALL_TIMEOUT_MS);
+    if (resp.error) {
+      throw new Error(`MCP tools/call '${name}' failed: ${resp.error.message}`);
+    }
+    return resp.result;
+  };
 }
 
 // ----------------------------------------------------------------------------
@@ -490,23 +667,8 @@ async function daemonChildMain() {
   });
 
   // Daemon-side state.
-  let nextMcpId = 100;
   let refMap = null;
-
-  async function mcpCall(name, callArgs, timeoutMs) {
-    const id = ++nextMcpId;
-    await sendJsonRpc(mcpChild.stdin, {
-      jsonrpc: '2.0',
-      id,
-      method: 'tools/call',
-      params: { name, arguments: callArgs },
-    });
-    const resp = await reader.waitFor(id, timeoutMs ?? CALL_TIMEOUT_MS);
-    if (resp.error) {
-      throw new Error(`MCP tools/call '${name}' failed: ${resp.error.message}`);
-    }
-    return resp.result;
-  }
+  const mcpCall = makeMcpCall(mcpChild, reader, 100);
 
   // IPC server (TCP loopback, ephemeral port — sun_path 104-char cap workaround).
   const ipcServer = createServer((conn) => {
@@ -666,6 +828,14 @@ async function daemonChildMain() {
           scores: result?.scores ?? null,
           attached_to_daemon: true,
         };
+      }
+      case 'inspect': {
+        const summary = await dispatchInspect(mcpCall, msg);
+        return { ...summary, attached_to_daemon: true };
+      }
+      case 'extract': {
+        const summary = await dispatchExtract(mcpCall, msg);
+        return { ...summary, attached_to_daemon: true };
       }
       default:
         return { event: 'error', status: 'error', message: `unknown verb '${msg.verb}'` };

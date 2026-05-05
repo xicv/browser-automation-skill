@@ -37,7 +37,8 @@ for traceability.
 | `eval` | `evaluate_script {script}` — works |
 | `audit` | `lighthouse_audit` — works (60s timeout) |
 | `click`, `fill` | works **via daemon** (phase-05 part 1c-ii) — `daemon-start` first, then `snapshot`, then `click eN` / `fill eN ...`. Without daemon → exit 41 with hint |
-| `inspect`, `extract` | exit 41 — bundled with their verb scripts in phase-05 part 1e |
+| `inspect` | works real-mode (phase-05 part 1e-ii). Multi-flag aggregation: `--capture-console` → `list_console_messages`; `--capture-network` → `list_network_requests`; `--screenshot` → `take_screenshot`; `--selector CSS` → `evaluate_script` with querySelectorAll. One-shot or daemon-routed |
+| `extract` | works real-mode (phase-05 part 1e-ii). `--selector CSS` → evaluate_script with querySelectorAll → text join; `--eval JS` → raw evaluate_script. One-shot or daemon-routed |
 
 ### Daemon mode (phase-05 part 1c-ii)
 

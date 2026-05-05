@@ -13,6 +13,9 @@
 //   - tools/call name=lighthouse_audit → canned score object
 //   - tools/call name=click            → "clicked <uid>" content (phase-5 part 1c-ii)
 //   - tools/call name=fill             → "filled <uid> with <text>" content (phase-5 part 1c-ii)
+//   - tools/call name=list_console_messages   → 2 canned messages (phase-5 part 1e-ii)
+//   - tools/call name=list_network_requests   → 1 canned request (phase-5 part 1e-ii)
+//   - tools/call name=take_screenshot         → canned path (phase-5 part 1e-ii)
 //   - any other method/tool            → JSON-RPC error -32601
 //
 // Logs each received message (one JSON per line) to ${MCP_STUB_LOG_FILE}
@@ -98,6 +101,33 @@ function handleToolsCall(id, params) {
       const text = typeof args.text === 'string' ? args.text : '';
       reply(id, {
         content: [{ type: 'text', text: `filled ${uid} with ${text}` }],
+        isError: false,
+      });
+      break;
+    }
+    case 'list_console_messages': {
+      reply(id, {
+        content: [{ type: 'text', text: 'console: 2 messages' }],
+        messages: [
+          { level: 'log',   text: 'hello world' },
+          { level: 'error', text: 'oops' },
+        ],
+        isError: false,
+      });
+      break;
+    }
+    case 'list_network_requests': {
+      reply(id, {
+        content: [{ type: 'text', text: 'network: 1 request' }],
+        requests: [{ url: 'https://example.com/api', method: 'GET', status: 200 }],
+        isError: false,
+      });
+      break;
+    }
+    case 'take_screenshot': {
+      reply(id, {
+        content: [{ type: 'text', text: 'screenshot saved' }],
+        path: '/tmp/cdt-mcp-stub-screenshot.png',
         isError: false,
       });
       break;

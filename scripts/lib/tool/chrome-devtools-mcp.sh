@@ -94,7 +94,7 @@ EOF
   fi
   local node_version
   node_version="$("${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" --version 2>/dev/null || printf 'unknown')"
-  printf '{"ok":true,"binary":"%s","node_version":"%s","mcp_server_bin":"%s","note":"real-mode MCP transport: stateless verbs one-shot; click/fill via daemon-start"}\n' \
+  printf '{"ok":true,"binary":"%s","node_version":"%s","mcp_server_bin":"%s","note":"real-mode MCP transport: 8/8 verbs (open/snapshot/eval/audit/inspect/extract one-shot or daemon; click/fill require daemon)"}\n' \
     "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_NODE_BIN}" "${node_version}" "${_BROWSER_TOOL_CHROME_DEVTOOLS_MCP_MCP_SERVER_BIN}"
 }
 

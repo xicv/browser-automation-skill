@@ -13,6 +13,25 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 1e-ii — Bridge dispatch for `inspect` + `extract` real-mode (8/8 cdt-mcp verbs)
+
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — `inspect` and `extract` work real-mode end-to-end. Pre-1e-ii both verbs exited 41 with hint pointing at part 1e. Now they route through the daemon when one is running, or one-shot via the new `withMcpClient(fn)` helper otherwise. Both paths share `dispatchInspect(mcpCall, msg)` and `dispatchExtract(mcpCall, msg)`.
+- [feat] **Inspect = multi-tool composition.** Per-flag MCP-call mapping: `--capture-console` → `list_console_messages` → `console_messages` field; `--capture-network` → `list_network_requests` → `network_requests`; `--screenshot` → `take_screenshot` → `screenshot_path`; `--selector CSS` → `evaluate_script` (with `document.querySelectorAll`) → `matches`. Multi-flag = sequential MCP calls aggregated into one summary JSON.
+- [feat] **Extract = single `evaluate_script` call.** `--selector CSS` wraps in `querySelectorAll` → `textContent.trim()` → joined; `--eval JS` passes the raw script through. Both flags acceptable (eval can use the selector via DOM API).
+- [feat] **Refactor: `makeMcpCall(child, reader, startId)` factory** extracted to top level. The daemon's previously-inline `mcpCall` closure now uses the factory; the new one-shot `withMcpClient(fn)` helper also uses it. One id-tracking implementation; two callers.
+- [feat] cdt-mcp adapter now real-mode for **all 8 declared verbs**: `open`, `snapshot`, `eval`, `audit`, `inspect`, `extract` work one-shot or daemon-routed; `click`, `fill` require a running daemon (refMap precondition).
+- [internal] `tests/stubs/mcp-server-stub.mjs` — added `list_console_messages` (2 canned messages), `list_network_requests` (1 canned request), `take_screenshot` (canned path) tool handlers. evaluate_script handler unchanged.
+- [internal] `tests/chrome-devtools-bridge_real.bats` — replaced 2 exit-41 tests for inspect/extract with 6 happy-path real-mode tests (one-shot path).
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` — added 5 cases covering inspect (capture-console / multi-flag / screenshot) and extract (selector / eval) via daemon. `attached_to_daemon: true` asserted on inspect to verify daemon-routing.
+- [docs] `references/chrome-devtools-mcp-cheatsheet.md` — per-verb table reflects real-mode for all 8 verbs; multi-flag aggregation documented.
+- [docs] `scripts/lib/tool/chrome-devtools-mcp.sh::tool_doctor_check` — note bumped: 8/8 verbs.
+- [docs] `SKILL.md` — inspect/extract rows simplified (no longer "deferred").
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-1e-ii-bridge-inspect-extract.md` — phase plan.
+
+After this PR, the cdt-mcp adapter's full surface is real. The remaining HANDOFF queue items are Path B routing extensions (already shipped via 1d's rules) + Phase 5 parts 1f / 3-ii / 3-iii / 3-iv / 4. CI green on macos+ubuntu (499 tests; +9 over 1e-i's 490 — 11 new tests minus 2 deleted exit-41 tests).
+
+Untouched per scope discipline: `scripts/lib/router.sh`, `scripts/lib/tool/chrome-devtools-mcp.sh` (capabilities unchanged — already declared inspect/extract), `scripts/lib/common.sh`, every credentials/session/site lib, every verb script (`scripts/browser-inspect.sh` and `scripts/browser-extract.sh` from 1e-i pass argv through unchanged — bridge changes are transparent).
+
 ### Phase 5 part 1e-i — Verb scripts: browser-audit + browser-extract (un-skip browser-inspect.bats)
 
 - [feat] new `scripts/browser-audit.sh` — `audit` verb script. Flags: `--lighthouse` (default when no flag given), `--perf-trace`. Routes to chrome-devtools-mcp by default per 1d's `rule_audit_or_perf`. **Ships real-mode end-to-end** because the bridge already supports `audit` → `lighthouse_audit` (part 1c). Bare `bash scripts/browser-audit.sh` runs the default lighthouse path.
