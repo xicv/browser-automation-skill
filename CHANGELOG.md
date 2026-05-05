@@ -13,6 +13,23 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 5 part 3-iii — `--auth-flow` declaration at `creds add` time
+
+- [feat] `scripts/browser-creds-add.sh` — new `--auth-flow STR` flag. Allowed values: `single-step-username-password` (default — backwards compatible), `multi-step-username-password`, `username-only`, `custom`. Persisted in cred metadata. Pre-3-iii the field was hardcoded to `single-step-username-password` regardless of the actual site flow.
+- [feat] `scripts/browser-login.sh` — `--auto` reads `cred_meta.auth_flow` and refuses any value other than `single-step-username-password` with a clear hint pointing at `--interactive`. Pre-3-iii, `--auto` would attempt single-step selectors against any auth flow → fail mid-flight on the password field selector. Now the refusal is up-front + actionable.
+- [internal] `tests/creds-add.bats` (+5 cases) — default flow, 3 valid values persisted, invalid value rejected with EXIT_USAGE_ERROR.
+- [internal] `tests/login.bats` (+4 cases) — 3 refuse-on-non-standard cases (multi-step, username-only, custom), 1 regression test for single-step still working via dry-run path. `_seed_auto_cred` helper extended with optional 5th arg for auth_flow.
+- [docs] `SKILL.md` — `creds add` row mentions `--auth-flow STR` flag.
+- [docs] `docs/superpowers/plans/2026-05-05-phase-05-part-3-iii-auth-flow-detection.md` — phase plan.
+
+**Out of scope (deferred):**
+- **Auto-observation at add time** — open the site's login URL, scrape DOM, infer the flow shape. Substantial: needs a headless browser dispatch + heuristics. Could land as a 3-iii follow-up if user demand surfaces.
+- **Multi-step / username-only auto-relogin support in playwright-driver** — needs different selector strategies in `runAutoRelogin`. Substantial enough to warrant its own sub-part (call it 3-iii-ii: multi-step support).
+
+After this PR, `login --auto` fails fast on credentials whose `auth_flow` declares a non-standard shape — preserving the agent's time and emitting a clear hint instead of cryptic Playwright selector errors. The harness is ready when 3-iii-ii lands the actual multi-step replay logic.
+
+Untouched per scope discipline: `scripts/lib/credential.sh` (schema unchanged — auth_flow field already in metadata), `scripts/lib/node/playwright-driver.mjs::runAutoRelogin` (selector strategies unchanged), all other verb scripts, all adapters.
+
 ### Phase 5 part 3-ii (cont.) — Wire `invoke_with_retry` into all remaining session-aware verbs
 
 - [feat] `scripts/browser-open.sh` / `browser-click.sh` / `browser-fill.sh` / `browser-inspect.sh` / `browser-audit.sh` / `browser-extract.sh` — all 6 swap their `tool_${verb}` adapter call for `invoke_with_retry ${verb}`. Mechanical churn replicating the pattern shipped for `browser-snapshot.sh` in the previous sub-PR. Now session expiry → silent re-login → retry is uniform across the verb surface.

@@ -121,6 +121,7 @@ if [ "${auto}" -eq 1 ]; then
   cred_site="$(printf '%s' "${cred_meta}" | jq -r .site)"
   cred_account="$(printf '%s' "${cred_meta}" | jq -r .account)"
   cred_auto="$(printf '%s' "${cred_meta}" | jq -r .auto_relogin)"
+  cred_auth_flow="$(printf '%s' "${cred_meta}" | jq -r '.auth_flow // "single-step-username-password"')"
 
   if [ "${cred_site}" != "${site}" ]; then
     die "${EXIT_USAGE_ERROR}" "credential ${as} is bound to site '${cred_site}', not '${site}'"
@@ -130,6 +131,13 @@ if [ "${auto}" -eq 1 ]; then
   fi
   if [ -z "${cred_account}" ] || [ "${cred_account}" = "null" ]; then
     die "${EXIT_USAGE_ERROR}" "credential ${as} has empty account; cannot --auto"
+  fi
+  # Phase-5 part 3-iii: only single-step-username-password is supported by
+  # the playwright-driver auto-relogin path. Other auth_flow values were
+  # persisted at creds-add time for documentation; relogin requires user
+  # interaction.
+  if [ "${cred_auth_flow}" != "single-step-username-password" ]; then
+    die "${EXIT_USAGE_ERROR}" "credential ${as} has auth_flow=${cred_auth_flow}; --auto only supports single-step-username-password (use --interactive)"
   fi
 
   if [ "${dry_run}" -eq 1 ]; then

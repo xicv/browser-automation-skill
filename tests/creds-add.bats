@@ -153,3 +153,37 @@ run_creds_add() {
   printf 'pw-kc' | run_creds_add --site prod --as prod--kc --backend keychain --password-stdin
   [ -f "${BROWSER_SKILL_HOME}/credentials/prod--kc.json" ] || fail "keychain add should not be gated"
 }
+
+# --- Phase 5 part 3-iii: --auth-flow flag --------------------------------
+
+@test "creds-add (3-iii): no --auth-flow → defaults to single-step-username-password" {
+  printf 'pw' | run_creds_add --site prod --as prod--default-flow --backend plaintext --password-stdin
+  flow="$(jq -r .auth_flow "${BROWSER_SKILL_HOME}/credentials/prod--default-flow.json")"
+  [ "${flow}" = "single-step-username-password" ] \
+    || fail "default auth_flow should be single-step-username-password, got ${flow}"
+}
+
+@test "creds-add (3-iii): --auth-flow multi-step-username-password persists value" {
+  printf 'pw' | run_creds_add --site prod --as prod--multistep --backend plaintext --password-stdin --auth-flow multi-step-username-password
+  flow="$(jq -r .auth_flow "${BROWSER_SKILL_HOME}/credentials/prod--multistep.json")"
+  [ "${flow}" = "multi-step-username-password" ] \
+    || fail "auth_flow should be persisted as multi-step-username-password, got ${flow}"
+}
+
+@test "creds-add (3-iii): --auth-flow username-only persists value" {
+  printf 'pw' | run_creds_add --site prod --as prod--userpass --backend plaintext --password-stdin --auth-flow username-only
+  flow="$(jq -r .auth_flow "${BROWSER_SKILL_HOME}/credentials/prod--userpass.json")"
+  [ "${flow}" = "username-only" ] || fail "auth_flow=username-only not persisted; got ${flow}"
+}
+
+@test "creds-add (3-iii): --auth-flow custom persists value" {
+  printf 'pw' | run_creds_add --site prod --as prod--custom --backend plaintext --password-stdin --auth-flow custom
+  flow="$(jq -r .auth_flow "${BROWSER_SKILL_HOME}/credentials/prod--custom.json")"
+  [ "${flow}" = "custom" ] || fail "auth_flow=custom not persisted; got ${flow}"
+}
+
+@test "creds-add (3-iii): --auth-flow with invalid value fails EXIT_USAGE_ERROR" {
+  run bash -c "printf 'pw' | bash '${SCRIPTS_DIR}/browser-creds-add.sh' --site prod --as prod--bogus --backend plaintext --password-stdin --auth-flow ghost-flow"
+  [ "${status}" = "${EXIT_USAGE_ERROR}" ] || fail "expected EXIT_USAGE_ERROR, got ${status}"
+  printf '%s' "${output}" | grep -q "must be one of" || fail "error should list valid values"
+}

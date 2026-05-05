@@ -27,7 +27,7 @@ Real browser launches arrive in Phase 3.
 | `list-sessions` | List captured sessions (optionally filter by site) | `… list-sessions --site prod` |
 | `show-session`  | Show session metadata (NEVER cookie/token values) | `… show-session --as prod--admin` |
 | `remove-session`| Typed-name confirmed delete of a captured session | `… remove-session --as prod--admin --yes-i-know` |
-| `creds add`     | Register credential (smart per-OS backend; AP-7 stdin-only; first plaintext use needs `--yes-i-know-plaintext`) | `printf 'pw' \| … creds-add --site prod --as prod--admin --password-stdin` |
+| `creds add`     | Register credential (smart per-OS backend; AP-7 stdin-only; first plaintext use needs `--yes-i-know-plaintext`; `--auth-flow STR` declares form shape — single-step / multi-step / username-only / custom) | `printf 'pw' \| … creds-add --site prod --as prod--admin --password-stdin --auth-flow single-step-username-password` |
 | `creds list`    | List credentials (optional `--site` filter; metadata only) | `… creds-list --site prod` |
 | `creds show`    | Show credential metadata (NEVER secret value) | `… creds-show --as prod--admin` |
 | `creds show` (reveal) | After typed-phrase confirmation, include secret + masked preview | `printf 'prod--admin\n' \| … creds-show --as prod--admin --reveal` |

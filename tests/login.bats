@@ -60,13 +60,15 @@ _setup_auto_test() {
 }
 
 _seed_auto_cred() {
-  # name, account, auto_relogin (true|false), site
+  # name, account, auto_relogin (true|false), site, auth_flow
   local name="$1" account="${2:-alice@example.com}" auto="${3:-true}" site="${4:-prod}"
+  local auth_flow="${5:-single-step-username-password}"
   local meta
-  meta="$(jq -nc --arg n "${name}" --arg s "${site}" --arg a "${account}" --argjson ar "${auto}" \
+  meta="$(jq -nc --arg n "${name}" --arg s "${site}" --arg a "${account}" \
+    --argjson ar "${auto}" --arg af "${auth_flow}" \
     '{schema_version:1, name:$n, site:$s, account:$a, backend:"plaintext",
-      auth_flow:"single-step-username-password",
-      auto_relogin:$ar, totp_enabled:false, created_at:"2026-05-03T00:00:00Z"}')"
+      auth_flow:$af, auto_relogin:$ar, totp_enabled:false,
+      created_at:"2026-05-03T00:00:00Z"}')"
   bash -c "
     set -euo pipefail
     source '${LIB_DIR}/common.sh'; init_paths
@@ -236,6 +238,45 @@ _seed_auto_cred() {
   local last_json
   last_json="$(printf '%s\n' "${lines[@]}" | tail -n 1)"
   printf '%s' "${last_json}" | jq -e '.verb == "login" and .why == "interactive-dry-run" and .status == "ok"' >/dev/null
+}
+
+# --- Phase 5 part 3-iii: --auto refuses non-single-step auth_flow ---------
+
+@test "login --auto (3-iii): refuses cred with auth_flow=multi-step-username-password (exit 2)" {
+  _setup_auto_test
+  _seed_auto_cred prod--ms alice@example.com true prod multi-step-username-password
+  run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as prod--ms --auto
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "auth_flow=multi-step-username-password"
+  assert_output_contains "use --interactive"
+}
+
+@test "login --auto (3-iii): refuses cred with auth_flow=username-only (exit 2)" {
+  _setup_auto_test
+  _seed_auto_cred prod--uo alice@example.com true prod username-only
+  run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as prod--uo --auto
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "auth_flow=username-only"
+}
+
+@test "login --auto (3-iii): refuses cred with auth_flow=custom (exit 2)" {
+  _setup_auto_test
+  _seed_auto_cred prod--cu alice@example.com true prod custom
+  run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as prod--cu --auto
+  teardown_temp_home
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "auth_flow=custom"
+}
+
+@test "login --auto (3-iii): single-step-username-password still works (regression — dry-run path)" {
+  _setup_auto_test
+  _seed_auto_cred prod--ss alice@example.com true prod single-step-username-password
+  run bash "${SCRIPTS_DIR}/browser-login.sh" --site prod --as prod--ss --auto --dry-run
+  teardown_temp_home
+  assert_status 0
+  printf '%s' "${output}" | grep -q "would auto-relogin" || fail "expected dry-run path to engage"
 }
 
 @test "login: requires --interactive OR --storage-state-file (one of them)" {
