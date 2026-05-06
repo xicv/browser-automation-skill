@@ -13,6 +13,30 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 8-ii — `tab-switch` verb (first state-mutation on `tabs[]`)
+
+- [feat] new `scripts/browser-tab-switch.sh` verb — mutex selectors `--by-index N` (1-based) ⊕ `--by-url-pattern STR` (substring-contains, first-match-wins). **Daemon-required.** Routes to chrome-devtools-mcp via new `rule_tab_switch_default`.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — new `runTabSwitchViaDaemon` (defensively re-validates the mutex). Daemon child gains `currentTab` slot (number | null — the tab_id pointer; tab metadata stays in `tabs[]`). New `refreshTabs()` helper shared between `tab-list` and `tab-switch` (the latter auto-refreshes `tabs[]` when empty so agents needn't remember to call `tab-list` first). Dispatch case `'tab-switch'` resolves selector → tab object, calls upstream MCP `select_page` (best-effort name; real upstream may differ — binding hardening tracked downstream), updates `currentTab`, returns `{ current_tab: { tab_id, url, title }, ... }`.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — `tab-list` output now annotates `is_current: true` on the entry whose `tab_id` matches `currentTab`, plus `current_tab_id` field at top level. Was queued for 8-iii but folded in here since `currentTab` is introduced in this sub-part.
+- [feat] `scripts/lib/router.sh::rule_tab_switch_default` — verb=`tab-switch` → chrome-devtools-mcp.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `tab-switch` capability declared (`flags: ["--by-index", "--by-url-pattern"]`); new `tool_tab-switch` dispatcher.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `select_page` handler echoes `selected tab N (URL)`.
+- [internal] new `tests/browser-tab-switch.bats` (8 cases) — missing-both-flags, mutex, `--by-index 0` (1-based), empty `--by-url-pattern`, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+7) — by-index happy + `select_page` MCP call observed; by-url-pattern substring resolution; auto-refresh when `tabs[]` empty (no preceding tab-list); by-url-pattern no-match error; by-index out-of-range error; no-daemon exit-41; `is_current` annotation in `tab-list` output after switch.
+- [docs] `SKILL.md` — chrome-devtools-mcp adapter row auto-bumped to 17 verbs.
+- [docs] `docs/superpowers/plans/2026-05-06-phase-06-part-8-ii-tab-switch.md` — phase plan.
+
+**Sub-scope (8-ii):**
+- Mutex selectors only — exactly one of index / pattern.
+- Substring-contains is intentionally simple. `--by-url-regex` / `--by-url-glob` deferred to follow-up.
+- `currentTab` is just the `tab_id` (number) — single source of truth for tab metadata stays in `tabs[]`.
+
+**Deferred to part 8-iii (`tab-close`):**
+- `--tab-id N` ⊕ `--by-url-pattern STR` (mutex). Splice from `tabs[]` + close upstream page.
+- `currentTab` invalidation when the closed tab matches.
+
+Phase 6 progress: **9 of 10 declared verbs** (press / select / hover / wait / drag / upload / route / tab-list / tab-switch). Remaining: tab-close (8-iii); route fulfill (7-ii) is independent.
+
 ### Phase 6 part 8-i — `tab-list` verb foundation (multi-tab daemon-state slot)
 
 - [feat] new `scripts/browser-tab-list.sh` verb — no required flags. Routes to chrome-devtools-mcp via new `rule_tab_list_default`. **Daemon-required** (mirrors route precedent — caches tabs in the daemon's new `tabs` slot so 8-ii / 8-iii can mutate the same shape). Without daemon → exit 41 with hint.

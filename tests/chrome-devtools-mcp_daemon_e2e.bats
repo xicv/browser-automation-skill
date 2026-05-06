@@ -360,6 +360,80 @@ teardown() {
     || fail "stderr must mention 'requires running daemon'"
 }
 
+@test "daemon (Phase 6 part 8-ii): tab-switch --by-index 2 sets currentTab + emits select_page" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-switch --by-index 2
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "tab-switch"' >/dev/null
+  printf '%s' "${output}" | jq -e '.current_tab.tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.current_tab.url | type == "string"' >/dev/null
+  printf '%s' "${output}" | jq -e '.current_tab.title | type == "string"' >/dev/null
+  printf '%s' "${output}" | jq -e '.attached_to_daemon == true' >/dev/null
+  grep -q '"name":"select_page"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=select_page"
+}
+
+@test "daemon (Phase 6 part 8-ii): tab-switch --by-url-pattern resolves substring match" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  # Stub tabs: example.com (id 1) + example.org/news (id 2). "news" → id 2.
+  run node "${BRIDGE}" tab-switch --by-url-pattern news
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.current_tab.tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.current_tab.url | contains("news")' >/dev/null
+}
+
+@test "daemon (Phase 6 part 8-ii): tab-switch auto-refreshes tabs[] when empty" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  # NOTE: no preceding tab-list call — daemon's tabs[] is empty until select_page
+  # path triggers an internal list_pages call.
+  run node "${BRIDGE}" tab-switch --by-index 1
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.current_tab.tab_id == 1' >/dev/null
+  # Verify list_pages was auto-called.
+  grep -q '"name":"list_pages"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing auto-triggered list_pages"
+}
+
+@test "daemon (Phase 6 part 8-ii): tab-switch --by-url-pattern no-match returns error event" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-switch --by-url-pattern "no-such-tab-anywhere"
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when pattern unmatched"
+  printf '%s' "${output}" | jq -e '.event == "error"' >/dev/null
+  printf '%s' "${output}" | grep -q "no-such-tab-anywhere" \
+    || fail "error must name the pattern"
+}
+
+@test "daemon (Phase 6 part 8-ii): tab-switch --by-index out-of-range returns error event" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-switch --by-index 99
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when index out-of-range"
+  printf '%s' "${output}" | jq -e '.event == "error"' >/dev/null
+  printf '%s' "${output}" | grep -q "out of range" \
+    || fail "error must mention out of range"
+}
+
+@test "daemon (Phase 6 part 8-ii): tab-switch without daemon → exit 41 with daemon hint" {
+  run bash -c "node '${BRIDGE}' tab-switch --by-index 1"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "stderr must mention 'requires running daemon'"
+}
+
+@test "daemon (Phase 6 part 8-ii): tab-list annotates is_current on switched tab" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  node "${BRIDGE}" tab-switch --by-index 2 >/dev/null
+  run node "${BRIDGE}" tab-list
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.current_tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs[0].is_current // false == false' >/dev/null
+  printf '%s' "${output}" | jq -e '.tabs[1].is_current == true' >/dev/null
+}
+
 @test "daemon (Phase 6 part 6): upload via daemon translates ref → uid + upload_file MCP tool" {
   node "${BRIDGE}" daemon-start >/dev/null
   node "${BRIDGE}" open https://example.com >/dev/null

@@ -31,6 +31,7 @@ ROUTING_RULES=(
   rule_upload_default
   rule_route_default
   rule_tab_list_default
+  rule_tab_switch_default
   rule_default_navigation
 )
 
@@ -221,6 +222,17 @@ rule_tab_list_default() {
   case "${verb}" in
     tab-list)
       printf 'chrome-devtools-mcp\t%s\n' "tab-list default (only cdt-mcp declares tab-list today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 8-ii: tab switching. First state-mutation on tabs[] (adds
+# currentTab pointer in the daemon). Routes to chrome-devtools-mcp.
+rule_tab_switch_default() {
+  local verb="$1"
+  case "${verb}" in
+    tab-switch)
+      printf 'chrome-devtools-mcp\t%s\n' "tab-switch default (only cdt-mcp declares tab-switch today)"
       ;;
   esac
 }
