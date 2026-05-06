@@ -217,6 +217,17 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'close_page': {
+      // Phase-6 part 8-iii: close the page identified by tab_id. Best-effort
+      // upstream tool name; real upstream may use targets.close or similar.
+      const tab_id = args.tab_id ?? '<missing>';
+      const url = args.url ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `closed tab ${tab_id} (${url})` }],
+        isError: false,
+      });
+      break;
+    }
     case 'select_option': {
       const uid = args.uid ?? '<missing>';
       let by;
