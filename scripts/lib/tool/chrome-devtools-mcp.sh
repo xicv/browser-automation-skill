@@ -79,6 +79,7 @@ tool_capabilities() {
     "route":    { "flags": ["--pattern", "--action"] },
     "tab-list": { "flags": [] },
     "tab-switch": { "flags": ["--by-index", "--by-url-pattern"] },
+    "tab-close":  { "flags": ["--tab-id", "--by-url-pattern"] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -321,6 +322,27 @@ tool_tab-switch() {
     _drive tab-switch --by-index "${by_index}" "${rest[@]}"
   elif [ -n "${by_url_pattern}" ]; then
     _drive tab-switch --by-url-pattern "${by_url_pattern}" "${rest[@]}"
+  else
+    return 41
+  fi
+}
+
+# Phase-6 part 8-iii: close a tab. Splice + upstream close + null currentTab
+# on match. Mutex on the two selectors (enforced bash-side; bridge re-checks).
+tool_tab-close() {
+  local tab_id="" by_url_pattern=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --tab-id)          tab_id="$2";          shift 2 ;;
+      --by-url-pattern)  by_url_pattern="$2";  shift 2 ;;
+      *)                 rest+=("$1"); shift ;;
+    esac
+  done
+  if [ -n "${tab_id}" ]; then
+    _drive tab-close --tab-id "${tab_id}" "${rest[@]}"
+  elif [ -n "${by_url_pattern}" ]; then
+    _drive tab-close --by-url-pattern "${by_url_pattern}" "${rest[@]}"
   else
     return 41
   fi

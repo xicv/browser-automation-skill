@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 8-iii — `tab-close` verb (last tab-* verb; closes Phase 6 tab trilogy)
+
+- [feat] new `scripts/browser-tab-close.sh` verb — mutex selectors `--tab-id N` ⊕ `--by-url-pattern STR`. Symmetric with tab-switch but uses canonical `--tab-id` (matches `tab_id` from tab-list output) instead of `--by-index` (positional). Reasoning: index drifts as the array shrinks during successive closes; canonical id is unambiguous. **Daemon-required.** Routes to chrome-devtools-mcp via new `rule_tab_close_default`.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` — new `runTabCloseViaDaemon` (defensively re-validates the mutex). Dispatch case `'tab-close'`: auto-refreshes `tabs[]` if empty (mirrors tab-switch); resolves selector → tab object; calls upstream MCP `close_page` (best-effort name; real upstream may differ); splices the matching entry from `tabs[]`; nulls `currentTab` if it pointed at the closed tab. Returns `{closed_tab, current_tab_id, tab_count}`. **`tab_id` values stay stable on remaining entries** — agents holding a `tab_id` reference shouldn't see it silently rebound.
+- [feat] `scripts/lib/router.sh::rule_tab_close_default` — verb=`tab-close` → chrome-devtools-mcp.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh` — `tab-close` capability declared (`flags: ["--tab-id", "--by-url-pattern"]`); new `tool_tab-close` dispatcher.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `close_page` handler echoes `closed tab N (URL)`.
+- [internal] new `tests/browser-tab-close.bats` (8 cases) — missing-both-flags, mutex, `--tab-id 0` (1-based), empty `--by-url-pattern`, ghost-tool, capability filter, dry-run, router routing.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+7) — by-tab-id happy + `close_page` MCP call observed; by-url-pattern substring resolution; closing currentTab nulls `current_tab_id`; closing non-current preserves `current_tab_id`; out-of-range `--tab-id` error; no-match pattern error; no-daemon exit-41.
+- [docs] `SKILL.md` — chrome-devtools-mcp adapter row auto-bumped to 18 verbs.
+- [docs] `docs/superpowers/plans/2026-05-06-phase-06-part-8-iii-tab-close.md` — phase plan.
+
+**Sub-scope (8-iii):**
+- Mutex selectors only — exactly one of canonical id / pattern.
+- `tab_id` stability across closes is an explicit contract (no renumbering).
+- `currentTab` invalidation on close-match — agents see `current_tab_id: null` in subsequent `tab-list` output.
+- No auto-fallback to a remaining tab on close — keeps the agent's mental model explicit.
+
+**Phase 6 progress: 10 of 10 declared verbs.** All Phase 6 tab-* verbs done (tab-list / tab-switch / tab-close). Only route fulfill (7-ii) remains as an independent track within Phase 6 (deferred — body management adds stdin-mux + binary-safety + persistence in `routeRules`).
+
 ### Phase 6 part 8-ii — `tab-switch` verb (first state-mutation on `tabs[]`)
 
 - [feat] new `scripts/browser-tab-switch.sh` verb — mutex selectors `--by-index N` (1-based) ⊕ `--by-url-pattern STR` (substring-contains, first-match-wins). **Daemon-required.** Routes to chrome-devtools-mcp via new `rule_tab_switch_default`.

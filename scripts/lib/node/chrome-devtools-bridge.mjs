@@ -143,6 +143,12 @@ async function realDispatch(args) {
     return await runTabSwitchViaDaemon(verbArgs);
   }
 
+  // tab-close splices from tabs[] + closes upstream page + nulls currentTab
+  // on match. Mutex selector: --tab-id N | --by-url-pattern STR.
+  if (verb === 'tab-close') {
+    return await runTabCloseViaDaemon(verbArgs);
+  }
+
   // Multi-call verbs (inspect / extract) — phase-05 part 1e-ii. Route through
   // daemon if running (shared long-lived MCP child); otherwise spawn one-shot
   // and run all sub-calls before shutdown.
@@ -258,6 +264,34 @@ async function runTabListViaDaemon(_verbArgs) {
     process.exit(41);
   }
   const reply = await ipcCall({ verb: 'tab-list' });
+  emitReply(reply);
+  process.exit(reply.status === 'error' ? 30 : 0);
+}
+
+// runTabCloseViaDaemon — close a tab. Mutex selectors (already enforced
+// bash-side; bridge re-validates). Argv shape: `tab-close --tab-id N` |
+// `tab-close --by-url-pattern STR`. Daemon splices the matching entry from
+// tabs[], asks upstream MCP to close the page, nulls currentTab on match.
+async function runTabCloseViaDaemon(verbArgs) {
+  if (!isDaemonAlive()) {
+    process.stderr.write(
+      'chrome-devtools-bridge: tab-close requires running daemon ' +
+        '(run: node chrome-devtools-bridge.mjs daemon-start)\n'
+    );
+    process.exit(41);
+  }
+  const msg = { verb: 'tab-close' };
+  for (let i = 0; i < verbArgs.length; i++) {
+    if (verbArgs[i] === '--tab-id')          msg.tab_id = parseInt(verbArgs[++i], 10);
+    if (verbArgs[i] === '--by-url-pattern')  msg.by_url_pattern = verbArgs[++i];
+  }
+  if (msg.tab_id === undefined && msg.by_url_pattern === undefined) {
+    throw withExit(2, 'tab-close requires --tab-id N or --by-url-pattern STR');
+  }
+  if (msg.tab_id !== undefined && msg.by_url_pattern !== undefined) {
+    throw withExit(2, '--tab-id and --by-url-pattern are mutually exclusive');
+  }
+  const reply = await ipcCall(msg);
   emitReply(reply);
   process.exit(reply.status === 'error' ? 30 : 0);
 }
@@ -1093,6 +1127,87 @@ async function daemonChildMain() {
           tabs: annotated,
           tab_count: annotated.length,
           current_tab_id: currentTab,
+          attached_to_daemon: true,
+        };
+      }
+      case 'tab-close': {
+        // Phase-6 part 8-iii: close a tab. Mutex selector. Auto-refresh
+        // tabs[] when empty (mirrors tab-switch). Splice matching entry,
+        // call upstream MCP `close_page` (best-effort name), and null
+        // `currentTab` if it pointed at the closed tab. tab_id values
+        // remain stable on remaining entries (no renumbering — agents
+        // holding a tab_id reference shouldn't see it silently rebound).
+        if (tabs.length === 0) {
+          try {
+            await refreshTabs();
+          } catch (err) {
+            return {
+              event: 'error',
+              verb: 'tab-close',
+              status: 'error',
+              message: `auto-refresh failed: ${err && err.message ? err.message : err}`,
+            };
+          }
+        }
+        if (tabs.length === 0) {
+          return {
+            event: 'error',
+            verb: 'tab-close',
+            status: 'error',
+            message: 'no tabs available (upstream returned empty page list)',
+          };
+        }
+        let idx = -1;
+        if (msg.tab_id !== undefined) {
+          idx = tabs.findIndex((t) => t.tab_id === msg.tab_id);
+          if (idx < 0) {
+            return {
+              event: 'error',
+              verb: 'tab-close',
+              tab_id: msg.tab_id,
+              tab_count: tabs.length,
+              status: 'error',
+              message: `tab_id ${msg.tab_id} not found`,
+            };
+          }
+        } else if (typeof msg.by_url_pattern === 'string' && msg.by_url_pattern) {
+          idx = tabs.findIndex((t) => t.url.includes(msg.by_url_pattern));
+          if (idx < 0) {
+            return {
+              event: 'error',
+              verb: 'tab-close',
+              by_url_pattern: msg.by_url_pattern,
+              status: 'error',
+              message: `no tab url contains pattern: ${msg.by_url_pattern}`,
+            };
+          }
+        } else {
+          return {
+            event: 'error',
+            verb: 'tab-close',
+            status: 'error',
+            message: 'tab-close requires --tab-id or --by-url-pattern',
+          };
+        }
+        const closed = tabs[idx];
+        let mcpAck = null;
+        try {
+          const result = await mcpCall('close_page', { tab_id: closed.tab_id, url: closed.url });
+          mcpAck = extractText(result);
+        } catch (err) {
+          mcpAck = `mcp-close_page-failed: ${err && err.message ? err.message : err}`;
+        }
+        tabs.splice(idx, 1);
+        if (currentTab === closed.tab_id) currentTab = null;
+        return {
+          verb: 'tab-close',
+          tool: 'chrome-devtools-mcp',
+          why:  'mcp/close_page',
+          status: 'ok',
+          closed_tab: { ...closed },
+          current_tab_id: currentTab,
+          tab_count: tabs.length,
+          mcp_ack: mcpAck,
           attached_to_daemon: true,
         };
       }

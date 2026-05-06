@@ -32,6 +32,7 @@ ROUTING_RULES=(
   rule_route_default
   rule_tab_list_default
   rule_tab_switch_default
+  rule_tab_close_default
   rule_default_navigation
 )
 
@@ -233,6 +234,17 @@ rule_tab_switch_default() {
   case "${verb}" in
     tab-switch)
       printf 'chrome-devtools-mcp\t%s\n' "tab-switch default (only cdt-mcp declares tab-switch today)"
+      ;;
+  esac
+}
+
+# Phase-6 part 8-iii: tab close. Splice from tabs[] + close upstream page +
+# null currentTab on match. Routes to chrome-devtools-mcp.
+rule_tab_close_default() {
+  local verb="$1"
+  case "${verb}" in
+    tab-close)
+      printf 'chrome-devtools-mcp\t%s\n' "tab-close default (only cdt-mcp declares tab-close today)"
       ;;
   esac
 }

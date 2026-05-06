@@ -434,6 +434,76 @@ teardown() {
   printf '%s' "${output}" | jq -e '.tabs[1].is_current == true' >/dev/null
 }
 
+@test "daemon (Phase 6 part 8-iii): tab-close --tab-id 2 splices + emits close_page" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-close --tab-id 2
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "tab-close"' >/dev/null
+  printf '%s' "${output}" | jq -e '.closed_tab.tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.tab_count == 1' >/dev/null
+  printf '%s' "${output}" | jq -e '.attached_to_daemon == true' >/dev/null
+  grep -q '"name":"close_page"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=close_page"
+}
+
+@test "daemon (Phase 6 part 8-iii): tab-close --by-url-pattern resolves substring match" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-close --by-url-pattern news
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.closed_tab.tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.closed_tab.url | contains("news")' >/dev/null
+  printf '%s' "${output}" | jq -e '.tab_count == 1' >/dev/null
+}
+
+@test "daemon (Phase 6 part 8-iii): closing currentTab nulls current_tab_id" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  node "${BRIDGE}" tab-switch --by-index 2 >/dev/null
+  run node "${BRIDGE}" tab-close --tab-id 2
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.closed_tab.tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.current_tab_id == null' >/dev/null
+}
+
+@test "daemon (Phase 6 part 8-iii): closing non-current tab preserves current_tab_id" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  node "${BRIDGE}" tab-switch --by-index 1 >/dev/null
+  run node "${BRIDGE}" tab-close --tab-id 2
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.closed_tab.tab_id == 2' >/dev/null
+  printf '%s' "${output}" | jq -e '.current_tab_id == 1' >/dev/null
+}
+
+@test "daemon (Phase 6 part 8-iii): tab-close --tab-id out-of-range returns error event" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-close --tab-id 99
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when tab-id unknown"
+  printf '%s' "${output}" | jq -e '.event == "error"' >/dev/null
+  printf '%s' "${output}" | grep -q "not found" \
+    || fail "error must say 'not found'"
+}
+
+@test "daemon (Phase 6 part 8-iii): tab-close --by-url-pattern no-match returns error event" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  node "${BRIDGE}" tab-list >/dev/null
+  run node "${BRIDGE}" tab-close --by-url-pattern "no-such-tab-anywhere"
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when pattern unmatched"
+  printf '%s' "${output}" | jq -e '.event == "error"' >/dev/null
+  printf '%s' "${output}" | grep -q "no-such-tab-anywhere" \
+    || fail "error must name the pattern"
+}
+
+@test "daemon (Phase 6 part 8-iii): tab-close without daemon → exit 41 with daemon hint" {
+  run bash -c "node '${BRIDGE}' tab-close --tab-id 1"
+  [ "${status}" = "41" ] || fail "expected exit 41, got ${status}"
+  printf '%s' "${output}" | grep -q "requires running daemon" \
+    || fail "stderr must mention 'requires running daemon'"
+}
+
 @test "daemon (Phase 6 part 6): upload via daemon translates ref → uid + upload_file MCP tool" {
   node "${BRIDGE}" daemon-start >/dev/null
   node "${BRIDGE}" open https://example.com >/dev/null
