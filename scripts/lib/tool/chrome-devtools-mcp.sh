@@ -78,6 +78,7 @@ tool_capabilities() {
     "upload":   { "flags": ["--ref", "--path"] },
     "route":    { "flags": ["--pattern", "--action"] },
     "tab-list": { "flags": [] },
+    "tab-switch": { "flags": ["--by-index", "--by-url-pattern"] },
     "inspect":  { "flags": ["--capture-console", "--capture-network", "--screenshot"] },
     "audit":    { "flags": ["--lighthouse", "--perf-trace"] },
     "extract":  { "flags": ["--selector", "--eval"] },
@@ -302,4 +303,25 @@ tool_route() {
 # to runTabListViaDaemon which caches the result in the daemon's `tabs` slot.
 tool_tab-list() {
   _drive tab-list "$@"
+}
+
+# Phase-6 part 8-ii: switch active tab via mutex selectors. Daemon-side
+# resolves to a tab_id, calls MCP select_page, updates currentTab pointer.
+tool_tab-switch() {
+  local by_index="" by_url_pattern=""
+  local rest=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --by-index)        by_index="$2";        shift 2 ;;
+      --by-url-pattern)  by_url_pattern="$2";  shift 2 ;;
+      *)                 rest+=("$1"); shift ;;
+    esac
+  done
+  if [ -n "${by_index}" ]; then
+    _drive tab-switch --by-index "${by_index}" "${rest[@]}"
+  elif [ -n "${by_url_pattern}" ]; then
+    _drive tab-switch --by-url-pattern "${by_url_pattern}" "${rest[@]}"
+  else
+    return 41
+  fi
 }

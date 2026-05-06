@@ -206,6 +206,17 @@ function handleToolsCall(id, params) {
       });
       break;
     }
+    case 'select_page': {
+      // Phase-6 part 8-ii: focus the page identified by tab_id. Best-effort
+      // upstream tool name; real upstream may use targets.activate or similar.
+      const tab_id = args.tab_id ?? '<missing>';
+      const url = args.url ?? '<missing>';
+      reply(id, {
+        content: [{ type: 'text', text: `selected tab ${tab_id} (${url})` }],
+        isError: false,
+      });
+      break;
+    }
     case 'select_option': {
       const uid = args.uid ?? '<missing>';
       let by;

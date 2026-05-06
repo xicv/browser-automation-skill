@@ -137,6 +137,12 @@ async function realDispatch(args) {
     return await runTabListViaDaemon(verbArgs);
   }
 
+  // tab-switch is the first state-mutation on tabs[] — adds currentTab
+  // pointer (1-based tab_id). Mutex selector: --by-index N | --by-url-pattern.
+  if (verb === 'tab-switch') {
+    return await runTabSwitchViaDaemon(verbArgs);
+  }
+
   // Multi-call verbs (inspect / extract) — phase-05 part 1e-ii. Route through
   // daemon if running (shared long-lived MCP child); otherwise spawn one-shot
   // and run all sub-calls before shutdown.
@@ -252,6 +258,34 @@ async function runTabListViaDaemon(_verbArgs) {
     process.exit(41);
   }
   const reply = await ipcCall({ verb: 'tab-list' });
+  emitReply(reply);
+  process.exit(reply.status === 'error' ? 30 : 0);
+}
+
+// runTabSwitchViaDaemon — switch active tab. Mutex on the two selectors,
+// already enforced bash-side; bridge re-validates defensively. Argv shape:
+// `tab-switch --by-index N` | `tab-switch --by-url-pattern STR`. Daemon
+// resolves selector to tab_id, calls MCP select_page, updates currentTab.
+async function runTabSwitchViaDaemon(verbArgs) {
+  if (!isDaemonAlive()) {
+    process.stderr.write(
+      'chrome-devtools-bridge: tab-switch requires running daemon ' +
+        '(run: node chrome-devtools-bridge.mjs daemon-start)\n'
+    );
+    process.exit(41);
+  }
+  const msg = { verb: 'tab-switch' };
+  for (let i = 0; i < verbArgs.length; i++) {
+    if (verbArgs[i] === '--by-index')        msg.by_index = parseInt(verbArgs[++i], 10);
+    if (verbArgs[i] === '--by-url-pattern')  msg.by_url_pattern = verbArgs[++i];
+  }
+  if (msg.by_index === undefined && msg.by_url_pattern === undefined) {
+    throw withExit(2, 'tab-switch requires --by-index N or --by-url-pattern STR');
+  }
+  if (msg.by_index !== undefined && msg.by_url_pattern !== undefined) {
+    throw withExit(2, '--by-index and --by-url-pattern are mutually exclusive');
+  }
+  const reply = await ipcCall(msg);
   emitReply(reply);
   process.exit(reply.status === 'error' ? 30 : 0);
 }
@@ -808,9 +842,26 @@ async function daemonChildMain() {
   let refMap = null;
   const routeRules = [];  // Phase-6 part 7: array of {pattern, action} entries.
   let tabs = [];          // Phase-6 part 8-i: array of {tab_id, url, title}.
-                          //   Replaced (not appended) on each tab-list call.
-                          //   8-ii will add a currentTab pointer; 8-iii will splice.
+                          //   Replaced (not appended) on each list_pages call.
+  let currentTab = null;  // Phase-6 part 8-ii: tab_id (number) of the active
+                          //   tab, or null if never set. Source of truth is
+                          //   tabs[] — currentTab is just the pointer.
+                          //   8-iii will null this out if the closed tab matches.
   const mcpCall = makeMcpCall(mcpChild, reader, 100);
+
+  // refreshTabs — call upstream list_pages and normalize to tabs[]. Shared by
+  // 'tab-list' and 'tab-switch' (the latter auto-refreshes when tabs[] empty).
+  // Returns the tabs[] array (also stored in the closure-scoped `tabs`).
+  async function refreshTabs() {
+    const result = await mcpCall('list_pages', {});
+    const raw = result?.pages ?? result?.tabs ?? [];
+    tabs = (Array.isArray(raw) ? raw : []).map((p, i) => ({
+      tab_id: i + 1,
+      url:    typeof p?.url   === 'string' ? p.url   : '',
+      title:  typeof p?.title === 'string' ? p.title : '',
+    }));
+    return tabs;
+  }
 
   // IPC server (TCP loopback, ephemeral port — sun_path 104-char cap workaround).
   const ipcServer = createServer((conn) => {
@@ -1017,12 +1068,12 @@ async function daemonChildMain() {
       case 'tab-list': {
         // Phase-6 part 8-i: read-only enumeration. Calls upstream MCP
         // `list_pages` (best-effort name; real upstream may use a different
-        // tool — binding hardening tracked in 8-ii/8-iii). Result normalized
-        // to [{tab_id, url, title}] where `tab_id` is bridge-assigned
-        // (1-based, stable per call). Replaces — not appends — the cache.
-        let result;
+        // tool). Result normalized to [{tab_id, url, title}] where `tab_id`
+        // is bridge-assigned (1-based, stable per call). Replaces — not
+        // appends — the cache. Phase-6 part 8-ii adds `is_current: true`
+        // on the entry whose tab_id matches the daemon's currentTab pointer.
         try {
-          result = await mcpCall('list_pages', {});
+          await refreshTabs();
         } catch (err) {
           return {
             event: 'error',
@@ -1031,19 +1082,95 @@ async function daemonChildMain() {
             message: `mcp/list_pages failed: ${err && err.message ? err.message : err}`,
           };
         }
-        const raw = result?.pages ?? result?.tabs ?? [];
-        tabs = (Array.isArray(raw) ? raw : []).map((p, i) => ({
-          tab_id: i + 1,
-          url:    typeof p?.url   === 'string' ? p.url   : '',
-          title:  typeof p?.title === 'string' ? p.title : '',
-        }));
+        const annotated = tabs.map((t) => (
+          currentTab !== null && t.tab_id === currentTab ? { ...t, is_current: true } : t
+        ));
         return {
           verb: 'tab-list',
           tool: 'chrome-devtools-mcp',
           why:  'mcp/list_pages',
           status: 'ok',
-          tabs,
-          tab_count: tabs.length,
+          tabs: annotated,
+          tab_count: annotated.length,
+          current_tab_id: currentTab,
+          attached_to_daemon: true,
+        };
+      }
+      case 'tab-switch': {
+        // Phase-6 part 8-ii: switch active tab via mutex selectors.
+        // --by-index (1-based) | --by-url-pattern (substring-contains).
+        // Auto-refreshes tabs[] when empty so agents don't have to remember
+        // to call tab-list first. Updates `currentTab` pointer and asks the
+        // upstream MCP to focus the corresponding page (best-effort
+        // `select_page` — real upstream may differ).
+        if (tabs.length === 0) {
+          try {
+            await refreshTabs();
+          } catch (err) {
+            return {
+              event: 'error',
+              verb: 'tab-switch',
+              status: 'error',
+              message: `auto-refresh failed: ${err && err.message ? err.message : err}`,
+            };
+          }
+        }
+        if (tabs.length === 0) {
+          return {
+            event: 'error',
+            verb: 'tab-switch',
+            status: 'error',
+            message: 'no tabs available (upstream returned empty page list)',
+          };
+        }
+        let target = null;
+        if (msg.by_index !== undefined) {
+          const idx = msg.by_index;
+          if (!Number.isInteger(idx) || idx < 1 || idx > tabs.length) {
+            return {
+              event: 'error',
+              verb: 'tab-switch',
+              by_index: idx,
+              tab_count: tabs.length,
+              status: 'error',
+              message: `--by-index ${idx} out of range (1..${tabs.length})`,
+            };
+          }
+          target = tabs[idx - 1];
+        } else if (typeof msg.by_url_pattern === 'string' && msg.by_url_pattern) {
+          target = tabs.find((t) => t.url.includes(msg.by_url_pattern)) || null;
+          if (!target) {
+            return {
+              event: 'error',
+              verb: 'tab-switch',
+              by_url_pattern: msg.by_url_pattern,
+              status: 'error',
+              message: `no tab url contains pattern: ${msg.by_url_pattern}`,
+            };
+          }
+        } else {
+          return {
+            event: 'error',
+            verb: 'tab-switch',
+            status: 'error',
+            message: 'tab-switch requires --by-index or --by-url-pattern',
+          };
+        }
+        let mcpAck = null;
+        try {
+          const result = await mcpCall('select_page', { tab_id: target.tab_id, url: target.url });
+          mcpAck = extractText(result);
+        } catch (err) {
+          mcpAck = `mcp-select_page-failed: ${err && err.message ? err.message : err}`;
+        }
+        currentTab = target.tab_id;
+        return {
+          verb: 'tab-switch',
+          tool: 'chrome-devtools-mcp',
+          why:  'mcp/select_page',
+          status: 'ok',
+          current_tab: { ...target },
+          mcp_ack: mcpAck,
           attached_to_daemon: true,
         };
       }
