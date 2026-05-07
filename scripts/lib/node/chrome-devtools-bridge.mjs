@@ -325,8 +325,15 @@ async function runTabSwitchViaDaemon(verbArgs) {
 }
 
 // runRouteViaDaemon — register a network-route rule in the daemon. Args
-// shape from adapter: `route <pattern> <action>`. Daemon-side stores
-// {pattern, action} in routeRules and best-effort calls MCP route_url tool.
+// shape from adapter: `route <pattern> <action> [--status N] [--body STR | --body-stdin]`.
+// Daemon stores {pattern, action} (block | allow) or
+// {pattern, action: 'fulfill', status, body} in routeRules and best-effort
+// calls MCP route_url tool.
+//
+// Phase 6 part 7-ii: fulfill action adds synthetic responses. Body via
+// --body-stdin reads from this process's stdin (passthrough from
+// browser-route.sh, mirrors fill --secret-stdin). Body verbatim — no trailing
+// newline strip (HTTP bodies are content, not credentials).
 async function runRouteViaDaemon(verbArgs) {
   if (!isDaemonAlive()) {
     process.stderr.write(
@@ -339,7 +346,28 @@ async function runRouteViaDaemon(verbArgs) {
   const action = verbArgs[1];
   if (!pattern) throw withExit(2, "route requires <pattern>");
   if (!action) throw withExit(2, "route requires <action>");
-  const reply = await ipcCall({ verb: 'route', pattern, action });
+  const msg = { verb: 'route', pattern, action };
+  let useBodyStdin = false;
+  let bodyInline;
+  for (let i = 2; i < verbArgs.length; i++) {
+    switch (verbArgs[i]) {
+      case '--status': msg.status = Number(verbArgs[++i]); break;
+      case '--body':   bodyInline = verbArgs[++i]; break;
+      case '--body-stdin': useBodyStdin = true; break;
+      default: break;
+    }
+  }
+  if (action === 'fulfill') {
+    if (useBodyStdin && bodyInline !== undefined) {
+      throw withExit(2, "route fulfill: --body and --body-stdin are mutually exclusive");
+    }
+    if (useBodyStdin) {
+      msg.body = await readAllStdin();
+    } else if (bodyInline !== undefined) {
+      msg.body = bodyInline;
+    }
+  }
+  const reply = await ipcCall(msg);
   emitReply(reply);
   process.exit(reply.status === 'error' ? 30 : 0);
 }
@@ -1290,31 +1318,55 @@ async function daemonChildMain() {
         };
       }
       case 'route': {
-        // Phase-6 part 7: register a network-route rule. Allowed actions
-        // for this sub-part: block | allow. fulfill (synthetic responses
-        // with --status / --body) deferred to part 7-ii.
-        const allowed = ['block', 'allow'];
+        // Phase-6 part 7: register a network-route rule.
+        // 7-i: block | allow.
+        // 7-ii: fulfill — synthetic responses, requires status + body.
+        const allowed = ['block', 'allow', 'fulfill'];
         if (!allowed.includes(msg.action)) {
           return {
             event: 'error',
             verb: 'route',
             status: 'error',
-            message: `route action must be one of ${allowed.join(', ')} (got: ${msg.action}); fulfill is part 7-ii`,
+            message: `route action must be one of ${allowed.join(', ')} (got: ${msg.action})`,
           };
         }
-        const rule = { pattern: msg.pattern, action: msg.action };
+        let rule;
+        if (msg.action === 'fulfill') {
+          if (!Number.isInteger(msg.status) || msg.status < 100 || msg.status > 599) {
+            return {
+              event: 'error',
+              verb: 'route',
+              status: 'error',
+              message: `route fulfill --status must be integer in 100-599 (got: ${msg.status})`,
+            };
+          }
+          if (typeof msg.body !== 'string') {
+            return {
+              event: 'error',
+              verb: 'route',
+              status: 'error',
+              message: 'route fulfill requires --body STR or --body-stdin',
+            };
+          }
+          rule = { pattern: msg.pattern, action: 'fulfill', status: msg.status, body: msg.body };
+        } else {
+          rule = { pattern: msg.pattern, action: msg.action };
+        }
         routeRules.push(rule);
         // Best-effort MCP `route_url` invocation. Real upstream may use a
         // different tool name (e.g. network.setRequestInterception); upstream
-        // binding hardening is part 7-ii.
+        // binding hardening tracked downstream.
         let mcpAck = null;
         try {
-          const result = await mcpCall('route_url', { pattern: msg.pattern, action: msg.action });
+          const callArgs = msg.action === 'fulfill'
+            ? { pattern: msg.pattern, action: msg.action, status: msg.status, body: msg.body }
+            : { pattern: msg.pattern, action: msg.action };
+          const result = await mcpCall('route_url', callArgs);
           mcpAck = extractText(result);
         } catch (err) {
           mcpAck = `mcp-route_url-failed: ${err && err.message ? err.message : err}`;
         }
-        return {
+        const reply = {
           verb: 'route',
           tool: 'chrome-devtools-mcp',
           why: 'mcp/route_url',
@@ -1325,6 +1377,13 @@ async function daemonChildMain() {
           mcp_ack: mcpAck,
           attached_to_daemon: true,
         };
+        if (msg.action === 'fulfill') {
+          reply.fulfill_status = msg.status;
+          reply.body_bytes = Buffer.byteLength(msg.body, 'utf8');
+          // Body itself NOT echoed in reply — agent sent it; avoid re-emitting
+          // potentially large or sensitive content. body_bytes is the contract.
+        }
+        return reply;
       }
       case 'upload': {
         // Phase-6 part 6: file upload to <input type=file>. eN→uid translation

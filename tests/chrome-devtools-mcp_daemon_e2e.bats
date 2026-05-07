@@ -327,6 +327,39 @@ teardown() {
     || fail "stderr must mention 'requires running daemon'"
 }
 
+@test "daemon (Phase 6 part 7-ii): route fulfill via daemon registers fulfill rule + persists status + body" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" route "https://api.x.com/*" fulfill --status 404 --body 'not found'
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.verb == "route"' >/dev/null
+  printf '%s' "${output}" | jq -e '.action == "fulfill"' >/dev/null
+  printf '%s' "${output}" | jq -e '.fulfill_status == 404' >/dev/null
+  printf '%s' "${output}" | jq -e '.body_bytes == 9' >/dev/null
+  printf '%s' "${output}" | jq -e '.rule_count == 1' >/dev/null
+  grep -q '"name":"route_url"' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing tools/call name=route_url"
+  grep -q '"status":404' "${MCP_STUB_LOG_FILE}" \
+    || fail "stub log missing status=404 in route_url args"
+}
+
+@test "daemon (Phase 6 part 7-ii): route fulfill --body-stdin roundtrips body verbatim" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  # 13-byte body with embedded newline + JSON braces (non-NUL binary safety).
+  run bash -c "printf '%s' '{\"a\":1}\n42' | node '${BRIDGE}' route 'https://api.x.com/*' fulfill --status 200 --body-stdin"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.fulfill_status == 200' >/dev/null
+  printf '%s' "${output}" | jq -e '.body_bytes == 11' >/dev/null
+  printf '%s' "${output}" | jq -e '.action == "fulfill"' >/dev/null
+}
+
+@test "daemon (Phase 6 part 7-ii): route fulfill with out-of-range status (defensive bridge check) returns error" {
+  node "${BRIDGE}" daemon-start >/dev/null
+  run node "${BRIDGE}" route "https://x.com/*" fulfill --status 999 --body 'x'
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit when status out of range"
+  printf '%s' "${output}" | jq -e '.event == "error"' >/dev/null
+  printf '%s' "${output}" | grep -q "100-599" || fail "error must mention 100-599 range"
+}
+
 @test "daemon (Phase 6 part 8-i): tab-list via daemon returns tabs[] from list_pages" {
   node "${BRIDGE}" daemon-start >/dev/null
   run node "${BRIDGE}" tab-list
