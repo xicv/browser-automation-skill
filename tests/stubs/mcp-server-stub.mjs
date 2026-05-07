@@ -187,8 +187,16 @@ function handleToolsCall(id, params) {
     case 'route_url': {
       const pattern = args.pattern ?? '<missing>';
       const action = args.action ?? '<missing>';
+      let text = `routed ${pattern} → ${action}`;
+      if (action === 'fulfill') {
+        const status = args.status ?? '<missing>';
+        const bodyLen = typeof args.body === 'string'
+          ? Buffer.byteLength(args.body, 'utf8')
+          : 0;
+        text += ` (status ${status}, ${bodyLen} bytes)`;
+      }
       reply(id, {
-        content: [{ type: 'text', text: `routed ${pattern} → ${action}` }],
+        content: [{ type: 'text', text }],
         isError: false,
       });
       break;

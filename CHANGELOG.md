@@ -13,6 +13,30 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 6 part 7-ii — `route` verb extension: `--action fulfill` (closes Phase 6)
+
+- [feat] `scripts/browser-route.sh` — accept `--action fulfill` (block/allow/fulfill triad complete). Adds `--status N` (HTTP code, integer 100-599) + body transport (`--body STR` ⊕ `--body-stdin`, mutex). Bash-side validation: `--status` / `--body*` rejected when paired with `block`/`allow`; fulfill requires both status + body; status range + integer-shape enforced. Body-via-stdin uses the same passthrough pattern as `fill --secret-stdin` (browser-fill.sh:87) — bash forwards the `--body-stdin` flag and stdin inherits naturally to the bridge subprocess.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs::runRouteViaDaemon` — parses `--status` / `--body` / `--body-stdin`; reads stdin via existing `readAllStdin` helper on `--body-stdin`; passes status + body through IPC to daemon child.
+- [feat] `scripts/lib/node/chrome-devtools-bridge.mjs` daemon-child `case 'route'` — `routeRules` slot extends from `{pattern, action}` to `{pattern, action: 'fulfill', status, body}` for fulfill rules; defensive validation re-checks status range + body presence (defense in depth — surface area for non-CLI callers); calls upstream MCP `route_url` with `{pattern, action, status?, body?}`. Reply adds `fulfill_status` + `body_bytes` (byte length, not the body itself — avoids re-emitting agent-supplied content; large bodies stay out of stdout).
+- [feat] **Body verbatim policy.** Unlike `fill --secret-stdin` (which strips a trailing newline since secrets shouldn't carry one), `route fulfill` stores the body **as-is** including trailing bytes — HTTP bodies are content where round-trip fidelity matters. Daemon e2e test asserts roundtrip.
+- [security] Body lives **in-memory only** in the daemon process (mirrors 7-i routeRules). Never written to disk; dies with the daemon. `body_bytes` (not `body`) ships in the reply by default — avoids accidental terminal/log capture.
+- [adapter] `scripts/lib/tool/chrome-devtools-mcp.sh::tool_route` — no change required. Existing `rest=()` passthrough already forwards `--status` / `--body` / `--body-stdin` to the bridge.
+- [internal] `tests/stubs/mcp-server-stub.mjs` — `route_url` handler echoes `(status N, M bytes)` suffix on `action: 'fulfill'` so e2e can assert the call shape end-to-end.
+- [internal] `tests/browser-route.bats` (+8 cases, 1 rewritten) — fulfill happy dry-run with `fulfill_status` + `body_bytes` in summary; missing-status; missing-body; body / body-stdin mutex; `--status 99` out of range (mentions "100-599"); `--status notanumber` non-integer; `--status` with `--action block` rejected; `--body` with `--action allow` rejected. Old "fulfill rejected with 7-ii hint" case rewritten as positive happy-path test.
+- [internal] `tests/chrome-devtools-mcp_daemon_e2e.bats` (+3 cases) — fulfill via daemon registers extended rule + persists status + body length + observes `route_url` MCP call with `status` + `body` args; `--body-stdin` body roundtrips verbatim (byte length matches); out-of-range status arriving at the bridge (defensive) returns error event mentioning "100-599".
+- [docs] `docs/superpowers/plans/2026-05-07-phase-06-part-7-ii-route-fulfill.md` — phase plan.
+
+**Sub-scope (7-ii):**
+- Three actions accepted: `block` | `allow` | `fulfill`. The fulfill-only flags (`--status`, `--body`, `--body-stdin`) are validated bash-side AND daemon-side (defense in depth). Bridge layer is the validating boundary if the IPC is exercised by a non-CLI caller.
+- Body byte length is the contract surfaced in the reply (`body_bytes`); the body string itself is not re-emitted.
+- Body-stdin transport: bash → bridge stdin (passthrough, no bash-side stdin read) → bridge `readAllStdin` → IPC `body` field → daemon-child store.
+
+**Documented limitations:**
+- Bash variables and JSON IPC strings can't carry the NUL byte itself. Multipart bodies legitimately containing NUL would need a different transport (file path? base64?). Not in scope for 7-ii.
+- `readAllStdin` reads as utf-8. Non-utf8 binary bytes aren't a target use case for 7-ii (HTTP API mocking is the primary motivation).
+
+**Phase 6 progress: 11 of 11 declared verbs.** ✅ **Phase 6 COMPLETE.**
+
 ### Phase 6 part 8-iii — `tab-close` verb (last tab-* verb; closes Phase 6 tab trilogy)
 
 - [feat] new `scripts/browser-tab-close.sh` verb — mutex selectors `--tab-id N` ⊕ `--by-url-pattern STR`. Symmetric with tab-switch but uses canonical `--tab-id` (matches `tab_id` from tab-list output) instead of `--by-index` (positional). Reasoning: index drifts as the array shrinks during successive closes; canonical id is unambiguous. **Daemon-required.** Routes to chrome-devtools-mcp via new `rule_tab_close_default`.
