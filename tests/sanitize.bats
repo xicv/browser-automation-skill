@@ -123,3 +123,32 @@ teardown() { teardown_temp_home; }
   twice="$(printf '%s' "${once}" | sanitize_console)"
   [ "${once}" = "${twice}" ] || fail "double-sanitize-console differs from single-sanitize"
 }
+
+# ---------- sanitize_inspect_reply (Phase 7 part 1-iii) ----------
+
+@test "sanitize_inspect_reply: console_messages + network_requests both sanitized in one pass" {
+  fixture='{"verb":"inspect","status":"ok","console_messages":[{"level":"log","text":"password: hunter2"}],"network_requests":[{"request":{"url":"https://x.com/?api_key=AAA","headers":[{"name":"Authorization","value":"Bearer SEKRET"}]},"response":{"status":200,"headers":[{"name":"Set-Cookie","value":"s=BBB"}]}}]}'
+  out="$(printf '%s' "${fixture}" | sanitize_inspect_reply)"
+  printf '%s' "${out}" | jq -e '.console_messages[0].text | contains("password: ***")' >/dev/null
+  printf '%s' "${out}" | jq -e '.console_messages[0].text | contains("hunter2") | not' >/dev/null
+  printf '%s' "${out}" | jq -e '.network_requests[0].request.headers | map(select(.name == "Authorization")) | .[0].value == "***REDACTED***"' >/dev/null
+  printf '%s' "${out}" | jq -e '.network_requests[0].response.headers | map(select(.name == "Set-Cookie")) | .[0].value == "***REDACTED***"' >/dev/null
+  printf '%s' "${out}" | jq -e '.network_requests[0].request.url | contains("api_key=***")' >/dev/null
+  printf '%s' "${out}" | jq -e '.network_requests[0].request.url | contains("AAA") | not' >/dev/null
+}
+
+@test "sanitize_inspect_reply: preserves non-sanitized fields (verb, tool, status, why)" {
+  fixture='{"verb":"inspect","tool":"chrome-devtools-mcp","why":"mcp/inspect","status":"ok","console_messages":[{"level":"log","text":"hi"}]}'
+  out="$(printf '%s' "${fixture}" | sanitize_inspect_reply)"
+  printf '%s' "${out}" | jq -e '.verb == "inspect"' >/dev/null
+  printf '%s' "${out}" | jq -e '.tool == "chrome-devtools-mcp"' >/dev/null
+  printf '%s' "${out}" | jq -e '.why == "mcp/inspect"' >/dev/null
+  printf '%s' "${out}" | jq -e '.status == "ok"' >/dev/null
+}
+
+@test "sanitize_inspect_reply: no console_messages or network_requests → JSON shape unchanged" {
+  fixture='{"verb":"inspect","tool":"chrome-devtools-mcp","status":"ok","matches":["x","y"]}'
+  out="$(printf '%s' "${fixture}" | sanitize_inspect_reply)"
+  printf '%s' "${out}" | jq -e '.matches == ["x","y"]' >/dev/null
+  printf '%s' "${out}" | jq -e '.verb == "inspect"' >/dev/null
+}

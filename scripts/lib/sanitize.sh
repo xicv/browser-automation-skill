@@ -74,3 +74,34 @@ sanitize_console() {
     )
   '
 }
+
+# sanitize_inspect_reply (Phase 7 part 1-iii) — applied to the bridge's
+# combined inspect reply. Sanitizes both .console_messages (via the same
+# rules as sanitize_console) and .network_requests (each request entry is
+# wrapped in a HAR envelope and run through sanitize_har in-memory).
+# Reads inspect-shaped JSON on stdin, emits same shape with sensitive values
+# redacted in place. Non-sensitive fields (verb, tool, why, status, matches,
+# screenshot_path, etc.) pass through untouched. Used by browser-inspect.sh
+# --capture for both stdout-side (agent-visibility) and disk-side (per-aspect
+# files: console.json + network.har) sanitization — single transformation,
+# both sinks.
+sanitize_inspect_reply() {
+  local raw out
+  raw="$(cat)"
+  out="${raw}"
+
+  if printf '%s' "${raw}" | jq -e 'has("console_messages") and (.console_messages | type == "array")' >/dev/null 2>&1; then
+    local sc
+    sc="$(printf '%s' "${raw}" | jq '.console_messages' | sanitize_console)"
+    out="$(printf '%s' "${out}" | jq --argjson sc "${sc}" '.console_messages = $sc')"
+  fi
+
+  if printf '%s' "${raw}" | jq -e 'has("network_requests") and (.network_requests | type == "array")' >/dev/null 2>&1; then
+    local sr_envelope sr
+    sr_envelope="$(printf '%s' "${raw}" | jq '{log: {entries: .network_requests}}' | sanitize_har)"
+    sr="$(printf '%s' "${sr_envelope}" | jq '.log.entries')"
+    out="$(printf '%s' "${out}" | jq --argjson sr "${sr}" '.network_requests = $sr')"
+  fi
+
+  printf '%s' "${out}"
+}

@@ -47,3 +47,70 @@ teardown() { teardown_temp_home; }
   last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last_line}" | jq -e '.verb == "inspect" and .dry_run == true' >/dev/null
 }
+
+# ---------- Phase 7 part 1-iii: --capture wire-up ----------
+
+@test "browser-inspect --capture: writes captures/001/{console.json,network.har,meta.json} + capture_id in summary" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console --capture-network --capture
+  assert_status 0
+  [ -f "${BROWSER_SKILL_HOME}/captures/001/console.json" ] || fail "console.json not written"
+  [ -f "${BROWSER_SKILL_HOME}/captures/001/network.har" ] || fail "network.har not written"
+  [ -f "${BROWSER_SKILL_HOME}/captures/001/meta.json" ]   || fail "meta.json not written"
+  jq -e '.status == "ok"'      "${BROWSER_SKILL_HOME}/captures/001/meta.json" >/dev/null
+  jq -e '.verb == "inspect"'   "${BROWSER_SKILL_HOME}/captures/001/meta.json" >/dev/null
+  local last_line
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.capture_id == "001"' >/dev/null
+}
+
+@test "browser-inspect --capture: dir mode 0700, per-aspect files mode 0600" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console --capture-network --capture
+  assert_status 0
+  dir_perms="$(stat -c '%a' "${BROWSER_SKILL_HOME}/captures/001" 2>/dev/null || stat -f '%Lp' "${BROWSER_SKILL_HOME}/captures/001" 2>/dev/null)"
+  console_perms="$(stat -c '%a' "${BROWSER_SKILL_HOME}/captures/001/console.json" 2>/dev/null || stat -f '%Lp' "${BROWSER_SKILL_HOME}/captures/001/console.json" 2>/dev/null)"
+  har_perms="$(stat -c '%a' "${BROWSER_SKILL_HOME}/captures/001/network.har" 2>/dev/null || stat -f '%Lp' "${BROWSER_SKILL_HOME}/captures/001/network.har" 2>/dev/null)"
+  [ "${dir_perms}" = "700" ]      || fail "expected dir mode 700, got ${dir_perms}"
+  [ "${console_perms}" = "600" ]  || fail "expected console mode 600, got ${console_perms}"
+  [ "${har_perms}" = "600" ]      || fail "expected har mode 600, got ${har_perms}"
+}
+
+@test "browser-inspect --capture: privacy canary (Authorization Bearer redacted on disk + stdout)" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console --capture-network --capture
+  assert_status 0
+  # On disk: canary absent + ***REDACTED*** present
+  ! grep -q "HEADER-CANARY-7-1-iii" "${BROWSER_SKILL_HOME}/captures/001/network.har" || fail "Authorization canary leaked to network.har"
+  grep -q "REDACTED" "${BROWSER_SKILL_HOME}/captures/001/network.har" || fail "expected REDACTED sentinel in network.har"
+  # On stdout: canary absent
+  printf '%s\n' "${lines[@]}" | grep -q "HEADER-CANARY-7-1-iii" \
+    && fail "Authorization canary leaked to stdout" || true
+}
+
+@test "browser-inspect --capture: privacy canary (URL api_key + Cookie + Set-Cookie redacted)" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console --capture-network --capture
+  assert_status 0
+  ! grep -q "URL-CANARY-7-1-iii"  "${BROWSER_SKILL_HOME}/captures/001/network.har" || fail "URL api_key canary leaked"
+  ! grep -q "SESS-CANARY-7-1-iii" "${BROWSER_SKILL_HOME}/captures/001/network.har" || fail "Cookie canary leaked"
+  ! grep -q "NEW-CANARY-7-1-iii"  "${BROWSER_SKILL_HOME}/captures/001/network.har" || fail "Set-Cookie canary leaked"
+  grep -q "api_key=\\*\\*\\*"     "${BROWSER_SKILL_HOME}/captures/001/network.har" || fail "expected api_key=*** in url"
+}
+
+@test "browser-inspect --capture: privacy canary (console password + token redacted)" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console --capture-network --capture
+  assert_status 0
+  ! grep -q "PWD-CANARY-7-1-iii" "${BROWSER_SKILL_HOME}/captures/001/console.json" || fail "console password canary leaked"
+  ! grep -q "TOK-CANARY-7-1-iii" "${BROWSER_SKILL_HOME}/captures/001/console.json" || fail "console token canary leaked"
+  grep -q "password: \\*\\*\\*"  "${BROWSER_SKILL_HOME}/captures/001/console.json" || fail "expected password: *** in console.json"
+  grep -q "token: \\*\\*\\*"     "${BROWSER_SKILL_HOME}/captures/001/console.json" || fail "expected token: *** in console.json"
+}
+
+@test "browser-inspect (no --capture): captures dir not created (clean state)" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console
+  assert_status 0
+  [ ! -d "${BROWSER_SKILL_HOME}/captures" ] || fail "captures dir created without --capture flag"
+}

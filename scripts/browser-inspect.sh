@@ -5,11 +5,16 @@
 #                                   [--raw]
 #                                   (--capture-console | --capture-network
 #                                    | --screenshot | --selector CSS)
+#                                   [--capture]
 #
 # Routes to chrome-devtools-mcp by default (post-1d router promotion — only
 # adapter with dedicated console + network MCP tools per parent spec
 # Appendix B). At least one of --capture-* / --screenshot / --selector is
 # required so the adapter has something to do.
+#
+# Phase 7 part 1-iii: --capture writes adapter output to ${CAPTURES_DIR}/NNN/
+# as console.json + network.har, sanitized via lib/sanitize.sh. Stdout output
+# is ALSO sanitized (defense in depth) — single transformation, both sinks.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -27,6 +32,12 @@ source "${SCRIPT_DIR}/lib/router.sh"
 # shellcheck source=lib/verb_helpers.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/verb_helpers.sh"
+# shellcheck source=lib/capture.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/capture.sh"
+# shellcheck source=lib/sanitize.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/sanitize.sh"
 
 init_paths
 
@@ -36,7 +47,7 @@ parse_verb_globals "$@"
 
 resolve_session_storage_state
 
-selector="" capture_console=0 capture_network=0 screenshot=0
+selector="" capture_console=0 capture_network=0 screenshot=0 do_capture=0
 verb_argv=()
 i=0
 while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
@@ -62,6 +73,10 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       verb_argv+=(--screenshot)
       i=$((i + 1))
       ;;
+    --capture)
+      do_capture=1
+      i=$((i + 1))
+      ;;
     *)
       verb_argv+=("${REMAINING_ARGV[i]}")
       i=$((i + 1))
@@ -77,7 +92,11 @@ fi
 
 if [ "${ARG_DRY_RUN:-0}" = "1" ]; then
   ok "dry-run: would inspect (${selector:-<no-selector>})"
-  emit_summary verb=inspect tool=none why=dry-run status=ok selector="${selector}" dry_run=true
+  if [ "${do_capture}" = "1" ]; then
+    emit_summary verb=inspect tool=none why=dry-run status=ok selector="${selector}" dry_run=true capture=true
+  else
+    emit_summary verb=inspect tool=none why=dry-run status=ok selector="${selector}" dry_run=true
+  fi
   exit 0
 fi
 
@@ -87,16 +106,61 @@ why="${picked#*$'\t'}"
 
 source_picked_adapter "${tool_name}"
 
+if [ "${do_capture}" = "1" ]; then
+  capture_start inspect
+fi
+
 set +e
 adapter_out="$(invoke_with_retry inspect "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 
-[ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
+if [ "${do_capture}" = "1" ] && [ -n "${adapter_out}" ]; then
+  # Single sanitize, both sinks: stdout + per-aspect files. Sanitize once,
+  # extract sub-fields for per-aspect persistence, emit sanitized aggregate
+  # to stdout.
+  sanitized_out="$(printf '%s' "${adapter_out}" | sanitize_inspect_reply)"
+
+  # console.json — extract sanitized .console_messages array.
+  if [ "${capture_console}" = "1" ]; then
+    if printf '%s' "${sanitized_out}" | jq -e 'has("console_messages")' >/dev/null 2>&1; then
+      printf '%s' "${sanitized_out}" | jq '.console_messages // []' > "${CAPTURE_DIR}/console.json"
+      chmod 600 "${CAPTURE_DIR}/console.json"
+    fi
+  fi
+
+  # network.har — wrap sanitized .network_requests in HAR envelope and persist.
+  if [ "${capture_network}" = "1" ]; then
+    if printf '%s' "${sanitized_out}" | jq -e 'has("network_requests")' >/dev/null 2>&1; then
+      printf '%s' "${sanitized_out}" \
+        | jq '{log: {version: "1.2", entries: (.network_requests // [])}}' \
+        > "${CAPTURE_DIR}/network.har"
+      chmod 600 "${CAPTURE_DIR}/network.har"
+    fi
+  fi
+
+  printf '%s\n' "${sanitized_out}"
+
+  if [ "${adapter_rc}" -eq 0 ]; then
+    capture_finish ok
+  else
+    capture_finish error
+  fi
+else
+  [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
+fi
 
 if [ "${adapter_rc}" -eq 0 ]; then
-  emit_summary verb=inspect tool="${tool_name}" why="${why}" status=ok selector="${selector}"
+  if [ "${do_capture}" = "1" ]; then
+    emit_summary verb=inspect tool="${tool_name}" why="${why}" status=ok selector="${selector}" capture_id="${CAPTURE_ID}"
+  else
+    emit_summary verb=inspect tool="${tool_name}" why="${why}" status=ok selector="${selector}"
+  fi
   exit 0
 fi
-emit_summary verb=inspect tool="${tool_name}" why="${why}" status=error selector="${selector}"
+if [ "${do_capture}" = "1" ]; then
+  emit_summary verb=inspect tool="${tool_name}" why="${why}" status=error selector="${selector}" capture_id="${CAPTURE_ID}"
+else
+  emit_summary verb=inspect tool="${tool_name}" why="${why}" status=error selector="${selector}"
+fi
 exit "${adapter_rc}"
