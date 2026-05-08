@@ -13,6 +13,29 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 7 part 1-i — capture foundation (`lib/capture.sh` + `snapshot --capture`)
+
+- [feat] new `scripts/lib/capture.sh` — three-function API: `capture_init_dir` (idempotent mkdir 0700), `capture_start <verb>` (atomic NNN allocation + meta.json `status:"in_progress"` + exports `CAPTURE_ID` + `CAPTURE_DIR`), `capture_finish [status]` (updates meta.json with `finished_at`/`status`/`total_bytes`/`files[]`; updates `_index.json` with `latest`/`count`/`total_bytes`/`next_id`).
+- [feat] `scripts/browser-snapshot.sh` — opt-in `--capture` flag. When set, persists adapter stdout to `${CAPTURES_DIR}/NNN/snapshot.json` and writes meta.json. `capture_id` joins the summary line. `--capture` is **stripped before adapter dispatch** (verb-script-level flag, not for adapters). Without `--capture`, `~/.browser-skill/captures/` is not created — clean state preserved.
+- [feat] **Atomic NNN allocation** via tmpfile + rename(2) per parent spec §4.5 ("tmpfile + mv, no flock"). Single-process per invocation expected; concurrent capture_starts race → documented as known limitation. Future hardening (mkdir without `-p` so the second loser fails fast) tracked.
+- [feat] **Failure path:** when the adapter fails (`adapter_rc != 0`), `capture_finish error` still runs — meta.json is finalized with `status: "error"` so the artifact directory is never left in `in_progress` state. Test asserts this directly.
+- [security] Dir mode 0700, all written files mode 0600. `meta.json` + `_index.json` permissions verified by bats.
+- [fix] `scripts/lib/common.sh::summary_json` numeric autodetect rejects leading-zero integers (`001` → string, not `1`). Capture IDs are zero-padded 3-digit identifiers; the spec contract is "NNN string" not "integer". Future capture-id-style fields preserve their padding through the summary serializer.
+- [internal] new `tests/capture.bats` (12 cases) — three-function contract: dir mode 0700, idempotent init, NNN=001 first run, zero-pad to 3 digits, bumps to 002 on second run, exports `CAPTURE_ID`+`CAPTURE_DIR`, meta.json shape (capture_id/verb/schema_version/started_at/status), dir+meta perms, capture_finish updates {finished_at/status/total_bytes/files[]}, status=ok/error round-trip, default status=ok, _index.json shape, two-capture cycle (latest=002, count=2, next_id=3).
+- [internal] `tests/browser-snapshot.bats` (+5 cases) — `--capture` writes snapshot.json + meta.json + capture_id in summary; perms (700/600); _index.json updated; without `--capture` no captures dir created; adapter failure → meta.json status=error.
+- [docs] `docs/superpowers/plans/2026-05-08-phase-07-part-1-i-capture-foundation.md` — phase plan.
+
+**Sub-scope (7-i):**
+- Wired only to `snapshot` — structurally safe (refs only, no headers/cookies, no leak surface). Console/HAR/screenshot wire-ups arrive when sanitization lands.
+- `--capture` is **opt-in**, not default. Default-on policy waits for sanitization (capturing without sanitizing is a leak surface; capturing without writing is the safe stance for 7-i).
+- `lib/capture.sh` does NOT call any adapter — pure filesystem helpers. Verbs sandwich their per-aspect file writes between `capture_start` and `capture_finish`.
+
+**Deferred sub-parts (Phase 7 plan):**
+- 7-ii: `lib/sanitize.sh` — pure jq-function library (sanitize_har, sanitize_console). Unit-tested in isolation.
+- 7-iii: wire sanitizer into `inspect --capture-console --capture-network --capture` (writes console.json + network.har, sanitized by default).
+- 7-iv: `--unsanitized` typed-phrase ack + `meta.json::sanitized:false` audit flag + `doctor` counter.
+- 7-v: `capture_prune` (count>500 / age>14d) + retention thresholds in `~/.browser-skill/config.json`.
+
 ### Recipe-doc catch-up — three reusable patterns extracted (pre-Phase-7)
 
 - [docs] `references/recipes/privacy-canary.md` — sentinel-byte regression test for any verb that ingests caller-supplied secrets via stdin. Layered bash + daemon coverage; canary-string discipline (unique per test, ASCII, ≥10 chars, distinct from injected payload); negative-grep + positive-shape combo (rejects "no output false-pass"); explicit "DON'T grep `${BROWSER_SKILL_HOME}`" rule (disk persistence is the credential-backend test's invariant, not the privacy canary's). Ten existing instances cited.

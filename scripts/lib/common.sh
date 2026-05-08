@@ -138,8 +138,10 @@ summary_json() {
       *=*)
         key="${pair%%=*}"
         value="${pair#*=}"
-        # Numeric? Pass as --argjson; else --arg (string).
-        if [[ "${value}" =~ ^-?[0-9]+(\.[0-9]+)?$ ]]; then
+        # Numeric? Pass as --argjson; else --arg (string). Reject leading-zero
+        # integers (e.g. capture_id "001") so they stay as strings — leading
+        # zeros are intentional padding, never numeric.
+        if [[ "${value}" =~ ^-?(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
           args+=(--argjson "${key}" "${value}")
         elif [ "${value}" = "true" ] || [ "${value}" = "false" ] || [ "${value}" = "null" ]; then
           args+=(--argjson "${key}" "${value}")
