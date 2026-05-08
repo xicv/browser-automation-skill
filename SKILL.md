@@ -4,6 +4,8 @@ description: Drive a real browser from Claude Code via four routed tools (chrome
 when_to_use: The user mentions a browser task — register a site, capture a session, verify a page, fill a form, capture console errors, run a lighthouse audit, scrape multiple URLs, debug a UI bug iteratively, or run a recorded flow.
 argument-hint: [verb] [--site NAME] [--session NAME] [--tool NAME] [--dry-run]
 allowed-tools: Bash(bash *) Bash(jq *) Bash(chmod *) Bash(mkdir *) Bash(stat *) Bash(rm *) Bash(mv *) Bash(cat *)
+model: sonnet
+effort: low
 ---
 
 # browser-automation-skill (Phase 2 — site & session core)
