@@ -1,0 +1,27 @@
+{
+  "log": {
+    "version": "1.2",
+    "entries": [
+      {
+        "request": {
+          "method": "GET",
+          "url": "https://api.example.com/users?api_key=SECRET123",
+          "headers": [
+            {"name": "Authorization", "value": "Bearer eyJabc.def.ghi"},
+            {"name": "Cookie", "value": "session=hunter2; csrf=tokval"},
+            {"name": "X-API-Key", "value": "key-9999"},
+            {"name": "Accept", "value": "application/json"}
+          ]
+        },
+        "response": {
+          "status": 200,
+          "headers": [
+            {"name": "Set-Cookie", "value": "session=NEWVAL; Path=/; HttpOnly"},
+            {"name": "Authorization", "value": "Bearer respondertok"},
+            {"name": "Content-Type", "value": "application/json"}
+          ]
+        }
+      }
+    ]
+  }
+}

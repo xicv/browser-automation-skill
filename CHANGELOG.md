@@ -13,6 +13,25 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 7 part 1-ii — `lib/sanitize.sh` (jq-function library; unit-tested in isolation)
+
+- [feat] new `scripts/lib/sanitize.sh` — pure jq-function library. Two functions: `sanitize_har` (redacts Authorization / Cookie / X-API-Key / X-Auth-Token request headers + Set-Cookie / Authorization response headers + api_key / token / access_token / client_secret URL params per parent spec §8.3) and `sanitize_console` (masks password / secret / token field values inline in console message text). Header sentinel `***REDACTED***`; URL-param + console-field mask `***`. Pure stdin → stdout; no verb integration (that's 7-1-iii).
+- [security] Header name match is case-insensitive (`ascii_downcase` in jq). URL-param sub() preserves the leading `?` or `&` separator + the param name; only the value is masked. Console field-value mask uses word-boundary regex `\\b<key>\\b\\s*[:=]\\s*\\S+` so neighbouring tokens like `mypassword: hunter2` only match the `password:` segment, not the prefix `my`.
+- [security] Idempotent — running `sanitize_har` (or `sanitize_console`) twice returns the same output as running once. Important for layered pipelines that may apply sanitization at multiple stages without compounding redaction.
+- [internal] new `tests/sanitize.bats` (15 cases) — Authorization / Cookie / X-API-Key / Set-Cookie / response-Authorization redaction; non-sensitive headers unchanged; api_key URL-param mask with name preserved; multi-param URL with all sensitive masked + others preserved + raw values gone; idempotency (HAR + console); clean-input passthrough (HAR + console); password / token / secret console field masking; non-sensitive console messages unchanged.
+- [internal] new `tests/fixtures/sanitize/` — five synthetic JSON fixtures (har-with-auth, har-clean, har-multi-params, console-with-secrets, console-clean). Hand-authored for predictable tests; not derived from real Chrome captures.
+- [docs] `docs/superpowers/plans/2026-05-08-phase-07-part-1-ii-sanitize-lib.md` — phase plan.
+
+**Sub-scope (7-1-ii):**
+- **No verb integration.** `inspect --capture-console --capture-network --capture` wire-up arrives in 7-1-iii.
+- **No `--unsanitized` flag.** Typed-phrase opt-out lands in 7-1-iv.
+- **No `meta.sanitized:false` audit field.** Also 7-1-iv.
+- **No retention/prune.** That's 7-1-v.
+
+**jq compatibility:** avoids named-capture-group regex (`(?<name>...)`) since older jq builds reject the syntax. Uses per-key sub() loop instead — portable across jq 1.6+. Verified on macOS Homebrew jq + Ubuntu apt jq via CI.
+
+**Phase 7 progress: 2 of 5 sub-parts shipped.** Remaining: 7-1-iii (inspect wire-up — first composition test for capture + sanitize), 7-1-iv (--unsanitized + audit flag + doctor counter), 7-1-v (retention/prune + `_index.json` bookkeeping + `~/.browser-skill/config.json` thresholds).
+
 ### Phase 11 — memory design doc (auto-learned per-archetype selector/action cache; queued after Phase 9)
 
 - [docs] new `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md` — full design for the per-archetype selector/action cache. Locks decisions M1+U1+E1+H1 (cache key = `(site, url_pattern, intent_phrase)`; URL pattern via web-standard URLPattern API; engagement via new `browser-do --intent "..."` verb; self-healing via fail_count threshold + invalidation). Five sub-parts split: 11-1-i (lib foundation), 11-1-ii (verb wire-up), 11-1-iii (self-heal), 11-2-i (manual `--pattern` flag), 11-2-ii (auto-cluster). Storage at `~/.browser-skill/memory/<site>/archetypes/<archetype_id>.json` (mode 0700 dir, 0600 files). Schema frozen at v1.
