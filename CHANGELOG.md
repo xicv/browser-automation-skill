@@ -13,6 +13,18 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Skill model-routing — `model: sonnet` + `effort: low` default; new model-routing recipe
+
+- [feat] `SKILL.md` frontmatter — adds `model: sonnet` + `effort: low`. Skill turns now drop to Sonnet 4.6 + low effort when invoked; parent session resumes its model on the next prompt (per [Claude Code skills docs](https://code.claude.com/docs/en/skills): "The override applies for the rest of the current turn and is not saved to settings"). Browser verb-driving is mechanical (chain snapshot → pick `eN` → fill/click) — Sonnet handles it reliably; Opus reasoning belongs in the parent session for plan-doc design / debugging session brainstorms. Estimated 3-5× cost reduction per skill turn vs running the whole turn on Opus.
+- [docs] new `references/recipes/model-routing.md` — three-tier strategy (parent session, skill turn, per-verb-future). Parent session: recommends `/model opusplan` (Opus during plan mode, Sonnet in execution mode) as zero-risk starting point; documents `/advisor` toggle (experimental in v2.1.x; Sonnet executor + Opus advisor mid-generation) as next-level optimization. Documents override escape-hatch (`/model opus` before skill invocation when a session needs Opus reasoning during the skill turn). Cites authoritative sources (Claude Code docs, Advisor Tool API docs, pricing page).
+- [docs] `docs/superpowers/HANDOFF.md` — model-routing pattern noted; recipe count → 4.
+
+**Why now:** This is an orthogonal optimization — independent of Phase 7 capture-pipeline progress. One-line frontmatter edit + one new recipe-doc; fits between Phase 7 sub-parts without blocking them. The recipe lives next to the existing privacy-canary/path-security/body-bytes-not-body recipes so future agents extending the skill can apply the same routing pattern.
+
+**Override escape-hatch.** Users who need Opus reasoning during a specific skill turn can run `/model opus` before invocation; the per-turn override only fires if the skill is loaded fresh. Permanent disable: change skill frontmatter to `model: inherit`.
+
+**Open follow-up:** Per-verb model selection isn't supported by Claude Code's frontmatter today. If users report needing different models per verb (e.g. Opus for `login --interactive` form-shape detection; Haiku for `snapshot` raw screen-scrape), the workaround is splitting into N skills or using `Agent` tool from inside the skill body. Not worth structural complexity until demand surfaces.
+
 ### Phase 7 part 1-i — capture foundation (`lib/capture.sh` + `snapshot --capture`)
 
 - [feat] new `scripts/lib/capture.sh` — three-function API: `capture_init_dir` (idempotent mkdir 0700), `capture_start <verb>` (atomic NNN allocation + meta.json `status:"in_progress"` + exports `CAPTURE_ID` + `CAPTURE_DIR`), `capture_finish [status]` (updates meta.json with `finished_at`/`status`/`total_bytes`/`files[]`; updates `_index.json` with `latest`/`count`/`total_bytes`/`next_id`).
