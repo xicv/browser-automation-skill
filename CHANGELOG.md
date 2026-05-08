@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 7 part 1-iii — `inspect --capture` wire-up (capture + sanitize composition)
+
+- [feat] `scripts/browser-inspect.sh` — opt-in `--capture` flag. When set, sandwiches `capture_start` / sanitize / per-aspect-file persistence / `capture_finish` around the adapter call. Persists `${CAPTURES_DIR}/NNN/console.json` (sanitized via `sanitize_console`) + `${CAPTURES_DIR}/NNN/network.har` (sanitized via `sanitize_har`, wrapped in HAR envelope) + `${CAPTURES_DIR}/NNN/meta.json`. `capture_id` joins the summary line. **Defense in depth: stdout output is ALSO sanitized** — single transformation, both sinks (stdout = agent transcript surface; same leak vector as disk).
+- [feat] `scripts/lib/sanitize.sh::sanitize_inspect_reply` — new helper. Reads bridge's combined inspect reply on stdin; emits same shape with `.console_messages` + `.network_requests` sanitized in place. Non-sanitized fields (verb, tool, why, status, matches, screenshot_path, etc.) pass through untouched. Single function used for both stdout-side and disk-side sanitization.
+- [security] **Privacy canary on the wire-up itself.** Test fixture (`tests/fixtures/chrome-devtools-mcp/d0fcae...json`) carries five distinct canary tokens — `HEADER-CANARY-7-1-iii`, `URL-CANARY-7-1-iii`, `SESS-CANARY-7-1-iii`, `NEW-CANARY-7-1-iii`, `PWD-CANARY-7-1-iii`, `TOK-CANARY-7-1-iii` — across Authorization header / URL api_key param / Cookie / Set-Cookie / console password / console token. Three new bats test cases assert NONE of these literal canaries appear in the persisted `console.json`/`network.har` on disk OR in stdout. Layered defense over the unit-tested `sanitize.sh`.
+- [security] **Sanitize stdout, not just disk.** Parent spec §4.1 emphasizes disk sanitization (`captures/NNN/network.har`); 7-1-iii extends to stdout for the same content. Reasoning: streaming output is the agent's transcript and (potentially) `tee log.txt` / `script(1)` capture. Same leak vector as disk; same defense applied. `--unsanitized` opt-out arrives in 7-1-iv if/when users need raw debugging.
+- [internal] new `tests/browser-inspect.bats` (+5 cases) — `--capture` writes 3 files + capture_id in summary; perms (700/600); privacy canary HEADER (Authorization + Cookie + Set-Cookie redacted); privacy canary URL (api_key=*** + raw value gone); privacy canary console (password + token field-value masked); without `--capture` no captures dir created.
+- [internal] `tests/sanitize.bats` (+3 cases) — `sanitize_inspect_reply` direct unit tests: combined console + network sanitization in one pass; non-sanitized field passthrough; clean-input shape preservation.
+- [internal] new `tests/fixtures/chrome-devtools-mcp/d0fcae777fd32c21edd55fca4e04d2b3130ea15124eac7f0de79613c080d1733.json` — bridge fixture for `inspect --capture-console --capture-network` argv. Contains rich content with sensitive headers + URL params + console messages (privacy-canary fodder).
+- [docs] `docs/superpowers/plans/2026-05-08-phase-07-part-1-iii-inspect-capture-wireup.md` — phase plan.
+
+**Sub-scope (7-1-iii):**
+- **No `--unsanitized` flag.** Typed-phrase opt-out is 7-1-iv.
+- **No `meta.sanitized:false` audit field.** 7-1-iv.
+- **No retention/prune.** 7-1-v.
+- **No screenshot persistence.** Existing `--screenshot` flag is orthogonal in this PR; revisit if user demand surfaces.
+- **No HAR-shape adapter** for the bridge's flat `network_requests` array. Test fixture authors HAR-shape entries directly (Authorization headers + Set-Cookie response headers + api_key URL params). Real CDT-MCP shape may need adaptation; binding-hardening track.
+
+**Phase 7 progress: 3 of 5 sub-parts shipped.** Remaining: 7-1-iv (--unsanitized + audit flag + doctor counter), 7-1-v (retention/prune + _index.json recompute + config.json thresholds).
+
 ### Phase 7 part 1-ii — `lib/sanitize.sh` (jq-function library; unit-tested in isolation)
 
 - [feat] new `scripts/lib/sanitize.sh` — pure jq-function library. Two functions: `sanitize_har` (redacts Authorization / Cookie / X-API-Key / X-Auth-Token request headers + Set-Cookie / Authorization response headers + api_key / token / access_token / client_secret URL params per parent spec §8.3) and `sanitize_console` (masks password / secret / token field values inline in console message text). Header sentinel `***REDACTED***`; URL-param + console-field mask `***`. Pure stdin → stdout; no verb integration (that's 7-1-iii).
