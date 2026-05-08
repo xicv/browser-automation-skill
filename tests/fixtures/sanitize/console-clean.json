@@ -1,0 +1,6 @@
+[
+  {"level": "log", "text": "user logged in"},
+  {"level": "info", "text": "config loaded successfully"},
+  {"level": "log", "text": "page rendered in 42ms"},
+  {"level": "warn", "text": "deprecation: foo() is deprecated"}
+]
