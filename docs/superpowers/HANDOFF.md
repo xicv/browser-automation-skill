@@ -81,6 +81,38 @@ Estimated size: ~10 bats unit cases + ~150 lines of sanitize.sh. Smaller than 7-
 
 After 7-1-ii: 7-1-iii (inspect wire-up using both capture.sh + sanitize.sh — first composition test for the pipeline). Then 7-1-iv (audit flag + doctor counter), 7-1-v (retention), then Phase 8 (obscura adapter).
 
+## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
+
+User confirmed (2026-05-08) that no memory-like feature is currently shipped. Sites profile holds login selectors (manually entered); daemon `refMap` is in-memory only; Phase 9's planned `flow record` is manual recording, not auto-learned. The auto-learned per-archetype selector/action cache (the "get smarter the more we use it" pattern from Skyvern/Stagehand/Agent-E) is a **Phase 11 candidate**.
+
+Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decisions locked: M1+U1+E1+H1.
+
+| Sub-part | Scope | Status |
+|---|---|---|
+| 11-1-i | `lib/memory.sh` foundation (read/write archetype JSON; URL→archetype via URLPattern API) | 🔲 (after Phase 9) |
+| 11-1-ii | `browser-do --intent "..."` verb — cache lookup → hit-direct OR miss-fallback to snapshot+reasoning + write-back | 🔲 |
+| 11-1-iii | Self-healing — fail_count threshold → invalidate → re-resolve | 🔲 |
+| 11-2-i | Manual user-defined `--pattern '/devices/:id'` flag | 🔲 |
+| 11-2-ii | Auto-cluster URL patterns (observe N visits; propose pattern) | 🔲 |
+
+**Sequencing locked.** Phase 11 implementation begins **after Phase 9 ships** (flow runner). Reasoning: flow record's manual semantics establish the deliberate-recording contract first; auto-recording layered on. Memory + flow record overlap (both are interaction-recording); ordering avoids retroactive contract changes.
+
+**Open follow-up after Phase 11 part 1:** new recipe `references/recipes/cache-write-security.md` codifying selector-injection guards + cache-write privacy canary. **User confirmed: ships AFTER Phase 11 part 1, not with it.**
+
+**Storage shape (frozen at v1):**
+```
+~/.browser-skill/memory/                       # mode 0700 (lazy-created)
+├── _index.json                                # mode 0600
+└── <site>/
+    ├── patterns.json                          # URL → archetype mapping
+    └── archetypes/<archetype_id>.json         # mode 0600
+          { schema_version: 1, archetype_id, url_pattern,
+            first_seen, last_seen, use_count,
+            interactions: [{intent, selector, success_count, fail_count, disabled, ...}] }
+```
+
+**Cost compounding.** Memory hits = zero LLM tokens. Combined with model-routing default (`model: sonnet` + `effort: low` per skill turn) + `/model opusplan` parent session, fully realized memory is the **largest cost lever in the roadmap**. Target: ≥ 70% cache hit rate after 20+ similar actions per archetype (Agent-E-validated threshold).
+
 ## Workflow expectations (proven across 56 PRs)
 
 - **TDD muscle-memory**: branch + bats RED → GREEN → lint → tag → push → PR → CI → squash-merge → reset main. ~95%+ CI-green-first-try across the project.
@@ -97,6 +129,7 @@ After 7-1-ii: 7-1-iii (inspect wire-up using both capture.sh + sanitize.sh — f
 - **Path-security pattern** (introduced in 6-6 upload): sensitive-pattern reject + `--allow-sensitive` ack + realpath canonicalization. Recipe: `references/recipes/path-security.md`.
 - **Body-bytes-not-body pattern** (introduced in 7-ii route fulfill): when a verb ingests caller-supplied content, ship the byte length in the reply, not the content. Recipe: `references/recipes/body-bytes-not-body.md`.
 - **Model-routing pattern** (new): three-tier strategy — parent session uses `opusplan` (or `/advisor` for advanced); this skill's turn drops to `model: sonnet` + `effort: low` via SKILL.md frontmatter; per-verb override deferred until demand surfaces. Recipe: `references/recipes/model-routing.md`.
+- **Memory pattern** (Phase 11 — design shipped, implementation queued after Phase 9): per-archetype `(site, url_pattern, intent_phrase) → selector` cache; cache hits skip LLM inference entirely. Composes with model-routing for compounding cost reduction. Design: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Recipe (post-Phase-11-1): `cache-write-security.md`.
 - **Padded-NNN-id-as-string pattern** (codified in 7-1-i): zero-padded identifiers (`001`, `042`, `999`) are **strings**, not integers — `summary_json`'s numeric regex now rejects leading-zero ints. Future padded-id fields (capture_id today; possibly baseline_id in flow runner) preserve padding through the summary serializer.
 - **Failure-path-finalize pattern** (codified in 7-1-i): when a verb opens a side-effect resource (capture dir, lock file, temp dir), the failure branch must run the same finalization as success — never leave `in_progress` orphans on disk. Test the failure-finalize directly; agents discovering an `in_progress` capture dir is a regression.
 - **Defense-in-depth validation pattern** (codified in 7-ii): same validation at three layers (bash verb → bridge → daemon-child). Each layer is cheap (<10 lines). Daemon-child layer is the only required test surface for non-CLI IPC paths.
