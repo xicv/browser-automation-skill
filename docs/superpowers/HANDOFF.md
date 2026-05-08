@@ -26,7 +26,7 @@ main is at tag `v0.32.0-phase-06-part-7-ii-route-fulfill`. **Phases 1-5 SHIPPED*
 - **3 of 4 adapters real-mode**: playwright-cli, playwright-lib, chrome-devtools-mcp (full + Path B promotion). obscura → Phase 8.
 - **3 of 3 Tier-1 credential backends**.
 - **~672 tests pass / 0 fail / lint exit 0** locally (CI-authoritative; local hangs on real-playwright e2e files when playwright globally installed; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing, tracked as follow-up).
-- **54 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI; not counting this HANDOFF refresh).
+- **55 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes-catchup; not counting any future HANDOFF refresh).
 
 ## Next session: jump to Phase 7 (capture pipeline + sanitization)
 
@@ -44,14 +44,12 @@ Likely sub-parts (rough — confirm with parent spec on the way in):
 - Where does sanitization gate? Pre-write (capture-side) or pre-read (replay-side)? Pre-write is safer (redacted bytes never hit disk) but couples capture to redaction.
 - Does sanitization run on existing snapshot/inspect artifacts already on disk, or only on Phase 7 captures? Migration question.
 
-### Recipe-doc catch-up (alternative for the very next session)
+### Recipe-doc catch-up — ✅ SHIPPED (PR #55)
 
-Two recipes are explicitly "overdue" in this HANDOFF and would be useful **before** Phase 7's sanitization work (path-security generalizes there):
-- `references/recipes/privacy-canary.md` — sentinel-canary-in-bats pattern (10+ instances).
-- `references/recipes/path-security.md` — sensitive-pattern reject + `--allow-sensitive` ack + realpath canonicalization (introduced 6-6 upload).
-- New candidate from this session: `references/recipes/body-bytes-not-body.md` — when reply-shape ingests caller-supplied content, ship a length contract (`body_bytes`), not the content itself. Avoids re-emitting agent-supplied data into stdout / logs / terminal capture. Two instances now: route fulfill 7-ii (body) and the older fill `--secret-stdin` reply scrub.
-
-Pure docs PR. Low risk. Useful primer for Phase 7's sanitization design.
+Three recipes landed pre-Phase-7 so sanitization design has primitives to cite:
+- `references/recipes/privacy-canary.md` — sentinel-canary-in-bats pattern (10+ instances; layered bash + daemon coverage; canary discipline; "don't grep ${BROWSER_SKILL_HOME}" rule).
+- `references/recipes/path-security.md` — four-step block (existence + regular-file → readable → sensitive-pattern reject → realpath canonicalize). Source of truth: `scripts/browser-upload.sh:74-103`. Notes the resolve-then-check ordering is what to write next time (browser-upload shipped check-then-resolve; both work, paranoid form re-checks).
+- `references/recipes/body-bytes-not-body.md` — for caller-supplied content (HTTP bodies, blobs), reply ships `<thing>_bytes` (length), never `<thing>` (content). Source of truth: `scripts/lib/node/chrome-devtools-bridge.mjs::case 'route'` fulfill branch. Calls out `Buffer.byteLength` vs `.length` (utf-16 code-units gotcha). Sister-recipe-of, not replacement-for, privacy-canary.
 
 ## Workflow expectations (proven across 54 PRs)
 
@@ -63,9 +61,9 @@ Pure docs PR. Low risk. Useful primer for Phase 7's sanitization design.
   - `BROWSER_SKILL_DRIVER_TEST_2FA=1` / `BROWSER_SKILL_DRIVER_TEST_TOTP_REPLAY=1` — driver short-circuit hooks.
 - **Cross-platform shell idioms**: GREP REPO FIRST. `stat -c '%a'` (GNU) precedes `stat -f '%Lp'` (BSD). `read -r -d ''` for NUL-stdin (bash vars can't hold NUL — but for stdin passthrough to a node bridge, the bash side doesn't read stdin at all; bridge's `readAllStdin` does).
 - **CI workflow** runs on macos-latest + ubuntu-latest. Doesn't install Playwright/cdt-mcp by default — driver real-mode tests gated; bats coverage via stubs (`tests/stubs/mcp-server-stub.mjs` handles 19 MCP tools used by the bridge).
-- **Privacy-canary pattern** (10+ instances now): every credential-emitting verb gets a sentinel canary in its bats file. Recipe doc at `references/recipes/privacy-canary.md` is **overdue**.
-- **Path-security pattern** (introduced in 6-6 upload): sensitive-pattern reject + `--allow-sensitive` ack + realpath canonicalization. Recipe doc at `references/recipes/path-security.md` is **overdue**.
-- **Body-bytes-not-body pattern** (new in 7-ii): when a verb ingests caller-supplied content (HTTP body, large blobs), ship the byte length in the reply, not the content. Avoids re-emitting agent-supplied data. Recipe doc candidate.
+- **Privacy-canary pattern** (10+ instances now): every credential-emitting verb gets a sentinel canary in its bats file. Recipe: `references/recipes/privacy-canary.md`.
+- **Path-security pattern** (introduced in 6-6 upload): sensitive-pattern reject + `--allow-sensitive` ack + realpath canonicalization. Recipe: `references/recipes/path-security.md`.
+- **Body-bytes-not-body pattern** (new in 7-ii): when a verb ingests caller-supplied content (HTTP body, large blobs), ship the byte length in the reply, not the content. Avoids re-emitting agent-supplied data. Recipe: `references/recipes/body-bytes-not-body.md`.
 - **Defense-in-depth validation pattern** (codified in 7-ii): same validation at three layers (bash verb → bridge → daemon-child). Each layer is cheap (<10 lines). Daemon-child layer is the only required test surface for non-CLI IPC paths. Use when the IPC boundary could be exercised by callers other than the verb script.
 - **HANDOFF-refresh-as-separate-PR pattern** (proven 4 times now: PR #47, #50, #52, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries.
 
@@ -113,6 +111,4 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 3. **Read parent spec** `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` for Phase 7's capture-pipeline shape — Phase 6 was mostly mechanical verbs; Phase 7 is a meaningfully different surface (artifacts, sanitization, replay) and the parent spec opinions matter.
 4. Propose Phase 7 sub-part split BEFORE coding — Phase 7 is too big for one PR. The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
 
-**Alternative pick** (lower risk, useful before Phase 7's sanitization work): write the three overdue recipe docs (privacy-canary, path-security, body-bytes-not-body) as a single docs-only PR. Doesn't move the roadmap, does cement reusable patterns.
-
-Start with: read CHANGELOG since `v0.32.0-phase-06-part-7-ii-route-fulfill` (the last tag) to confirm no in-flight work, then propose Phase 7 part 7-i scope (or recipe docs alternative).
+Start with: read CHANGELOG since `v0.32.0-phase-06-part-7-ii-route-fulfill` (the last tag) to confirm no in-flight work, then propose Phase 7 part 7-i scope. Recipe-doc catch-up already shipped (#55) — patterns are extracted, ready for citation by Phase 7 work.
