@@ -13,6 +13,15 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Recipe-doc catch-up — three reusable patterns extracted (pre-Phase-7)
+
+- [docs] `references/recipes/privacy-canary.md` — sentinel-byte regression test for any verb that ingests caller-supplied secrets via stdin. Layered bash + daemon coverage; canary-string discipline (unique per test, ASCII, ≥10 chars, distinct from injected payload); negative-grep + positive-shape combo (rejects "no output false-pass"); explicit "DON'T grep `${BROWSER_SKILL_HOME}`" rule (disk persistence is the credential-backend test's invariant, not the privacy canary's). Ten existing instances cited.
+- [docs] `references/recipes/path-security.md` — four-step block (existence + regular-file → readable → sensitive-pattern reject → realpath canonicalize) for any verb taking `--path PATH`. Source of truth: `scripts/browser-upload.sh:74-103`. Documents resolve-then-check vs check-then-resolve ordering trade-off (browser-upload shipped check-then-resolve; resolve-first is paranoid form for new verbs). Cross-platform `realpath || readlink -f || printf` fallback chain explained.
+- [docs] `references/recipes/body-bytes-not-body.md` — for caller-supplied content (HTTP bodies, blobs), reply ships `<thing>_bytes` (length), never `<thing>` (content). Source of truth: `scripts/lib/node/chrome-devtools-bridge.mjs::case 'route'` fulfill branch. `Buffer.byteLength` vs `.length` gotcha (utf-16 code-unit mismatch); bash `wc -c` analogue; defensive double-scrub idiom from fill verb (line ~432).
+- [docs] `docs/superpowers/HANDOFF.md` — marks all three recipes shipped; removes "overdue" markers from workflow-expectations section; PR count 55.
+
+**Why now (pre-Phase-7):** Phase 7 (capture pipeline + sanitization) will reuse path-security as a primitive (sanitization-write-to-file gate) and body-bytes-not-body for sanitizer-output replies. Cheaper to extract patterns now than mid-Phase-7. Pure-docs PR; near-zero risk.
+
 ### Phase 6 part 7-ii — `route` verb extension: `--action fulfill` (closes Phase 6)
 
 - [feat] `scripts/browser-route.sh` — accept `--action fulfill` (block/allow/fulfill triad complete). Adds `--status N` (HTTP code, integer 100-599) + body transport (`--body STR` ⊕ `--body-stdin`, mutex). Bash-side validation: `--status` / `--body*` rejected when paired with `block`/`allow`; fulfill requires both status + body; status range + integer-shape enforced. Body-via-stdin uses the same passthrough pattern as `fill --secret-stdin` (browser-fill.sh:87) — bash forwards the `--body-stdin` flag and stdin inherits naturally to the bridge subprocess.
