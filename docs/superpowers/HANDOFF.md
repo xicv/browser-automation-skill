@@ -1,27 +1,27 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-08 — Phase 7 part 1-ii shipped)
+## Where the project stands (as of 2026-05-08 — Phase 7 part 1-iii shipped)
 
-main is at tag `v0.34.0-phase-07-part-1-ii-sanitize-lib`. **Phases 1-6 SHIPPED** (Phase 6 closed at 11/11 verbs). **Phase 7 is 2/5 sub-parts done** — capture foundation + sanitize lib. Inspect wire-up + `--unsanitized` audit flag + retention/prune remain.
+main is at tag `v0.35.0-phase-07-part-1-iii-inspect-capture-wireup`. **Phases 1-6 SHIPPED** (Phase 6 closed at 11/11 verbs). **Phase 7 is 3/5 sub-parts done** — capture foundation + sanitize lib + inspect wire-up. `--unsanitized` audit flag + retention/prune remain.
 
-### Phase 7 progress (PRs #56, #60)
+### Phase 7 progress (PRs #56, #60, #62)
 
 | Sub-part | Scope | Status |
 |---|---|---|
 | 7-1-i | `lib/capture.sh` foundation (3-fn API: capture_init_dir / capture_start / capture_finish) + opt-in `--capture` on snapshot | ✅ |
 | 7-1-ii | `lib/sanitize.sh` — pure jq-function library (sanitize_har + sanitize_console). 15 bats; 5 fixture JSONs; no verb integration | ✅ |
-| 7-1-iii | Wire sanitizer into `inspect --capture-console --capture-network --capture` (writes console.json + network.har, sanitized by default) | 🔲 |
+| 7-1-iii | `inspect --capture` wire-up — first composition test for capture + sanitize. Persists console.json + network.har sanitized; defense in depth (stdout sanitized too); 6-canary privacy regression suite. | ✅ |
 | 7-1-iv | `--unsanitized` typed-phrase ack (`I want raw network/console data including auth tokens`) + `meta.sanitized: false` audit flag + `doctor` counter | 🔲 |
 | 7-1-v | `capture_prune` (count>500 / age>14d) + retention thresholds in `~/.browser-skill/config.json` + `_index.json` recompute on prune | 🔲 |
 
 ### Counters
 
-- **34 user-facing verbs** (Phase 7 1-i extends `snapshot` with `--capture` opt-in flag — same verb count). Phase 6 11/11 closed.
-- **2 lib helpers added in Phase 7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`.
+- **34 user-facing verbs** (snapshot + inspect both extended with `--capture` opt-in flag — same verb count). Phase 6 11/11 closed.
+- **2 lib helpers added in Phase 7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`. Sanitize lib gained `sanitize_inspect_reply` helper in 7-1-iii.
 - **3 of 4 adapters real-mode**: playwright-cli, playwright-lib, chrome-devtools-mcp. obscura → Phase 8.
 - **3 of 3 Tier-1 credential backends**.
-- **~704 tests pass / 0 fail / lint exit 0** locally (CI-authoritative; local hangs on real-playwright e2e files when playwright globally installed; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing, tracked as follow-up).
-- **58 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 part 1-i + Phase 11 design + Phase 7 part 1-ii; not counting any future HANDOFF refresh).
+- **~713 tests pass / 0 fail / lint exit 0** locally (CI-authoritative; local hangs on real-playwright e2e files when playwright globally installed; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing, tracked as follow-up).
+- **60 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii + Phase 11 design + skill model-routing; not counting future HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-i)
 
@@ -37,38 +37,39 @@ ${BROWSER_SKILL_HOME}/captures/                  # mode 0700 (lazy-created)
 ```
 
 Per-aspect files arrive incrementally:
-- 7-1-i: `snapshot.json` (snapshot verb only)
-- 7-1-iii: `console.json`, `network.har` (inspect verb, sanitized)
+- 7-1-i: `snapshot.json` (snapshot verb)
+- 7-1-iii: `console.json`, `network.har` (inspect verb, **sanitized by default**)
 - Future: `screenshot.png`, `trace.zip`, `lighthouse.json` (audit verb)
 
 `meta.json` and `_index.json` schemas are **frozen at v1** for Phase 7. Field additions are non-breaking; renames/removals bump `schema_version`.
 
-## Next session: pick up at Phase 7 part 1-iii (inspect wire-up)
+## Next session: pick up at Phase 7 part 1-iv (`--unsanitized` opt-out)
 
-Recommended start: **`inspect --capture` wire-up (Phase 7 part 1-iii)**. **First composition test for the capture + sanitize pipeline** — this is where 7-1-i's `lib/capture.sh` and 7-1-ii's `lib/sanitize.sh` finally compose against a real verb. The sanitizer has been TDD'd in isolation (15 bats green); now it gets wired in.
+Recommended start: **`--unsanitized` typed-phrase ack (Phase 7 part 1-iv)**. The capture+sanitize pipeline now ships sanitized-by-default. 7-1-iv adds the typed-phrase escape-hatch for users who legitimately need raw network/console data (e.g. debugging an auth flow that the sanitizer is hiding).
 
 Surface:
 
 ```bash
-# After this sub-part ships:
-bash scripts/browser-inspect.sh --capture-console --capture-network --capture
-# → captures/NNN/console.json   (sanitized via sanitize_console)
-# → captures/NNN/network.har    (sanitized via sanitize_har)
-# → captures/NNN/meta.json      (capture_id + finalized status)
-# Summary line includes capture_id="NNN" + counts
+# Triggers a typed-phrase confirmation. Cannot be passed via flag value;
+# user must echo the exact phrase via stdin or interactive prompt.
+bash scripts/browser-inspect.sh --capture-console --capture-network --capture --unsanitized
+# → asks for: "I want raw network/console data including auth tokens"
+# → on confirm: captures/NNN/{console.json, network.har} written RAW
+#                meta.json::sanitized = false (audit field)
+# → on mismatch: EXIT_USAGE_ERROR; capture aborted
 ```
 
 Scope:
-- `scripts/browser-inspect.sh` — accept `--capture` flag (verb-script-level, stripped before adapter dispatch like `--capture` on `browser-snapshot.sh` precedent from 7-1-i).
-- When `--capture` set + capture-console/capture-network requested: route adapter output through `sanitize_har` / `sanitize_console` BEFORE persisting to capture dir. Sanitized-by-default policy.
-- Wire `capture_start` / `capture_finish` around the adapter call (same shape as `browser-snapshot.sh:--capture`).
-- Bats: extend `tests/browser-inspect.bats` with ~5 wire-up cases — `--capture` writes sanitized files; mode 0600; meta.json finalized; existing non-`--capture` flow unchanged; sanitization actually applied (canary: inject Authorization header in adapter mock, verify masked in persisted file).
+- `scripts/browser-inspect.sh` — accept `--unsanitized`; require typed-phrase confirmation (mirror `creds-show --reveal` precedent for typed-phrase pattern).
+- When `--unsanitized` confirmed: skip `sanitize_inspect_reply` for that capture; persist RAW console.json + network.har; write `meta.json::sanitized = false` (new field). Stdout still emits raw too (consistent with disk).
+- `scripts/browser-doctor.sh` — count captures with `sanitized:false` in `meta.json`; surface as warning in doctor output ("N captures with sanitization disabled — review captures/NNN/").
+- `scripts/lib/capture.sh::capture_finish` — accept optional `sanitized` flag to write into meta.json. Default true; overrideable.
+- Bats: ~6-8 cases — typed-phrase happy + mismatch → error + canary survives in raw mode + meta.sanitized:false written + doctor counter increments.
+- **Privacy guard:** `--unsanitized` MUST require interactive typed-phrase OR explicit env var `BROWSER_SKILL_UNSANITIZED_ACK=1` (for scripted use). Never bypassed by `-y` or `--yes` shortcuts. Mirrors the strict typed-phrase pattern from creds-show.
 
-Estimated size: medium. Comparable to 7-1-i. Probably ~5 new bats + verb script edit + capture+sanitize composition.
+Estimated size: medium. Comparable to 7-1-iii. ~6-8 bats + verb script edit + capture-finish optional flag + doctor counter + typed-phrase plumbing.
 
-**Cannot skip 7-1-iii** to a later sub-part — 7-1-iv (`--unsanitized` opt-out) and 7-1-v (retention) both depend on console.json + network.har existing on disk.
-
-After 7-1-iii: 7-1-iv (`--unsanitized` typed-phrase ack + `meta.sanitized:false` flag + doctor counter), 7-1-v (retention/prune + `_index.json` recompute), then Phase 8 (obscura adapter).
+After 7-1-iv: 7-1-v (retention/prune + `_index.json` recompute + config.json thresholds), then Phase 8 (obscura adapter).
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
 
@@ -165,8 +166,9 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 
 1. `git checkout main && git pull --ff-only origin main`
 2. Confirm tag is `v0.34.0-phase-07-part-1-ii-sanitize-lib` and main HEAD matches.
-3. **Recommended:** Phase 7 part 1-iii — wire sanitizer into `inspect --capture-console --capture-network --capture`. Branch `feature/phase-07-part-1-iii-inspect-capture-wireup`. Plan-doc + RED bats + GREEN browser-inspect.sh edit (sandwich capture_start / sanitize_har|sanitize_console / capture_finish around adapter call) + lint + tag + PR + CI + squash-merge + reset main.
-4. Read `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` §4.1 (single-verb call flow showing sanitize.sh between adapter output and capture write) for the canonical pipe shape.
-5. **Privacy canary worth shipping with 7-1-iii**: bats case that injects `Authorization: Bearer SECRET-CANARY-7-1-iii` via the adapter mock, then asserts the canary string does NOT appear in the persisted `network.har` on disk. Layered defense over the unit-tested sanitize lib.
+3. **Recommended:** Phase 7 part 1-iv — `--unsanitized` typed-phrase opt-out + `meta.sanitized:false` audit flag + doctor counter. Branch `feature/phase-07-part-1-iv-unsanitized-flag`. Plan-doc + RED bats + GREEN inspect-script edit + capture-finish flag extension + doctor counter + lint + tag + PR + CI + squash-merge + reset main.
+4. Read parent spec §8.5 (Audit & observability) — "Did a verb run --unsanitized? meta.json carries `sanitized:false`; doctor counts these" defines the exact contract.
+5. Read existing typed-phrase precedent in `scripts/browser-creds-show.sh::--reveal` for the `--unsanitized` plumbing pattern. Mirror the strict-confirmation mechanic; never bypassable by `-y` / `--yes`.
+6. **Privacy guard test**: bats case that asserts `--unsanitized` WITHOUT typed-phrase confirmation → `EXIT_USAGE_ERROR`. Plus a positive case where the typed phrase is supplied → raw data passes through; meta.json carries `sanitized: false`.
 
-Start with: read CHANGELOG since `v0.34.0-phase-07-part-1-ii-sanitize-lib` to confirm no in-flight work, then propose 7-1-iii sub-part scope (or alternative if user prefers). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG since `v0.35.0-phase-07-part-1-iii-inspect-capture-wireup` to confirm no in-flight work, then propose 7-1-iv sub-part scope (or alternative if user prefers). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
