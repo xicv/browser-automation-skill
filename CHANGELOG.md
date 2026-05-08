@@ -13,6 +13,18 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 11 — memory design doc (auto-learned per-archetype selector/action cache; queued after Phase 9)
+
+- [docs] new `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md` — full design for the per-archetype selector/action cache. Locks decisions M1+U1+E1+H1 (cache key = `(site, url_pattern, intent_phrase)`; URL pattern via web-standard URLPattern API; engagement via new `browser-do --intent "..."` verb; self-healing via fail_count threshold + invalidation). Five sub-parts split: 11-1-i (lib foundation), 11-1-ii (verb wire-up), 11-1-iii (self-heal), 11-2-i (manual `--pattern` flag), 11-2-ii (auto-cluster). Storage at `~/.browser-skill/memory/<site>/archetypes/<archetype_id>.json` (mode 0700 dir, 0600 files). Schema frozen at v1.
+- [docs] `docs/superpowers/HANDOFF.md` — Phase 11 sub-part table + storage shape + sequencing note (after Phase 9). Workflow-expectations section adds memory pattern entry; recipe-doc candidate `cache-write-security.md` queued for after Phase 11 part 1 ships.
+- [docs] State-of-the-art (May 2026) confirms the user's instinct: Skyvern auto-caching + self-healing, Stagehand action caching that skips LLM inference after first interaction, Agent-E "Skill Harvesting" with 40% faster task completion after 20+ skills accumulated. URLPattern API (Node 20+ web standard) solves the `/devices/:id` URL-templating piece.
+
+**Why now (design only, no code):** Phase 11 implementation is queued **after Phase 9** (flow runner) per user direction. Design doc ships first to lock decisions before code lands — same "design before code" cadence as parent spec (`2026-04-27-browser-automation-skill-design.md`). HANDOFF + CHANGELOG updates fold into this PR per the proven pure-docs-fold exception to the 5-of-5 alternation pattern (PRs #55, #58, this one).
+
+**Cost compounding once shipped.** Memory hits = zero LLM tokens. Combined with the just-shipped `model: sonnet` + `effort: low` skill default + recommended `/model opusplan` parent session, memory is the **largest single cost lever in the roadmap** when fully realized. Target: ≥ 70% cache hit rate after 20+ similar actions per archetype (Agent-E benchmark threshold).
+
+**Open follow-ups documented (decided during Phase 11 implementation, not now):** intent canonicalization (strip articles? embed-vector match?), cache TTL/decay, memory-as-input-to-flow-record (could `flow record` propose flows from clustered memory interactions?). All deferred until cache-hit-rate measurements warrant complexity.
+
 ### Skill model-routing — `model: sonnet` + `effort: low` default; new model-routing recipe
 
 - [feat] `SKILL.md` frontmatter — adds `model: sonnet` + `effort: low`. Skill turns now drop to Sonnet 4.6 + low effort when invoked; parent session resumes its model on the next prompt (per [Claude Code skills docs](https://code.claude.com/docs/en/skills): "The override applies for the rest of the current turn and is not saved to settings"). Browser verb-driving is mechanical (chain snapshot → pick `eN` → fill/click) — Sonnet handles it reliably; Opus reasoning belongs in the parent session for plan-doc design / debugging session brainstorms. Estimated 3-5× cost reduction per skill turn vs running the whole turn on Opus.
