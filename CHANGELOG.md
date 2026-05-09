@@ -13,6 +13,14 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### `summary_json` — fix jq reserved-keyword collision (label, def, or, and, not, …)
+
+- [fix] `scripts/lib/common.sh::summary_json` — internal jq variable names now prefixed with `_v_` so JSON field names that collide with jq's reserved keyword set (e.g. `label`, `def`, `or`, `and`, `not`, `if`, `then`, `else`, `end`, `as`, `reduce`, `foreach`, `try`, `catch`, `import`, `include`, `module`, `true`, `false`, `null`, `break`) no longer trigger `syntax error, unexpected label, expecting IDENT or __loc__` at the `--arg <key> X` → `$<key>` parser stage. **Output JSON shape unchanged** — the prefix lives only in the internal jq variable namespace; emitted field names stay caller-supplied.
+- [internal] `tests/common.bats` (+1 case) — regression: `summary_json verb=test status=ok label=Big def=alpha or=beta and=gamma not=delta` returns valid JSON with all fields preserved.
+- [fix] `tests/browser-select.bats:6` — pre-existing local-only failure (`--dry-run prints planned action and skips adapter`) now passes locally as a side effect. The test was tracked as "jq-version-dependent" since Phase 6; root cause turned out to be jq reserved-keyword collision, not version-specific behavior. The collision triggers on jq 1.6 (Ubuntu 22.04 apt + macOS Homebrew); the CI-vs-local divergence remains a curiosity (CI runs the same jq 1.6 but somehow tolerated the failing filter — possibly a build-flag / oniguruma-linkage difference between distros). Either way, the lib-level fix is robust across all jq builds.
+
+**Why now:** the failing test sat quarantined-local since Phase 6. User asked to address it; the root cause turned out to be a one-line library fix, not a test-level workaround. Lands as its own PR (no Phase 8 alternation impact) so reviewers see a focused single-concern diff.
+
 ### Phase 8 part 1-iii — `tool_extract --stealth` real-mode (single-URL via `obscura fetch`)
 
 - [feat] `scripts/lib/tool/obscura.sh::tool_extract` — second mode branch alongside the existing `--scrape` (8-1-ii). `--stealth` mode wraps `obscura fetch <url> --stealth --eval EXPR`; single URL; `--eval` required (without it `obscura fetch` dumps full HTML — too large for the streaming-event contract). Emits one `extract_stealth` event: `{event, url, eval}`. The `eval` field is **always a string** in this PR (obscura's `run_fetch` prints raw evaluated result on stdout — string unquoted, other JSON-encoded; disambiguating via heuristic parsing deferred). Callers needing typed results should `JSON.stringify` inside their `--eval` expression and parse downstream.
