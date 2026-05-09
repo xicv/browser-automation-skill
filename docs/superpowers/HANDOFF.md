@@ -1,10 +1,10 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-09 — Phase 7 part 1-iv shipped)
+## Where the project stands (as of 2026-05-09 — Phase 7 COMPLETE)
 
-main is at tag `v0.36.0-phase-07-part-1-iv-unsanitized-flag`. **Phases 1-6 SHIPPED** (Phase 6 closed at 11/11 verbs). **Phase 7 is 4/5 sub-parts done** — capture foundation + sanitize lib + inspect wire-up + `--unsanitized` audit flag. Only retention/prune remains.
+main is at tag `v0.37.0-phase-07-part-1-v-capture-prune`. **Phases 1-7 SHIPPED.** Phase 6 closed at 11/11 verbs; **Phase 7 closed at 5/5 sub-parts** — full capture pipeline (foundation + sanitize lib + inspect wire-up + `--unsanitized` audit + retention/prune).
 
-### Phase 7 progress (PRs #56, #60, #62, #64)
+### Phase 7 progress (PRs #56, #60, #62, #64, #66) — ✅ COMPLETE
 
 | Sub-part | Scope | Status |
 |---|---|---|
@@ -12,69 +12,73 @@ main is at tag `v0.36.0-phase-07-part-1-iv-unsanitized-flag`. **Phases 1-6 SHIPP
 | 7-1-ii | `lib/sanitize.sh` — pure jq-function library (sanitize_har + sanitize_console). 15 bats; 5 fixture JSONs; no verb integration | ✅ |
 | 7-1-iii | `inspect --capture` wire-up — first composition test for capture + sanitize. Persists console.json + network.har sanitized; defense in depth (stdout sanitized too); 6-canary privacy regression suite. | ✅ |
 | 7-1-iv | `--unsanitized` typed-phrase ack (`I want raw network/console data including auth tokens`) + `meta.sanitized: false` audit flag + `doctor` counter | ✅ |
-| 7-1-v | `capture_prune` (count>500 / age>14d) + retention thresholds in `~/.browser-skill/config.json` + `_index.json` recompute on prune | 🔲 |
+| 7-1-v | `capture_prune` (count>500 / age>14d) + retention thresholds in `~/.browser-skill/config.json` + `_index.json` recompute on prune. Baseline-protection forward-compat (Phase 8). Cross-platform age parsing. | ✅ |
 
 ### Counters
 
 - **34 user-facing verbs** (snapshot + inspect both extended with `--capture` opt-in flag — same verb count). Phase 6 11/11 closed.
-- **2 lib helpers added in Phase 7**: `scripts/lib/capture.sh` (gained optional `sanitized` arg in 7-1-iv), `scripts/lib/sanitize.sh` (gained `sanitize_inspect_reply` helper in 7-1-iii).
+- **2 lib helpers shipped in Phase 7**: `scripts/lib/capture.sh` (gained `capture_prune` + `sanitized` arg + cross-platform age parser), `scripts/lib/sanitize.sh` (gained `sanitize_inspect_reply` helper).
 - **3 of 4 adapters real-mode**: playwright-cli, playwright-lib, chrome-devtools-mcp. obscura → Phase 8.
 - **3 of 3 Tier-1 credential backends**.
-- **~723 tests pass / 0 fail / lint exit 0** locally (CI-authoritative; local hangs on real-playwright e2e files when playwright globally installed; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing, tracked as follow-up).
-- **62 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii/1-iv + Phase 11 design + skill model-routing; not counting future HANDOFF refresh).
+- **~731 tests pass / 0 fail / lint exit 0** locally (CI-authoritative; local hangs on real-playwright e2e files when playwright globally installed; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing, tracked as follow-up).
+- **64 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 design + skill model-routing + 4 HANDOFF refreshes; not counting future HANDOFF refresh).
 
-## Capture pipeline shape (shipped through 7-1-i)
+## Capture pipeline shape (shipped through 7-1-v — full)
 
 ```
-${BROWSER_SKILL_HOME}/captures/                  # mode 0700 (lazy-created)
-├── _index.json                                  # mode 0600
-│     {schema_version: 1, next_id: N, count: M, latest: "NNN", total_bytes: B}
-└── NNN/                                         # mode 0700, zero-padded 3-digit
-    ├── meta.json                                # mode 0600
-    │     {capture_id, verb, schema_version: 1, started_at, finished_at,
-    │      status: "ok"|"error"|"in_progress", total_bytes, files: [{name, bytes}]}
-    └── snapshot.json                            # mode 0600 (per-aspect file)
+${BROWSER_SKILL_HOME}/
+├── config.json                                  # mode 0600 (NEW in 7-1-v)
+│     { schema_version: 1, retention_days: 14,
+│       retention_count: 500, warn_at_pct: 90 }
+└── captures/                                    # mode 0700 (lazy-created)
+    ├── _index.json                              # mode 0600 (recomputed on prune)
+    │     {schema_version: 1, next_id: N, count: M, latest: "NNN", total_bytes: B}
+    └── NNN/                                     # mode 0700, zero-padded 3-digit
+        ├── meta.json                            # mode 0600
+        │     { capture_id, verb, schema_version: 1,
+        │       started_at, finished_at, status,
+        │       sanitized,                        # 7-1-iv audit field
+        │       total_bytes, files,
+        │       is_baseline?  (Phase 8 forward-compat) }
+        ├── snapshot.json                        # 7-1-i (snapshot verb)
+        ├── console.json                         # 7-1-iii (inspect, sanitized)
+        └── network.har                          # 7-1-iii (inspect, sanitized)
 ```
 
-Per-aspect files arrive incrementally:
-- 7-1-i: `snapshot.json` (snapshot verb)
-- 7-1-iii: `console.json`, `network.har` (inspect verb, **sanitized by default**)
-- Future: `screenshot.png`, `trace.zip`, `lighthouse.json` (audit verb)
+Per-aspect files (Phase 7 inventory):
+- `snapshot.json` (snapshot verb)
+- `console.json` + `network.har` (inspect verb; sanitized by default; raw under `--unsanitized` typed-phrase opt-out)
+- Future: `screenshot.png`, `trace.zip`, `lighthouse.json` (audit verb — likely Phase 8 follow-up)
 
-`meta.json` and `_index.json` schemas are **frozen at v1** for Phase 7. Field additions are non-breaking; renames/removals bump `schema_version`.
+`meta.json`, `_index.json`, `config.json` schemas all **frozen at v1** for Phase 7. Field additions are non-breaking; renames/removals bump `schema_version`.
 
-## Next session: pick up at Phase 7 part 1-v (retention/prune) — Phase 7 closure
+**Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-Recommended start: **`capture_prune` retention/prune (Phase 7 part 1-v)**. **Last sub-part of Phase 7.** Closes the capture pipeline. Self-contained; no jq filter complexity (unlike 7-1-ii); no typed-phrase plumbing (unlike 7-1-iv); no per-aspect file orchestration (unlike 7-1-iii). Pure prune-by-policy logic + `_index.json` recompute + config thresholds.
+## Next session: pick up at Phase 8 (obscura adapter)
 
-Surface:
+Phase 7 is closed. Per parent spec §12 (sequencing) + §3 (4-adapter routing), **Phase 8 ships the obscura adapter** — first non-bridge tool implementation; ships a real backend behind the existing 4-adapter routing model. Today's adapter inventory:
 
-```bash
-# Auto-prune triggered after capture_finish when count > threshold OR
-# age > threshold. Idempotent — re-running on already-pruned state is no-op.
-bash scripts/browser-snapshot.sh --capture
-# → captures/NNN/ written
-# → if count > 500 OR oldest_age > 14 days: oldest non-baseline pruned
-# → _index.json recomputed (count, total_bytes, latest)
-# → emit_summary includes pruned_ids[] when pruning happened
+| Adapter | Real-mode status |
+|---|---|
+| chrome-devtools-mcp | ✅ Full (8/8 verbs; daemon-resident bridge) |
+| playwright-cli | ✅ Full |
+| playwright-lib | ✅ Full |
+| **obscura** | 🔲 **Phase 8** — adapter shell exists; verb implementations are stubs returning EXIT_TOOL_UNSUPPORTED_OP |
 
-# Manual cleanup verb (per parent spec §3 verb table — verb #29 "clean"):
-bash scripts/browser-clean.sh [--keep N] [--days D]
-# → forces prune by policy or override; safer than rm -rf manual deletion
-```
+Recommended starting sub-part shape (TBD; surface during plan-doc):
+- Phase 8 part 1-i: obscura `tool_doctor_check` real implementation (binary discovery + version pin handshake).
+- Phase 8 part 1-ii: obscura `tool_open` + `tool_snapshot` (most-used pair; validates the adapter shape end-to-end).
+- Phase 8 part 1-iii+: remaining verbs in priority order (click/fill stateful first).
 
-Scope:
-- `scripts/lib/capture.sh::capture_prune` — new function. Reads `${BROWSER_SKILL_HOME}/config.json` for thresholds (`retention_count`, `retention_days`); walks `captures/*/meta.json`; computes age + total count; spliuces oldest-first while either threshold exceeded; recomputes `_index.json`. Idempotent.
-- `scripts/lib/capture.sh::capture_finish` — calls `capture_prune` at the end (after meta.json finalize + _index.json update). Auto-prune on every successful capture.
-- `scripts/lib/common.sh::init_paths` — exports `CONFIG_FILE="${BROWSER_SKILL_HOME}/config.json"`.
-- `scripts/install.sh` — writes default `config.json` with `{retention_days: 14, retention_count: 500, warn_at_pct: 90}` per parent spec §4.5.
-- (Optional) `scripts/browser-clean.sh` — force-prune verb. May defer to a follow-up sub-part.
-- **Baseline-protection**: per parent spec §4.5, `capture_prune` never prunes a capture that's a baseline. **But Phase 8 ships baselines.** So 7-1-v ships prune logic that ignores baseline-protection (no baselines exist yet); 7-1-v's prune simply skips capture dirs whose meta has `is_baseline:true` (forward-compat).
-- Bats: ~6-8 cases — prune-by-count threshold; prune-by-age threshold; combined; idempotent (no-op on already-pruned); `_index.json` correctness post-prune; baseline-protection (forward-compat); config.json missing → defaults applied.
+**Open scope question for next session:** does obscura need a daemon (parallel to chrome-devtools-mcp's bridge), or is it one-shot per call? Determines whether 8-1-i opens with stateless verbs (open/snapshot) or daemon lifecycle (daemon-start/stop/status). Answer depends on obscura's transport model — research first.
 
-Estimated size: small-medium. Pure-filesystem logic; no IPC, no typed-phrase, no fixture authoring. ~150 lines of capture.sh additions + ~8 bats.
+**Phase ordering recap:**
+- Phase 8 — obscura adapter (this session's recommended target)
+- Phase 9 — flow runner (`flow record` / `flow run` / `replay` / `history`). Phase 11 memory design doc says Phase 11 implementation comes AFTER Phase 9.
+- Phase 10 — schema migration tooling
+- Phase 11 — memory (per-archetype selector/action cache; design doc shipped, implementation queued)
 
-**Phase 7 closure after 7-1-v.** Then Phase 8 (obscura adapter), Phase 9 (flow runner — needs to land before Phase 11 memory per design doc), Phase 10 (schema migration), Phase 11 (memory).
+**Alternative pick** if user wants to avoid the obscura research cycle: ship the optional `browser-clean.sh` force-prune verb (parent spec §3 verb #29) as a Phase 7 follow-up. Tiny PR (~50 lines + ~3 bats). Wraps existing `capture_prune` with manual-trigger flags (`--keep N`, `--days D`). User-facing verb count goes 34 → 35.
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
 
@@ -171,10 +175,8 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 
 1. `git checkout main && git pull --ff-only origin main`
 2. Confirm tag is `v0.34.0-phase-07-part-1-ii-sanitize-lib` and main HEAD matches.
-3. **Recommended:** Phase 7 part 1-v — `capture_prune` retention/prune (Phase 7 closure). Branch `feature/phase-07-part-1-v-capture-prune`. Plan-doc + RED bats + GREEN capture.sh additions + install.sh config-default + lint + tag + PR + CI + squash-merge + reset main.
-4. Read parent spec §4.5 for the exact prune algorithm: `while count > 500 OR (oldest.age_days > 14 AND oldest is not a baseline AND not in flight): rm -rf captures/$oldest_id`.
-5. Default thresholds in `~/.browser-skill/config.json`: `{retention_days: 14, retention_count: 500, warn_at_pct: 90}` (per spec §4.5).
-6. **Baseline-protection forward-compat:** Phase 8 ships baselines. 7-1-v's prune ignores `meta.is_baseline:true` entries. No baselines exist yet so logic is dormant; lands now to avoid retroactive change later.
-7. **`scripts/browser-clean.sh`** (parent spec §3 verb #29) — force-prune verb. Optional in 7-1-v; can defer to a follow-up sub-part if scope grows.
+3. **Recommended:** Phase 8 (obscura adapter). Research-first: read parent spec §3.x for obscura's transport model + planned verb coverage; decide whether 8-1-i opens with stateless verbs or daemon lifecycle. Branch + plan-doc once research lands.
+4. **Alternative (small):** ship `browser-clean.sh` force-prune verb (parent spec §3 verb #29) as a Phase 7 follow-up. Tiny PR; wraps existing `capture_prune` with `--keep N` / `--days D` flags.
+5. **Alternative (cleanup):** address the pre-existing `tests/browser-select.bats:6` jq-label-keyword failure that's been local-only since Phase 6. Not blocking; small impact; satisfying to clear before opening Phase 8.
 
-Start with: read CHANGELOG since `v0.36.0-phase-07-part-1-iv-unsanitized-flag` to confirm no in-flight work, then propose 7-1-v sub-part scope (or alternative if user prefers). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG since `v0.37.0-phase-07-part-1-v-capture-prune` to confirm no in-flight work, then propose Phase 8 sub-part split (or alternative). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
