@@ -142,3 +142,25 @@ teardown() { teardown_temp_home; }
   last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last_line}" | jq -e '.mode == "stealth" and .url == "https://example.com" and .dry_run == true' >/dev/null
 }
+
+# --- Phase 8 part 2-i: auto-routing (no --tool obscura needed) ---
+
+@test "browser-extract (8-2-i): --scrape auto-routes to obscura (no --tool flag needed)" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --scrape \
+      --eval document.title https://example.com https://example.org https://example.net
+  assert_status 0
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.tool == "obscura" and .status == "ok" and .mode == "scrape"' >/dev/null
+}
+
+@test "browser-extract (8-2-i): --stealth auto-routes to obscura (no --tool flag needed)" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --stealth \
+      --eval document.title https://example.com
+  assert_status 0
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.tool == "obscura" and .status == "ok" and .mode == "stealth"' >/dev/null
+}

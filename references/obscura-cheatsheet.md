@@ -1,16 +1,16 @@
 # obscura — cheatsheet
 
-The browser-skill's obscura adapter shells to the [`obscura`](https://github.com/h4ckf0r0day/obscura) binary (Apache-2.0 Rust headless browser, ~70 MB). Obscura is **not** a default-routed adapter in 8-1-i — it ships via Path A "ship-without-promotion" per [adapter-extension-model spec §4.4](../docs/superpowers/specs/2026-04-30-tool-adapter-extension-model-design.md). Reach it with `--tool=obscura`. Promotion to default for `--scrape` / `--stealth` lands in a follow-up PR (Phase 8 part 2-i).
+The browser-skill's obscura adapter shells to the [`obscura`](https://github.com/h4ckf0r0day/obscura) binary (Apache-2.0 Rust headless browser, ~70 MB). Obscura is the default-routed adapter for `--scrape` and `--stealth` (since Phase 8 part 2-i); reachable as `--tool obscura` for explicit override.
 
 ## When the router picks this adapter
 
 | Verb | Default? |
 |---|---|
-| `extract --scrape <urls...>` | **planned 8-2-i** — not yet routed automatically; pass `--tool obscura` |
-| `extract --stealth <url>` | **planned 8-2-i** — not yet routed automatically; pass `--tool obscura` |
+| `extract --scrape <urls...>` | **yes** (since 8-2-i) — `rule_scrape_flag` in `scripts/lib/router.sh` |
+| `extract --stealth <url>` | **yes** (since 8-2-i) — `rule_stealth_flag` in `scripts/lib/router.sh` |
 | any other verb | no — obscura is a one-shot fetch/scrape adapter |
 
-After 8-1-iii: `--scrape` (8-1-ii) and `--stealth` (8-1-iii) are real-mode behind `--tool obscura`. Router promotion to default for `--scrape` / `--stealth` is 8-2-i (Path B).
+`--tool obscura` still works as an explicit override. `--tool chrome-devtools-mcp --scrape` would fail the capability filter (cdt-mcp doesn't declare `--scrape`) and the router falls through to the next rule.
 
 ## Capabilities declared
 
@@ -46,13 +46,13 @@ No Chrome, no Node.js, no dependencies. Release archives include both `obscura` 
 
 ## Override
 
-To force this adapter even when the router would pick another:
+To force this adapter even when the router would pick another (e.g. for verbs where obscura isn't the default):
 
 ```bash
-bash scripts/browser-extract.sh --tool=obscura ...
+bash scripts/browser-extract.sh --tool obscura ...
 ```
 
-This is the **Path A entry point** — it works without router edits. In 8-1-i this is the *only* entry point.
+This was the **Path A entry point** in 8-1-i / 8-1-ii / 8-1-iii. After 8-2-i, `--scrape` and `--stealth` auto-route to obscura (Path B); the explicit `--tool obscura` is no longer needed for those flags but still works as an override.
 
 ## Modes
 
