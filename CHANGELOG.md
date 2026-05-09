@@ -13,6 +13,36 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 8 part 2-i — router promotion for `--scrape` / `--stealth` (Path B → CLOSES Phase 8)
+
+- [feat] `scripts/lib/router.sh` — two new precedence rules placed BEFORE `rule_extract_default`:
+  - `rule_scrape_flag`: `--scrape` set → obscura (`--scrape requested (only obscura declares scrape backend)`).
+  - `rule_stealth_flag`: `--stealth` set → obscura (`--stealth requested (only obscura declares stealth backend)`).
+- [feat] **Auto-routing now works** — `bash scripts/browser-extract.sh --scrape --eval EXPR url1 url2` resolves to obscura without `--tool obscura`. Same for `--stealth`. `--tool obscura` still works as an explicit override.
+- [internal] **Capability filter handles mismatched verbs cleanly** — e.g. `open --scrape` triggers `rule_scrape_flag` which picks obscura, but obscura doesn't declare `open` in `tool_capabilities`; capability filter rejects; router emits `warn: rule_scrape_flag picked obscura but it doesn't support verb=open; falling through` and walks to `rule_default_navigation` → playwright-cli. Documented in a dedicated bats case (`open --scrape falls through to playwright-cli`).
+- [internal] Stale routing-comment cleanup in `scripts/lib/router.sh::rule_extract_default` and `scripts/browser-extract.sh` header — removed the "should route to obscura when it lands (Phase 8)" placeholder; now references the actual `rule_scrape_flag` / `rule_stealth_flag` rules.
+- [internal] `tests/router.bats` (+5 cases) — `extract --scrape` → obscura; `extract --stealth` → obscura; `extract` (no flags) → cdt-mcp (default unchanged); `extract --selector .title` → cdt-mcp (no scrape/stealth in argv); `open --scrape` falls through to playwright-cli (capability-filter safety).
+- [internal] `tests/routing-capability-sync.bats` (+3 cases) — drift checks: obscura declares `extract` in `tool_capabilities` (so `rule_scrape_flag` / `rule_stealth_flag` don't silently fail-over); `pick_tool extract --scrape` resolves cleanly; `pick_tool extract --stealth` resolves cleanly.
+- [internal] `tests/browser-extract.bats` (+2 cases) — end-to-end auto-routing without `--tool obscura`: `--scrape --eval EXPR url1 url2` → ok summary with `tool:obscura / mode:scrape`; same for `--stealth`.
+- [docs] `references/obscura-cheatsheet.md` — "When the router picks this adapter" table flipped both rows from "planned 8-2-i — pass `--tool obscura`" to "yes (default) — `rule_scrape_flag` / `rule_stealth_flag`". Override section reframed as "explicit override" rather than the only entry point.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-08-part-2-i-router-promotion.md` — phase plan with surface-change diff + capability-filter-safety reasoning.
+
+**Sub-scope (8-2-i):**
+- **No new verb-dispatch backend.** Only routing-rule changes; obscura's `tool_extract` already handles both modes (8-1-ii / 8-1-iii).
+- **No `--site` support for `--scrape` / `--stealth`.** Same deferral as before.
+- **No multi-URL stealth.** Still requires upstream support or adapter-side fan-out; deferred indefinitely.
+- **No daemon-mode wiring** (`obscura serve --port 9222`). Still routed via future `playwright-lib --cdp-endpoint`, NOT this adapter.
+
+**Phase 8 closure** ✅ **COMPLETE.** All 4 sub-parts shipped:
+- 8-1-i: obscura adapter shell (Path A)
+- 8-1-ii: `tool_extract --scrape` real-mode (`obscura scrape`)
+- 8-1-iii: `tool_extract --stealth` real-mode (`obscura fetch --stealth --eval`)
+- 8-2-i: router promotion (Path B; auto-routing for `--scrape` / `--stealth`)
+
+**Adapter inventory after Phase 8:** chrome-devtools-mcp ✅ + playwright-cli ✅ + playwright-lib ✅ + obscura ✅ (4 of 4 real-mode where applicable; obscura's other 7 verb-dispatch fns remain 41-stub by design — one-shot extract-only).
+
+Next phase: Phase 9 (flow runner — `flow record` / `flow run` / `replay` / `history`).
+
 ### `summary_json` — fix jq reserved-keyword collision (label, def, or, and, not, …)
 
 - [fix] `scripts/lib/common.sh::summary_json` — internal jq variable names now prefixed with `_v_` so JSON field names that collide with jq's reserved keyword set (e.g. `label`, `def`, `or`, `and`, `not`, `if`, `then`, `else`, `end`, `as`, `reduce`, `foreach`, `try`, `catch`, `import`, `include`, `module`, `true`, `false`, `null`, `break`) no longer trigger `syntax error, unexpected label, expecting IDENT or __loc__` at the `--arg <key> X` → `$<key>` parser stage. **Output JSON shape unchanged** — the prefix lives only in the internal jq variable namespace; emitted field names stay caller-supplied.

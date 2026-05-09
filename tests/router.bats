@@ -193,3 +193,62 @@ teardown() {
   assert_status "$EXIT_USAGE_ERROR"
   assert_output_contains "does not support"
 }
+
+# --- Phase 8 part 2-i: router promotion (--scrape / --stealth → obscura) ---
+
+@test "router (8-2-i): extract --scrape routes to obscura (Path B)" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool extract --scrape https://a.example.com https://b.example.com
+  "
+  assert_status 0
+  assert_output_contains "obscura"
+  assert_output_contains "--scrape"
+}
+
+@test "router (8-2-i): extract --stealth routes to obscura (Path B)" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool extract --stealth https://example.com
+  "
+  assert_status 0
+  assert_output_contains "obscura"
+  assert_output_contains "--stealth"
+}
+
+@test "router (8-2-i): extract (no flags) still routes to chrome-devtools-mcp (default unchanged)" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool extract
+  "
+  assert_status 0
+  assert_output_contains "chrome-devtools-mcp"
+}
+
+@test "router (8-2-i): extract --selector .title still routes to chrome-devtools-mcp (no scrape/stealth in argv)" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool extract --selector .title
+  "
+  assert_status 0
+  assert_output_contains "chrome-devtools-mcp"
+}
+
+@test "router (8-2-i): open --scrape falls through to playwright-cli (capability filter rejects obscura's open)" {
+  # rule_scrape_flag picks obscura; obscura doesn't declare verb=open in its
+  # tool_capabilities → capability filter rejects → router walks to next rule.
+  # Eventually rule_default_navigation picks playwright-cli.
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/router.sh'
+    pick_tool open --scrape
+  "
+  assert_status 0
+  assert_output_contains "playwright-cli"
+  # Drift signal: ensure router emitted the expected fall-through warn.
+  assert_output_contains "doesn't support verb=open"
+}

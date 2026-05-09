@@ -7,9 +7,9 @@
 #
 # Routes to chrome-devtools-mcp by default for selector / eval (post-1d router
 # promotion — only adapter with `evaluate_script` + `list_network_requests`
-# per parent spec Appendix B). `--scrape` requires `--tool obscura` in 8-1-ii;
-# router promotion to default for `--scrape` is 8-2-i (Path B).
-# Exactly one mode is required: --selector / --eval / --scrape.
+# per parent spec Appendix B). `--scrape` and `--stealth` auto-route to obscura
+# via rule_scrape_flag / rule_stealth_flag (Phase 8-2-i, Path B).
+# Exactly one mode is required: --selector / --eval / --scrape / --stealth.
 
 set -euo pipefail
 IFS=$'\n\t'

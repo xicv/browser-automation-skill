@@ -22,6 +22,8 @@ ROUTING_RULES=(
   rule_capture_flags
   rule_audit_or_perf
   rule_inspect_default
+  rule_scrape_flag
+  rule_stealth_flag
   rule_extract_default
   rule_press_default
   rule_select_default
@@ -119,11 +121,32 @@ rule_inspect_default() {
   esac
 }
 
+# Phase 8 part 2-i (Path B): --scrape routes to obscura. Higher precedence
+# than rule_extract_default so `extract --scrape` reaches obscura instead of
+# chrome-devtools-mcp. Capability filter rejects mismatched verbs (e.g.
+# `open --scrape` falls through since obscura doesn't declare verb=open).
+rule_scrape_flag() {
+  local verb="$1"
+  shift
+  if _has_flag --scrape "$@"; then
+    printf 'obscura\t%s\n' "--scrape requested (only obscura declares scrape backend)"
+  fi
+}
+
+# Phase 8 part 2-i (Path B): --stealth routes to obscura. Single-URL anti-
+# detect mode. Same precedence reasoning as rule_scrape_flag.
+rule_stealth_flag() {
+  local verb="$1"
+  shift
+  if _has_flag --stealth "$@"; then
+    printf 'obscura\t%s\n' "--stealth requested (only obscura declares stealth backend)"
+  fi
+}
+
 # Default tool for `extract` per parent spec Appendix B — chrome-devtools-mcp
 # pairs `evaluate_script` with `list_network_requests` for selector/eval +
-# multi-URL inspection. NOTE: `--scrape <urls...>` should route to obscura
-# when it lands (Phase 8); prepend a higher-precedence obscura rule above
-# this one then — no edits needed here.
+# multi-URL inspection. `--scrape` / `--stealth` route to obscura via the
+# higher-precedence rule_scrape_flag / rule_stealth_flag rules (Phase 8-2-i).
 rule_extract_default() {
   local verb="$1"
   case "${verb}" in
