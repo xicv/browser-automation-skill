@@ -6,11 +6,11 @@ The browser-skill's obscura adapter shells to the [`obscura`](https://github.com
 
 | Verb | Default? |
 |---|---|
-| `extract --scrape <urls...>` | **planned 8-2-i** — not yet routed automatically |
-| `extract --stealth` | **planned 8-2-i** — not yet routed automatically |
+| `extract --scrape <urls...>` | **planned 8-2-i** — not yet routed automatically; pass `--tool obscura` |
+| `extract --stealth <url>` | **planned 8-2-i** — not yet routed automatically; pass `--tool obscura` |
 | any other verb | no — obscura is a one-shot fetch/scrape adapter |
 
-In 8-1-i: reachable only via `--tool=obscura` (and `tool_extract` is itself a stub returning 41 — real backend in 8-1-ii and 8-1-iii).
+After 8-1-iii: `--scrape` (8-1-ii) and `--stealth` (8-1-iii) are real-mode behind `--tool obscura`. Router promotion to default for `--scrape` / `--stealth` is 8-2-i (Path B).
 
 ## Capabilities declared
 
@@ -80,7 +80,20 @@ Obscura's standout feature: build with `--features stealth`, run with `--stealth
 - `navigator.webdriver = undefined`
 - 3,520-domain tracker block
 
-Surfaces in this adapter via `extract --stealth` once 8-1-iii lands.
+Real-mode in this adapter via `extract --stealth <url> --eval EXPR` (since 8-1-iii). Single URL only; `--eval` required (without it `obscura fetch` dumps full HTML, too large for the streaming-event contract). Emits one `extract_stealth` event with `{event, url, eval}`. The `eval` field is always a string in this PR — typed parsing is deferred. Callers needing typed results should `JSON.stringify` inside their `--eval` expression and parse downstream.
+
+```bash
+# String eval (default):
+bash scripts/browser-extract.sh --tool obscura --stealth \
+  --eval "document.title" https://example.com
+
+# Typed eval (caller-encoded JSON):
+bash scripts/browser-extract.sh --tool obscura --stealth \
+  --eval "JSON.stringify({title: document.title, h1: document.querySelector('h1').textContent})" \
+  https://example.com
+```
+
+`--scrape` and `--stealth` are mutually exclusive (verb script enforces this).
 
 ## See also
 

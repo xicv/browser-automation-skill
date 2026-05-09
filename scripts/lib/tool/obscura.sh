@@ -102,34 +102,42 @@ tool_inspect()  { return 41; }
 tool_audit()    { return 41; }
 tool_eval()     { return 41; }
 
-# tool_extract — Phase 8 part 1-ii.
+# tool_extract — Phase 8 part 1-ii (--scrape) + 1-iii (--stealth).
 #
-# Modes (router/verb selects via flags):
+# Modes (router/verb selects via flags; mutually exclusive):
 #   --scrape <url1> <url2> ... [--eval EXPR] [--concurrency N]
 #       Wraps `obscura scrape u1 u2 ... --eval EXPR --format json`. Emits one
 #       `scrape_url` event per URL on stdout (success or error shape from
 #       obscura's per-result divergence in run_parallel_scrape).
-#   --stealth (single URL)         — deferred to 8-1-iii.
-#   --selector / --eval (single URL, no --scrape) — never supported here;
-#       routed to chrome-devtools-mcp / playwright-cli.
+#   --stealth <url> --eval EXPR
+#       Wraps `obscura fetch <url> --stealth --eval EXPR`. Single URL.
+#       --eval REQUIRED (without it, obscura fetch dumps full HTML — too large
+#       for the streaming-event contract). Emits one `extract_stealth` event:
+#       {event, url, eval, time_ms}. Adapter times the call (fetch doesn't
+#       report time). `eval` always emitted as string (obscura fetch --eval
+#       prints raw, not wrapped JSON; typed parsing deferred).
+#   --selector / --eval (single URL, no --scrape / --stealth) — never supported
+#       here; routed to chrome-devtools-mcp / playwright-cli.
 #
-# Returns 0 if obscura ran (any URL succeeded OR all failed — the per-URL error
-# events surface in the stream; verb-script normalizes overall status). Returns
-# 2 on USAGE_ERROR (--scrape with no URLs). Returns 41 if no recognized mode.
+# Returns:
+#   0  on successful adapter call (per-URL event stream may include errors).
+#   2  on USAGE_ERROR (empty URL list with --scrape; missing URL or --eval
+#      with --stealth).
+#   41 if no recognized mode OR mutually-exclusive modes selected.
 tool_extract() {
-  local mode_scrape=0 eval_expr="" concurrency=""
+  local mode_scrape=0 mode_stealth=0 eval_expr="" concurrency=""
   local urls=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --scrape)      mode_scrape=1; shift ;;
+      --stealth)     mode_stealth=1; shift ;;
       --eval)        eval_expr="$2"; shift 2 ;;
       --concurrency) concurrency="$2"; shift 2 ;;
-      --stealth|--selector|--site|--tool|--dry-run|--raw)
-        # Recognised skill flags that are NOT handled in 8-1-ii. --stealth lands
-        # in 8-1-iii. Skip-with-arg-or-just-skip per flag shape.
+      --selector|--site|--tool|--dry-run|--raw)
+        # Recognised skill flags not consumed by this adapter.
         case "$1" in
-          --stealth|--dry-run|--raw) shift ;;
-          *)                          shift 2 ;;
+          --dry-run|--raw) shift ;;
+          *)               shift 2 ;;
         esac
         ;;
       --*)
@@ -140,17 +148,38 @@ tool_extract() {
     esac
   done
 
-  if [ "${mode_scrape}" = "0" ]; then
-    # Other modes (single-URL eval, stealth) deferred — see header.
+  # Mutually-exclusive mode selection.
+  if [ "${mode_scrape}" = "1" ] && [ "${mode_stealth}" = "1" ]; then
     return 41
   fi
+
+  if [ "${mode_scrape}" = "1" ]; then
+    _tool_extract_scrape "${eval_expr}" "${concurrency}" "${urls[@]}"
+    return $?
+  fi
+
+  if [ "${mode_stealth}" = "1" ]; then
+    _tool_extract_stealth "${eval_expr}" "${urls[@]}"
+    return $?
+  fi
+
+  # No recognised mode. Other one-shot extract paths route elsewhere.
+  return 41
+}
+
+# _tool_extract_scrape EVAL_EXPR CONCURRENCY URLS...
+# Internal helper — wraps `obscura scrape`.
+_tool_extract_scrape() {
+  local eval_expr="$1" concurrency="$2"
+  shift 2
+  local urls=("$@")
 
   if [ "${#urls[@]}" -eq 0 ]; then
     return 2
   fi
 
-  # Build obscura argv: scrape <urls...> [--eval EXPR] [--concurrency N] --format json.
-  # Argv order is canonical for fixture-based stub lookup (sha256-of-argv).
+  # Canonical argv (sha256-of-argv must be stable for fixture-based stub):
+  #   scrape <urls...> [--eval EXPR] [--concurrency N] --format json
   local args=("scrape" "${urls[@]}")
   [ -n "${eval_expr}" ]   && args+=(--eval "${eval_expr}")
   [ -n "${concurrency}" ] && args+=(--concurrency "${concurrency}")
@@ -158,20 +187,13 @@ tool_extract() {
 
   local raw
   if ! raw="$("${_BROWSER_TOOL_OBSCURA_BIN}" "${args[@]}" 2>/dev/null)"; then
-    # obscura crashed or returned non-zero. The stub uses 41 for missing
-    # fixtures; surface the same so the verb-script can route status properly.
     return 41
   fi
 
   # Reshape obscura's per-URL .results[] into one streaming event line per URL.
-  # Direct jq pass-through preserves the eval field's JSON typing (it can be
-  # string / number / array / null / object — emit_event can't carry arbitrary
-  # JSON values, so the streaming events bypass it). The summary line is still
-  # built by browser-extract.sh via emit_summary.
-  #
-  # Per-result shape divergence (success vs error) handled by jq's branching:
-  #   - error result: {url, error, time_ms}
-  #   - success result: {url, title, eval, time_ms} (drop .worker — internal)
+  # Direct jq pass-through preserves the eval field's JSON typing (string /
+  # number / array / null / object — emit_event can't carry arbitrary JSON
+  # values). Summary line built by browser-extract.sh via emit_summary.
   printf '%s' "${raw}" | jq -c '
     .results[] |
     {event: "scrape_url"} +
@@ -181,6 +203,47 @@ tool_extract() {
         {url, title, eval, time_ms}
       end
   ' || return 41
+
+  return 0
+}
+
+# _tool_extract_stealth EVAL_EXPR URLS...
+# Internal helper — wraps `obscura fetch <url> --stealth --eval EXPR`.
+# Single URL (rejects 0 or ≥2). --eval required.
+_tool_extract_stealth() {
+  local eval_expr="$1"
+  shift
+  local urls=("$@")
+
+  if [ "${#urls[@]}" -ne 1 ]; then
+    return 2
+  fi
+  if [ -z "${eval_expr}" ]; then
+    return 2
+  fi
+  local url="${urls[0]}"
+
+  # Canonical argv: fetch <url> --stealth --eval EXPR
+  local args=("fetch" "${url}" --stealth --eval "${eval_expr}")
+
+  # No time_ms field (obscura fetch doesn't report timing; the verb-script's
+  # summary already carries end-to-end duration_ms via SUMMARY_T0). Adapters
+  # are leaves — don't source common.sh's now_ms; don't fabricate timing.
+  local raw
+  if ! raw="$("${_BROWSER_TOOL_OBSCURA_BIN}" "${args[@]}" 2>/dev/null)"; then
+    return 41
+  fi
+
+  # obscura fetch --eval prints raw evaluated result (string unquoted; other
+  # JSON-encoded). Strip trailing newline; emit as string. Typed parsing
+  # deferred — callers needing typed results should JSON.stringify in EXPR.
+  local eval_out
+  eval_out="${raw%$'\n'}"
+
+  jq -nc \
+    --arg url "${url}" \
+    --arg eval_val "${eval_out}" \
+    '{event: "extract_stealth", url: $url, eval: $eval_val}'
 
   return 0
 }

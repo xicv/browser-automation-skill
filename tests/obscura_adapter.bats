@@ -175,3 +175,54 @@ teardown() {
   [ ! -s "${STUB_LOG_FILE}" ] || { rm -f "${STUB_LOG_FILE}"; fail "stub --version should NOT touch STUB_LOG_FILE"; }
   rm -f "${STUB_LOG_FILE}"
 }
+
+# --- Phase 8 part 1-iii: tool_extract --stealth real-mode (single-URL fetch) ---
+
+@test "obscura adapter (8-1-iii): tool_extract --stealth --eval EXPR <url> emits 1 extract_stealth event" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --stealth --eval document.title https://example.com"
+  assert_status 0
+  # Adapter doesn't fabricate time_ms (obscura fetch doesn't report it; the
+  # verb-script's summary already carries end-to-end duration_ms).
+  count="$(printf '%s\n' "${output}" | jq -e -s 'map(select(.event=="extract_stealth")) | length')"
+  [ "${count}" = "1" ] || fail "expected 1 extract_stealth event, got ${count}"
+  printf '%s' "${lines[0]}" | jq -e '.url == "https://example.com" and .eval == "Example Domain"' >/dev/null
+}
+
+@test "obscura adapter (8-1-iii): tool_extract --stealth without URL returns 2 (USAGE_ERROR)" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --stealth --eval document.title"
+  [ "${status}" = "2" ] || fail "expected USAGE_ERROR (2) for no-URL stealth, got ${status}"
+}
+
+@test "obscura adapter (8-1-iii): tool_extract --stealth without --eval returns 2 (USAGE_ERROR)" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --stealth https://example.com"
+  [ "${status}" = "2" ] || fail "expected USAGE_ERROR (2) for missing --eval, got ${status}"
+}
+
+@test "obscura adapter (8-1-iii): tool_extract --scrape --stealth → 41 (modes mutually exclusive)" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --scrape --stealth --eval document.title https://example.com"
+  [ "${status}" = "41" ] || fail "expected 41 for mutually-exclusive modes, got ${status}"
+}
+
+@test "obscura adapter (8-1-iii): tool_extract --stealth passes fetch + url + --stealth + --eval to obscura argv" {
+  STUB_LOG_FILE="$(mktemp)"
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --stealth --eval document.title https://example.com"
+  assert_status 0
+  grep -qE '^fetch$'                "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing fetch subcommand"; }
+  grep -qE '^https://example\.com$' "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing url"; }
+  grep -qE '^--stealth$'            "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing --stealth"; }
+  grep -qE '^--eval$'               "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing --eval"; }
+  grep -qE '^document\.title$'      "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing eval-expr"; }
+  # MUST NOT contain --format json (that's --scrape only; obscura fetch has no --format)
+  if grep -qE '^--format$' "${STUB_LOG_FILE}"; then
+    rm -f "${STUB_LOG_FILE}"; fail "stealth mode should NOT pass --format flag (only --scrape does)"
+  fi
+  rm -f "${STUB_LOG_FILE}"
+}
