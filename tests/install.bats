@@ -103,6 +103,7 @@ load helpers
 @test "install.sh: runs doctor at the end and reports its result" {
   setup_temp_home
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
     run bash "${REPO_ROOT}/install.sh" --user
   assert_status 0
   assert_output_contains "running doctor"

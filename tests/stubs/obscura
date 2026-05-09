@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# tests/stubs/obscura — minimal mock obscura binary for doctor + install tests.
+#
+# Responds to `--version` (the only call obscura's tool_doctor_check makes
+# during health checks) so doctor reports `ok:true` for the obscura adapter.
+# Real-mode verb-dispatch tests (8-1-ii / 8-1-iii) will replace this with a
+# fixture-based stub similar to tests/stubs/playwright-cli.
+
+set -euo pipefail
+
+case "${1:-}" in
+  --version) printf 'obscura 0.0.0-stub\n' ;;
+  *)         printf '{"verb":"stub","status":"error","note":"obscura stub: only --version implemented in 8-1-i"}\n'; exit 41 ;;
+esac
