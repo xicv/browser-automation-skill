@@ -47,7 +47,7 @@ parse_verb_globals "$@"
 
 resolve_session_storage_state
 
-selector="" capture_console=0 capture_network=0 screenshot=0 do_capture=0
+selector="" capture_console=0 capture_network=0 screenshot=0 do_capture=0 unsanitized=0
 verb_argv=()
 i=0
 while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
@@ -77,12 +77,28 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       do_capture=1
       i=$((i + 1))
       ;;
+    --unsanitized)
+      unsanitized=1
+      i=$((i + 1))
+      ;;
     *)
       verb_argv+=("${REMAINING_ARGV[i]}")
       i=$((i + 1))
       ;;
   esac
 done
+
+# Phase 7 part 1-iv: --unsanitized requires typed-phrase confirmation.
+# Strict equality (no whitespace strip) — friction-by-design. Mirrors
+# scripts/browser-creds-show.sh::--reveal precedent. Phrase verbatim per
+# parent spec §8.3. Scripted use: pipe phrase via stdin.
+if [ "${unsanitized}" = "1" ]; then
+  printf 'Type the unsanitized confirmation phrase to confirm: ' >&2
+  IFS= read -r unsanitized_answer || true
+  if [ "${unsanitized_answer}" != "I want raw network/console data including auth tokens" ]; then
+    die "${EXIT_USAGE_ERROR}" "unsanitized aborted (confirmation mismatch)"
+  fi
+fi
 
 if [ -z "${selector}" ] && [ "${capture_console}" = 0 ] \
    && [ "${capture_network}" = 0 ] && [ "${screenshot}" = 0 ]; then
@@ -116,35 +132,41 @@ adapter_rc=$?
 set -e
 
 if [ "${do_capture}" = "1" ] && [ -n "${adapter_out}" ]; then
-  # Single sanitize, both sinks: stdout + per-aspect files. Sanitize once,
-  # extract sub-fields for per-aspect persistence, emit sanitized aggregate
-  # to stdout.
-  sanitized_out="$(printf '%s' "${adapter_out}" | sanitize_inspect_reply)"
+  # Single (maybe-)sanitize, both sinks: stdout + per-aspect files. Either
+  # path produces the same emit-twice contract; only the transformation
+  # differs. --unsanitized skips sanitize_inspect_reply.
+  if [ "${unsanitized}" = "1" ]; then
+    out_for_emit="${adapter_out}"
+    sanitized_flag=false
+  else
+    out_for_emit="$(printf '%s' "${adapter_out}" | sanitize_inspect_reply)"
+    sanitized_flag=true
+  fi
 
-  # console.json — extract sanitized .console_messages array.
+  # console.json — extract .console_messages array.
   if [ "${capture_console}" = "1" ]; then
-    if printf '%s' "${sanitized_out}" | jq -e 'has("console_messages")' >/dev/null 2>&1; then
-      printf '%s' "${sanitized_out}" | jq '.console_messages // []' > "${CAPTURE_DIR}/console.json"
+    if printf '%s' "${out_for_emit}" | jq -e 'has("console_messages")' >/dev/null 2>&1; then
+      printf '%s' "${out_for_emit}" | jq '.console_messages // []' > "${CAPTURE_DIR}/console.json"
       chmod 600 "${CAPTURE_DIR}/console.json"
     fi
   fi
 
-  # network.har — wrap sanitized .network_requests in HAR envelope and persist.
+  # network.har — wrap .network_requests in HAR envelope and persist.
   if [ "${capture_network}" = "1" ]; then
-    if printf '%s' "${sanitized_out}" | jq -e 'has("network_requests")' >/dev/null 2>&1; then
-      printf '%s' "${sanitized_out}" \
+    if printf '%s' "${out_for_emit}" | jq -e 'has("network_requests")' >/dev/null 2>&1; then
+      printf '%s' "${out_for_emit}" \
         | jq '{log: {version: "1.2", entries: (.network_requests // [])}}' \
         > "${CAPTURE_DIR}/network.har"
       chmod 600 "${CAPTURE_DIR}/network.har"
     fi
   fi
 
-  printf '%s\n' "${sanitized_out}"
+  printf '%s\n' "${out_for_emit}"
 
   if [ "${adapter_rc}" -eq 0 ]; then
-    capture_finish ok
+    capture_finish ok "${sanitized_flag}"
   else
-    capture_finish error
+    capture_finish error "${sanitized_flag}"
   fi
 else
   [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"

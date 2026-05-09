@@ -160,6 +160,34 @@ if [ -d "${CREDENTIALS_DIR}" ]; then
 fi
 ok "credentials: ${creds_total} total (keychain: ${creds_keychain}, libsecret: ${creds_libsecret}, plaintext: ${creds_plaintext})"
 
+# --- Captures sanitization counter (advisory; never fails doctor) ---
+# Phase 7 part 1-iv: walk ${CAPTURES_DIR}/*/meta.json and count total +
+# sanitized:false. Missing/null .sanitized treated as sanitized=true
+# (forward-compat with pre-7-1-iv captures).
+captures_total=0
+captures_unsanitized=0
+captures_unsanitized_ids=""
+if [ -d "${CAPTURES_DIR}" ]; then
+  shopt -s nullglob
+  for capture_meta in "${CAPTURES_DIR}"/*/meta.json; do
+    captures_total=$((captures_total + 1))
+    # Note: don't use `// true` — jq's `//` fires on null OR false, so a
+    # legit sanitized=false would resolve to "true". Read raw; missing field
+    # surfaces as "null" which is correctly NOT-equal-to-"false" below.
+    sanitized="$(jq -r '.sanitized' "${capture_meta}" 2>/dev/null || printf 'null')"
+    if [ "${sanitized}" = "false" ]; then
+      captures_unsanitized=$((captures_unsanitized + 1))
+      capture_id="$(jq -r '.capture_id // "?"' "${capture_meta}" 2>/dev/null || printf '?')"
+      captures_unsanitized_ids="${captures_unsanitized_ids:+${captures_unsanitized_ids}, }captures/${capture_id}/"
+    fi
+  done
+  shopt -u nullglob
+fi
+ok "captures: ${captures_total} total (sanitized:false: ${captures_unsanitized})"
+if [ "${captures_unsanitized}" -gt 0 ]; then
+  warn "${captures_unsanitized} capture(s) with sanitization disabled — review ${captures_unsanitized_ids}"
+fi
+
 duration_ms=$(( $(now_ms) - started_at_ms ))
 
 # Status semantics (§5.3 of extension-model spec).

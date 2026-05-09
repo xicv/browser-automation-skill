@@ -13,6 +13,28 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 7 part 1-iv — `--unsanitized` typed-phrase opt-out + `meta.sanitized` audit flag + doctor counter
+
+- [feat] `scripts/browser-inspect.sh` — accepts `--unsanitized` flag. **Strict typed-phrase confirmation required**: user must pipe (or type) `I want raw network/console data including auth tokens` (verbatim per parent spec §8.3) via stdin. Mismatch → `EXIT_USAGE_ERROR` with "confirmation mismatch"; capture aborted; no files written. Match → `sanitize_inspect_reply` skipped; raw console.json + network.har persisted; stdout output ALSO raw (consistent with disk).
+- [feat] `scripts/lib/capture.sh::capture_finish` — accepts optional 2nd arg `sanitized` ∈ `{true, false}`. Default `true`. Writes `meta.json::sanitized` field (always present in v1+ schema). Field addition is non-breaking (default `true` matches sanitized-by-default contract); does not bump `schema_version`.
+- [feat] `scripts/browser-doctor.sh` — captures sanitization counter. Walks `${CAPTURES_DIR}/*/meta.json`; reads `.sanitized` field; counts total + `sanitized:false`. Emits `captures: N total (sanitized:false: M)`. When M > 0: emits `warn` line listing capture IDs ("M capture(s) with sanitization disabled — review captures/004/, captures/009/"). Never increments `problems` (informational only).
+- [security] **Strict equality on typed phrase** — no whitespace strip, no case-fold. Mirrors `creds-show --reveal` precedent. Friction-by-design; cannot be bypassed by `-y`/`--yes` shortcuts. Bats case asserts leading-whitespace mismatch fails (`" I want raw..."` ≠ `"I want raw..."`).
+- [security] **Prompt to stderr, read from stdin.** Stdout stays JSON-contract-clean. Scripted use: `printf '%s\n' '<phrase>' | bash inspect.sh ... --unsanitized`. Interactive use: prompt visible on terminal, user types phrase, hits enter.
+- [security] Default behavior unchanged — `--unsanitized` opt-in only. Existing 7-1-iii canary tests still green: sanitization-by-default contract preserved.
+- [security] **`jq // operator gotcha avoided in doctor counter.** `// true` would have masked legit `sanitized:false` reads (jq's `//` fires on null OR false). Reads `.sanitized` raw and string-compares to `"false"`; missing field surfaces as `"null"` which correctly does NOT match. One-line gotcha; would have silently undermined the audit counter.
+- [internal] `tests/browser-inspect.bats` (+5 cases) — typed-phrase mismatch error; correct phrase + canary preserved on disk; correct phrase + canary preserved on stdout; default `meta.sanitized=true`; leading-whitespace strict-equality mismatch.
+- [internal] `tests/capture.bats` (+3 cases) — `capture_finish ok true` writes `sanitized=true`; `capture_finish ok false` writes `sanitized=false`; `capture_finish` (no args) defaults to `sanitized=true`.
+- [internal] `tests/doctor.bats` (+2 cases) — doctor reports zero sanitized:false correctly (no warn); doctor warns when sanitized:false count > 0.
+- [docs] `docs/superpowers/plans/2026-05-09-phase-07-part-1-iv-unsanitized-flag.md` — phase plan.
+
+**Sub-scope (7-1-iv):**
+- **No retention/prune.** That's 7-1-v (last Phase 7 sub-part).
+- **No env var bypass for typed phrase.** Scripted use pipes via stdin; mirrors `creds-show --reveal`.
+- **No `--unsanitized` on snapshot.** Snapshot's data isn't sanitization-relevant (refs only, no headers/cookies/URL params). Out of scope.
+- **No retroactive backfill** for captures created pre-7-1-iv. Doctor reads missing `.sanitized` as `null` and treats null as sanitized=true (no warn).
+
+**Phase 7 progress: 4 of 5 sub-parts shipped.** Remaining: 7-1-v (`capture_prune` + `_index.json` recompute + `~/.browser-skill/config.json` retention thresholds). Phase 7 closure ~1 PR away.
+
 ### Phase 7 part 1-iii — `inspect --capture` wire-up (capture + sanitize composition)
 
 - [feat] `scripts/browser-inspect.sh` — opt-in `--capture` flag. When set, sandwiches `capture_start` / sanitize / per-aspect-file persistence / `capture_finish` around the adapter call. Persists `${CAPTURES_DIR}/NNN/console.json` (sanitized via `sanitize_console`) + `${CAPTURES_DIR}/NNN/network.har` (sanitized via `sanitize_har`, wrapped in HAR envelope) + `${CAPTURES_DIR}/NNN/meta.json`. `capture_id` joins the summary line. **Defense in depth: stdout output is ALSO sanitized** — single transformation, both sinks (stdout = agent transcript surface; same leak vector as disk).

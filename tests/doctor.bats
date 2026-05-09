@@ -145,3 +145,32 @@ EOF
   assert_output_contains "credentials: 1 total"
   assert_output_contains "plaintext: 1"
 }
+
+# ---------- Phase 7 part 1-iv: captures sanitization counter ----------
+
+@test "doctor: captures count line — all sanitized, no warn" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}/captures/001" "${BROWSER_SKILL_HOME}/captures/002"
+  chmod 700 "${BROWSER_SKILL_HOME}" "${BROWSER_SKILL_HOME}/captures" "${BROWSER_SKILL_HOME}/captures/001" "${BROWSER_SKILL_HOME}/captures/002"
+  printf '{"capture_id":"001","verb":"snapshot","status":"ok","sanitized":true}' > "${BROWSER_SKILL_HOME}/captures/001/meta.json"
+  printf '{"capture_id":"002","verb":"inspect","status":"ok","sanitized":true}'  > "${BROWSER_SKILL_HOME}/captures/002/meta.json"
+  chmod 600 "${BROWSER_SKILL_HOME}/captures/001/meta.json" "${BROWSER_SKILL_HOME}/captures/002/meta.json"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_output_contains "captures: 2 total"
+  assert_output_contains "sanitized:false: 0"
+}
+
+@test "doctor: captures count line — mixed (1 unsanitized) emits warn" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}/captures/001" "${BROWSER_SKILL_HOME}/captures/002"
+  chmod 700 "${BROWSER_SKILL_HOME}" "${BROWSER_SKILL_HOME}/captures" "${BROWSER_SKILL_HOME}/captures/001" "${BROWSER_SKILL_HOME}/captures/002"
+  printf '{"capture_id":"001","verb":"inspect","status":"ok","sanitized":true}'  > "${BROWSER_SKILL_HOME}/captures/001/meta.json"
+  printf '{"capture_id":"002","verb":"inspect","status":"ok","sanitized":false}' > "${BROWSER_SKILL_HOME}/captures/002/meta.json"
+  chmod 600 "${BROWSER_SKILL_HOME}/captures/001/meta.json" "${BROWSER_SKILL_HOME}/captures/002/meta.json"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_output_contains "captures: 2 total"
+  assert_output_contains "sanitized:false: 1"
+  assert_output_contains "sanitization disabled"
+}
