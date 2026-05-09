@@ -36,9 +36,9 @@ parse_verb_globals "$@"
 
 resolve_session_storage_state
 
-selector="" eval_js="" mode_scrape=0 concurrency=""
+selector="" eval_js="" mode_scrape=0 mode_stealth=0 concurrency=""
 verb_argv=()
-scrape_urls=()
+positional_urls=()
 i=0
 while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
   case "${REMAINING_ARGV[i]}" in
@@ -59,6 +59,11 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       verb_argv+=(--scrape)
       i=$((i + 1))
       ;;
+    --stealth)
+      mode_stealth=1
+      verb_argv+=(--stealth)
+      i=$((i + 1))
+      ;;
     --concurrency)
       concurrency="${REMAINING_ARGV[i+1]:-}"
       [ -n "${concurrency}" ] || die "${EXIT_USAGE_ERROR}" "--concurrency requires a value"
@@ -72,30 +77,42 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       i=$((i + 1))
       ;;
     *)
-      # Positional. In --scrape mode these are URLs. Outside scrape mode the
-      # only positional we accept is empty (selector/eval must use flags).
-      if [ "${mode_scrape}" = "1" ]; then
-        scrape_urls+=("${REMAINING_ARGV[i]}")
+      # Positional. In --scrape / --stealth mode these are URLs. Outside both
+      # modes the verb script has no use for positionals (selector/eval are
+      # flag-only).
+      if [ "${mode_scrape}" = "1" ] || [ "${mode_stealth}" = "1" ]; then
+        positional_urls+=("${REMAINING_ARGV[i]}")
         verb_argv+=("${REMAINING_ARGV[i]}")
       else
-        die "${EXIT_USAGE_ERROR}" "unexpected positional arg '${REMAINING_ARGV[i]}' (use --selector / --eval / --scrape)"
+        die "${EXIT_USAGE_ERROR}" "unexpected positional arg '${REMAINING_ARGV[i]}' (use --selector / --eval / --scrape / --stealth)"
       fi
       i=$((i + 1))
       ;;
   esac
 done
 
+if [ "${mode_scrape}" = "1" ] && [ "${mode_stealth}" = "1" ]; then
+  die "${EXIT_USAGE_ERROR}" "--scrape and --stealth are mutually exclusive"
+fi
+
 if [ "${mode_scrape}" = "1" ]; then
-  [ "${#scrape_urls[@]}" -ge 1 ] || die "${EXIT_USAGE_ERROR}" "--scrape requires at least one URL"
+  [ "${#positional_urls[@]}" -ge 1 ] || die "${EXIT_USAGE_ERROR}" "--scrape requires at least one URL"
+elif [ "${mode_stealth}" = "1" ]; then
+  [ "${#positional_urls[@]}" -eq 1 ] || die "${EXIT_USAGE_ERROR}" "--stealth requires exactly one URL"
+  [ -n "${eval_js}" ]               || die "${EXIT_USAGE_ERROR}" "--stealth requires --eval EXPR"
 elif [ -z "${selector}" ] && [ -z "${eval_js}" ]; then
-  die "${EXIT_USAGE_ERROR}" "extract requires --selector CSS, --eval JS, or --scrape URL..."
+  die "${EXIT_USAGE_ERROR}" "extract requires --selector CSS, --eval JS, --scrape URL..., or --stealth URL"
 fi
 
 if [ "${ARG_DRY_RUN:-0}" = "1" ]; then
   if [ "${mode_scrape}" = "1" ]; then
-    ok "dry-run: would scrape ${#scrape_urls[@]} URL(s) via obscura"
+    ok "dry-run: would scrape ${#positional_urls[@]} URL(s) via obscura"
     emit_summary verb=extract tool=none why=dry-run status=ok mode=scrape \
-      total_urls="${#scrape_urls[@]}" dry_run=true
+      total_urls="${#positional_urls[@]}" dry_run=true
+  elif [ "${mode_stealth}" = "1" ]; then
+    ok "dry-run: would stealth-fetch ${positional_urls[0]} via obscura"
+    emit_summary verb=extract tool=none why=dry-run status=ok mode=stealth \
+      url="${positional_urls[0]}" dry_run=true
   else
     ok "dry-run: would extract ${selector:-${eval_js}}"
     emit_summary verb=extract tool=none why=dry-run status=ok selector="${selector}" dry_run=true
@@ -118,7 +135,7 @@ set -e
 
 if [ "${mode_scrape}" = "1" ]; then
   # Aggregate per-URL events into success/failure counts for the summary line.
-  total="${#scrape_urls[@]}"
+  total="${#positional_urls[@]}"
   successful=0
   failed=0
   if [ -n "${adapter_out}" ]; then
@@ -137,6 +154,20 @@ if [ "${mode_scrape}" = "1" ]; then
   emit_summary verb=extract tool="${tool_name}" why="${why}" \
     status="${overall_status}" mode=scrape \
     total_urls="${total}" successful="${successful}" failed="${failed}"
+  [ "${overall_status}" = "ok" ] && exit 0
+  exit "${adapter_rc}"
+fi
+
+if [ "${mode_stealth}" = "1" ]; then
+  if [ "${adapter_rc}" -ne 0 ]; then
+    overall_status=error
+  elif [ -z "${adapter_out}" ]; then
+    overall_status=empty
+  else
+    overall_status=ok
+  fi
+  emit_summary verb=extract tool="${tool_name}" why="${why}" \
+    status="${overall_status}" mode=stealth url="${positional_urls[0]}"
   [ "${overall_status}" = "ok" ] && exit 0
   exit "${adapter_rc}"
 fi

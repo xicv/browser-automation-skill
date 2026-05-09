@@ -13,6 +13,29 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 8 part 1-iii — `tool_extract --stealth` real-mode (single-URL via `obscura fetch`)
+
+- [feat] `scripts/lib/tool/obscura.sh::tool_extract` — second mode branch alongside the existing `--scrape` (8-1-ii). `--stealth` mode wraps `obscura fetch <url> --stealth --eval EXPR`; single URL; `--eval` required (without it `obscura fetch` dumps full HTML — too large for the streaming-event contract). Emits one `extract_stealth` event: `{event, url, eval}`. The `eval` field is **always a string** in this PR (obscura's `run_fetch` prints raw evaluated result on stdout — string unquoted, other JSON-encoded; disambiguating via heuristic parsing deferred). Callers needing typed results should `JSON.stringify` inside their `--eval` expression and parse downstream.
+- [feat] `scripts/lib/tool/obscura.sh` — refactor: `tool_extract` is now a thin mode-dispatcher; the per-mode logic moved to internal helpers `_tool_extract_scrape` (existing) and `_tool_extract_stealth` (new). Mode mutual exclusion enforced (`--scrape + --stealth` returns 41).
+- [feat] `scripts/browser-extract.sh` — new `--stealth` mode flag + single-URL validation + `--eval` requirement check. Mutually-exclusive with `--scrape` (verb script enforces). Status mapping: ok (adapter rc=0 + non-empty stdout) / empty (adapter rc=0 + empty stdout) / error (adapter rc≠0). New `--dry-run --stealth` plan path emits `mode:stealth / url:... / dry_run:true`.
+- [internal] `tests/fixtures/obscura/8c83562f...json` — fixture for `fetch <url> --stealth --eval document.title` argv. Single-line raw payload (`Example Domain\n`) — NOT a wrapped JSON object, matching obscura `fetch --eval`'s actual output shape.
+- [internal] `tests/obscura_adapter.bats` (+5 cases, total 29) — `tool_extract --stealth` event shape (`url`, `eval`); empty URL → exit 2; missing `--eval` → exit 2; `--scrape + --stealth` → exit 41 (mutually-exclusive); argv shape via STUB_LOG_FILE grep (`fetch + url + --stealth + --eval`; rejects spurious `--format` flag from `--scrape` mode).
+- [internal] `tests/browser-extract.bats` (+5 cases, total 15) — end-to-end `--tool obscura --stealth --eval EXPR <url>` reaches adapter + emits 1 event + `status:ok / mode:stealth / url:...` summary; missing URL → `EXIT_USAGE_ERROR` with "--stealth requires exactly one URL"; missing `--eval` → `EXIT_USAGE_ERROR` with "--stealth requires --eval"; `--scrape + --stealth` → `EXIT_USAGE_ERROR` with "mutually exclusive"; `--stealth --dry-run` → plan with `mode:stealth / url:... / dry_run:true`.
+- [docs] `references/obscura-cheatsheet.md` — "Stealth mode" section updated to reflect real-mode landing in 8-1-iii. New cheatsheet examples for string-eval and typed-eval (`JSON.stringify(...)`) usage. "When the router picks this adapter" table notes both `--scrape` and `--stealth` are real-mode-after-1-iii but still require `--tool obscura` until 8-2-i.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-08-part-1-iii-extract-stealth.md` — phase plan with upstream `run_fetch` shape divergence note (raw eval result on stdout, NOT wrapped JSON like `scrape`) + sub-scope bounds.
+
+**Sub-scope (8-1-iii):**
+- **No router promotion.** `--stealth` doesn't auto-route to obscura yet; user must pass `--tool obscura`. Promotion is 8-2-i (Path B).
+- **No typed-eval parsing.** `eval` field always a string in this PR. Heuristic JSON-parse deferred.
+- **No `--site` support for `--stealth`.** Same constraint as `--scrape`.
+- **No `obscura fetch --dump html|text|links` modes.** Only `--eval`-based extraction supported.
+- **No multi-URL stealth.** `obscura scrape` doesn't accept `--stealth` upstream (scrape uses worker subprocesses; stealth is a serve/fetch flag). Adapter-side fan-out via parallel `obscura fetch --stealth` calls deferred.
+- **No `time_ms` field in the event.** Obscura `fetch` doesn't report timing; the verb-script's summary already carries end-to-end `duration_ms`. Adapter is a leaf — doesn't source `common.sh::now_ms`; doesn't fabricate timing.
+
+**Adapter inventory after 8-1-iii:** chrome-devtools-mcp ✅ + playwright-cli ✅ + playwright-lib ✅ + **obscura** ⚠️ partial (1 verb-dispatch fn now real-mode for **two** modes — `tool_extract` handles both `--scrape` and `--stealth`; remaining 7 verb-dispatch fns are 41-stubs by design).
+
+**Phase 8 progress: 3 of (3+) sub-parts shipped.** Remaining: 8-2-i (router promotion / Path B). Phase 8 closure ~1 PR away.
+
 ### Phase 8 part 1-ii — `tool_extract --scrape` real-mode (obscura backend; first real verb on the new adapter)
 
 - [feat] `scripts/lib/tool/obscura.sh::tool_extract` — first real-mode verb backend on the obscura adapter. Wraps `obscura scrape u1 u2 ... [--eval EXPR] [--concurrency N] --format json`. Parses obscura's pretty-printed aggregate JSON dump (`{total_urls, concurrency, total_time_ms, avg_time_ms, results: [...]}` per `crates/obscura-cli/src/main.rs::run_parallel_scrape`); reshapes per-URL `.results[]` into one streaming `scrape_url` event line per URL. Per-result shape divergence handled by jq branching: success → `{event,url,title,eval,time_ms}`; error → `{event,url,error,time_ms}`. The `worker` field is internal (process index) and dropped from the event surface. **Direct jq emit** for events (bypasses `emit_event`) preserves the `eval` field's JSON typing — eval is `serde_json::Value` upstream, so it can be string/number/array/null/object; `emit_event`'s `key=value` shape can't carry arbitrary JSON values.

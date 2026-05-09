@@ -96,3 +96,49 @@ teardown() { teardown_temp_home; }
   last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last_line}" | jq -e '.mode == "scrape" and .total_urls == 2 and .dry_run == true' >/dev/null
 }
+
+# --- Phase 8 part 1-iii: --stealth end-to-end via obscura adapter ---
+
+@test "browser-extract (8-1-iii): --tool obscura --stealth --eval EXPR <url> emits 1 event + ok summary" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --stealth \
+      --eval document.title https://example.com
+  assert_status 0
+  evt_count="$(printf '%s\n' "${lines[@]}" | jq -s 'map(select(.event=="extract_stealth")) | length')"
+  [ "${evt_count}" = "1" ] || fail "expected 1 extract_stealth event, got ${evt_count}"
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.verb == "extract" and .tool == "obscura" and .status == "ok"' >/dev/null
+  printf '%s' "${last_line}" | jq -e '.mode == "stealth" and .url == "https://example.com"' >/dev/null
+}
+
+@test "browser-extract (8-1-iii): --stealth without URL fails EXIT_USAGE_ERROR" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --stealth --eval document.title
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "--stealth requires exactly one URL"
+}
+
+@test "browser-extract (8-1-iii): --stealth without --eval fails EXIT_USAGE_ERROR" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --stealth https://example.com
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "--stealth requires --eval"
+}
+
+@test "browser-extract (8-1-iii): --scrape + --stealth fails EXIT_USAGE_ERROR (mutually exclusive)" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --scrape --stealth \
+      --eval document.title https://example.com
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "mutually exclusive"
+}
+
+@test "browser-extract (8-1-iii): --stealth --dry-run prints plan with mode=stealth + url and skips adapter" {
+  run bash "${SCRIPTS_DIR}/browser-extract.sh" --dry-run --stealth \
+    --eval document.title https://example.com
+  assert_status 0
+  assert_output_contains "dry-run"
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.mode == "stealth" and .url == "https://example.com" and .dry_run == true' >/dev/null
+}
