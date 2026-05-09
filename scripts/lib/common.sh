@@ -111,6 +111,7 @@ init_paths() {
   export CAPTURES_DIR="${BROWSER_SKILL_HOME}/captures"
   export FLOWS_DIR="${BROWSER_SKILL_HOME}/flows"
   export CURRENT_FILE="${BROWSER_SKILL_HOME}/current"
+  export CONFIG_FILE="${BROWSER_SKILL_HOME}/config.json"
 
   # Adapter directory — single source of truth for "what adapters exist".
   # Tools live one-file-per-adapter at $LIB_TOOL_DIR/<name>.sh; basename minus

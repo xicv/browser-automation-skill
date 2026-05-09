@@ -13,6 +13,35 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 7 part 1-v — `capture_prune` retention/prune (Phase 7 COMPLETE — 5/5)
+
+- [feat] new `scripts/lib/capture.sh::capture_prune` — auto-prune by count + age thresholds. Reads `${CONFIG_FILE}` (defaults `retention_count: 500`, `retention_days: 14` per parent spec §4.5). Walks `${CAPTURES_DIR}/*/meta.json`; computes age + count via `_capture_iso_to_epoch` (cross-platform GNU + BSD date parsing). Splices oldest-first while EITHER threshold exceeded. **Skip rules**: `meta.is_baseline:true` (Phase 8 forward-compat — never prune); `meta.status:"in_progress"` (in-flight; never prune). After prune: recomputes `_index.json` (count, latest, total_bytes); `next_id` stays monotonic (never decremented). Emits one `warn` line per pruned capture.
+- [feat] `scripts/lib/capture.sh::capture_finish` — calls `capture_prune` at end. Auto-prune on every successful capture finalize. Idempotent.
+- [feat] `scripts/lib/common.sh::init_paths` — exports `CONFIG_FILE="${BROWSER_SKILL_HOME}/config.json"` alongside existing path exports.
+- [feat] `install.sh::create_state_dir` — seeds default `config.json` (mode 0600) on fresh install if absent. **Idempotent — never overwrites an existing user-edited config.**
+- [security] **Baseline-protection lands now** even though Phase 8 ships baselines. `meta.is_baseline:true` entries skipped during prune. Logic dormant until Phase 8 sets the flag; lands here to avoid retroactive contract changes when baselines arrive.
+- [security] **In-flight protection** — captures with `meta.status:"in_progress"` (mid-finalize) never pruned. Defends against the rare race where a long-running capture sits in flight while another verb completes + auto-prunes.
+- [security] **Cross-platform age parsing.** `_capture_iso_to_epoch` tries GNU `date -d ...` first (Linux + coreutils-on-Mac), falls back to BSD `date -j -f '%Y-%m-%dT%H:%M:%SZ' ...`, defaults to epoch 0 on parse failure. Same precedent as `stat -c '%a' || stat -f '%Lp'` already in capture.sh.
+- [internal] `tests/capture.bats` (+8 cases) — prune-by-count threshold; prune-by-age threshold; no-op-under-threshold; idempotent (two consecutive calls); baseline-skip (oldest-but-baseline preserved, oldest non-baseline pruned); in-flight-skip (in_progress preserved); `_index.json` correctness post-prune (count + latest recomputed; next_id monotonic); missing-config defaults applied. Test helpers `_seed_config` + `_seed_capture` author meta.json directly to drive deterministic age/baseline/status fixtures.
+- [docs] `docs/superpowers/plans/2026-05-09-phase-07-part-1-v-capture-prune.md` — phase plan.
+
+**Sub-scope (7-1-v):**
+- **No `browser-clean.sh` verb.** Auto-prune covers the common case; manual force-prune (parent spec §3 verb #29) deferred as a follow-up.
+- **No `warn_at_pct` near-threshold warning.** Field is read+written for forward-compat but no warn-on-90% logic. Lands as a follow-up if user demand surfaces.
+- **No interactive prune confirmation.** Auto-prune is silent (just emits warn line per pruned capture). User can disable via `retention_count: 999999` if never-prune is preferred.
+- **No prune-by-bytes.** Threshold is count + age only; `total_bytes` is informational.
+
+**Phase 7 progress: 5 of 5 sub-parts shipped.** ✅ **Phase 7 COMPLETE.**
+
+The capture pipeline now ships:
+- 7-1-i: `lib/capture.sh` foundation — capture_init_dir / capture_start / capture_finish.
+- 7-1-ii: `lib/sanitize.sh` — pure jq-function library (sanitize_har, sanitize_console).
+- 7-1-iii: `inspect --capture` wire-up — first composition test for capture + sanitize; defense-in-depth (stdout sanitized too); 6-canary privacy regression suite.
+- 7-1-iv: `--unsanitized` typed-phrase opt-out + `meta.sanitized` audit flag + doctor counter.
+- 7-1-v: `capture_prune` retention/prune + baseline-protection forward-compat + cross-platform age parsing.
+
+Next phase: Phase 8 (obscura adapter — first non-bridge tool implementation; ships a real backend behind the existing 4-adapter routing model).
+
 ### Phase 7 part 1-iv — `--unsanitized` typed-phrase opt-out + `meta.sanitized` audit flag + doctor counter
 
 - [feat] `scripts/browser-inspect.sh` — accepts `--unsanitized` flag. **Strict typed-phrase confirmation required**: user must pipe (or type) `I want raw network/console data including auth tokens` (verbatim per parent spec §8.3) via stdin. Mismatch → `EXIT_USAGE_ERROR` with "confirmation mismatch"; capture aborted; no files written. Match → `sanitize_inspect_reply` skipped; raw console.json + network.har persisted; stdout output ALSO raw (consistent with disk).

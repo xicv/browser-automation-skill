@@ -132,3 +132,115 @@ teardown() { teardown_temp_home; }
   capture_finish
   jq -e '.sanitized == true' "${CAPTURE_DIR}/meta.json" >/dev/null
 }
+
+# ---------- Phase 7 part 1-v: capture_prune ----------
+#
+# Test helpers — author captures with custom started_at + status fields by
+# reaching directly into ${CAPTURE_DIR}/meta.json after capture_start.
+# Bypassing capture_finish keeps the test fixture deterministic; in
+# production, capture_finish writes started_at via _capture_iso_now.
+
+_seed_config() {
+  # $1 retention_count, $2 retention_days
+  capture_init_dir
+  printf '{"schema_version":1,"retention_days":%s,"retention_count":%s,"warn_at_pct":90}\n' "$2" "$1" \
+    > "${CONFIG_FILE}"
+  chmod 600 "${CONFIG_FILE}"
+}
+
+_seed_capture() {
+  # $1 NNN id, $2 started_at ISO, [$3 status (default ok)], [$4 is_baseline (default false)]
+  local id="$1" started="$2" status="${3:-ok}" baseline="${4:-false}"
+  mkdir -p "${CAPTURES_DIR}/${id}"
+  chmod 700 "${CAPTURES_DIR}/${id}"
+  jq -n --arg id "${id}" --arg started "${started}" --arg status "${status}" --argjson baseline "${baseline}" \
+    '{capture_id: $id, verb: "snapshot", schema_version: 1, started_at: $started, status: $status, is_baseline: $baseline, sanitized: true}' \
+    > "${CAPTURES_DIR}/${id}/meta.json"
+  chmod 600 "${CAPTURES_DIR}/${id}/meta.json"
+}
+
+@test "capture_prune: prunes by count threshold (retention_count=2; 3 captures → 2)" {
+  _seed_config 2 14
+  _seed_capture "001" "2026-05-09T08:00:00Z"
+  _seed_capture "002" "2026-05-09T09:00:00Z"
+  _seed_capture "003" "2026-05-09T10:00:00Z"
+  capture_prune
+  [ ! -d "${CAPTURES_DIR}/001" ] || fail "001 should have been pruned (oldest)"
+  [ -d "${CAPTURES_DIR}/002" ]   || fail "002 should have survived"
+  [ -d "${CAPTURES_DIR}/003" ]   || fail "003 should have survived"
+}
+
+@test "capture_prune: prunes by age threshold (retention_days=7; 30-day-old capture pruned)" {
+  _seed_config 500 7
+  _seed_capture "001" "2026-04-09T00:00:00Z"  # 30 days before 2026-05-09
+  _seed_capture "002" "2026-05-09T08:00:00Z"  # fresh
+  capture_prune
+  [ ! -d "${CAPTURES_DIR}/001" ] || fail "001 (30d old) should have been pruned"
+  [ -d "${CAPTURES_DIR}/002" ]   || fail "002 (fresh) should have survived"
+}
+
+@test "capture_prune: no-op when under both thresholds" {
+  _seed_config 10 14
+  _seed_capture "001" "2026-05-09T08:00:00Z"
+  _seed_capture "002" "2026-05-09T09:00:00Z"
+  capture_prune
+  [ -d "${CAPTURES_DIR}/001" ] || fail "001 should have survived (under threshold)"
+  [ -d "${CAPTURES_DIR}/002" ] || fail "002 should have survived (under threshold)"
+}
+
+@test "capture_prune: idempotent (second call is no-op)" {
+  _seed_config 2 14
+  _seed_capture "001" "2026-05-09T08:00:00Z"
+  _seed_capture "002" "2026-05-09T09:00:00Z"
+  _seed_capture "003" "2026-05-09T10:00:00Z"
+  capture_prune
+  capture_prune
+  # 002 + 003 should still exist; nothing else changed.
+  [ ! -d "${CAPTURES_DIR}/001" ] || fail "001 should remain pruned"
+  [ -d "${CAPTURES_DIR}/002" ]   || fail "002 should still exist"
+  [ -d "${CAPTURES_DIR}/003" ]   || fail "003 should still exist"
+}
+
+@test "capture_prune: baseline-protection (is_baseline:true preserved even when oldest)" {
+  _seed_config 2 14
+  _seed_capture "001" "2026-05-09T08:00:00Z" "ok" "true"   # oldest BUT baseline
+  _seed_capture "002" "2026-05-09T09:00:00Z"
+  _seed_capture "003" "2026-05-09T10:00:00Z"
+  capture_prune
+  [ -d "${CAPTURES_DIR}/001" ]   || fail "001 (baseline) should NOT have been pruned"
+  [ ! -d "${CAPTURES_DIR}/002" ] || fail "002 (oldest non-baseline) should have been pruned instead"
+  [ -d "${CAPTURES_DIR}/003" ]   || fail "003 should have survived"
+}
+
+@test "capture_prune: in-flight-protection (status:in_progress preserved)" {
+  _seed_config 1 14
+  _seed_capture "001" "2026-05-09T08:00:00Z" "in_progress"
+  _seed_capture "002" "2026-05-09T09:00:00Z" "ok"
+  capture_prune
+  [ -d "${CAPTURES_DIR}/001" ]   || fail "001 (in-flight) should NOT have been pruned"
+  [ ! -d "${CAPTURES_DIR}/002" ] || fail "002 (oldest non-in-flight) should have been pruned instead"
+}
+
+@test "capture_prune: _index.json recomputed (count + latest correct after prune)" {
+  _seed_config 2 14
+  _seed_capture "001" "2026-05-09T08:00:00Z"
+  _seed_capture "002" "2026-05-09T09:00:00Z"
+  _seed_capture "003" "2026-05-09T10:00:00Z"
+  # Seed _index with stale count to verify recompute.
+  printf '{"schema_version":1,"next_id":4,"count":3,"latest":"003","total_bytes":0}\n' > "${CAPTURES_DIR}/_index.json"
+  capture_prune
+  jq -e '.count == 2'      "${CAPTURES_DIR}/_index.json" >/dev/null
+  jq -e '.latest == "003"' "${CAPTURES_DIR}/_index.json" >/dev/null
+  jq -e '.next_id == 4'    "${CAPTURES_DIR}/_index.json" >/dev/null
+}
+
+@test "capture_prune: missing config → defaults applied (no-op for tiny test set)" {
+  capture_init_dir
+  [ ! -f "${CONFIG_FILE}" ] || rm -f "${CONFIG_FILE}"
+  _seed_capture "001" "2026-05-09T08:00:00Z"
+  _seed_capture "002" "2026-05-09T09:00:00Z"
+  capture_prune
+  # Defaults retention_count=500, retention_days=14 — 2 captures fresh.
+  [ -d "${CAPTURES_DIR}/001" ] || fail "001 should survive default thresholds"
+  [ -d "${CAPTURES_DIR}/002" ] || fail "002 should survive default thresholds"
+}

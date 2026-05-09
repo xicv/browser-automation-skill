@@ -73,6 +73,19 @@ create_state_dir() {
   printf '*\n' > "${BROWSER_SKILL_HOME}/.gitignore"
   # Schema version marker.
   printf '1\n' > "${BROWSER_SKILL_HOME}/version"
+  # Phase 7 part 1-v: default capture-retention config. Idempotent — never
+  # overwrite an existing user-edited config. Defaults per parent spec §4.5.
+  if [ ! -f "${CONFIG_FILE}" ]; then
+    cat > "${CONFIG_FILE}" <<'EOF'
+{
+  "schema_version": 1,
+  "retention_days": 14,
+  "retention_count": 500,
+  "warn_at_pct": 90
+}
+EOF
+    chmod 600 "${CONFIG_FILE}"
+  fi
   ok "state dir ready: ${BROWSER_SKILL_HOME}"
 }
 
