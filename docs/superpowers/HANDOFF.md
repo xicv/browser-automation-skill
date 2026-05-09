@@ -1,27 +1,27 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-08 — Phase 7 part 1-iii shipped)
+## Where the project stands (as of 2026-05-09 — Phase 7 part 1-iv shipped)
 
-main is at tag `v0.35.0-phase-07-part-1-iii-inspect-capture-wireup`. **Phases 1-6 SHIPPED** (Phase 6 closed at 11/11 verbs). **Phase 7 is 3/5 sub-parts done** — capture foundation + sanitize lib + inspect wire-up. `--unsanitized` audit flag + retention/prune remain.
+main is at tag `v0.36.0-phase-07-part-1-iv-unsanitized-flag`. **Phases 1-6 SHIPPED** (Phase 6 closed at 11/11 verbs). **Phase 7 is 4/5 sub-parts done** — capture foundation + sanitize lib + inspect wire-up + `--unsanitized` audit flag. Only retention/prune remains.
 
-### Phase 7 progress (PRs #56, #60, #62)
+### Phase 7 progress (PRs #56, #60, #62, #64)
 
 | Sub-part | Scope | Status |
 |---|---|---|
 | 7-1-i | `lib/capture.sh` foundation (3-fn API: capture_init_dir / capture_start / capture_finish) + opt-in `--capture` on snapshot | ✅ |
 | 7-1-ii | `lib/sanitize.sh` — pure jq-function library (sanitize_har + sanitize_console). 15 bats; 5 fixture JSONs; no verb integration | ✅ |
 | 7-1-iii | `inspect --capture` wire-up — first composition test for capture + sanitize. Persists console.json + network.har sanitized; defense in depth (stdout sanitized too); 6-canary privacy regression suite. | ✅ |
-| 7-1-iv | `--unsanitized` typed-phrase ack (`I want raw network/console data including auth tokens`) + `meta.sanitized: false` audit flag + `doctor` counter | 🔲 |
+| 7-1-iv | `--unsanitized` typed-phrase ack (`I want raw network/console data including auth tokens`) + `meta.sanitized: false` audit flag + `doctor` counter | ✅ |
 | 7-1-v | `capture_prune` (count>500 / age>14d) + retention thresholds in `~/.browser-skill/config.json` + `_index.json` recompute on prune | 🔲 |
 
 ### Counters
 
 - **34 user-facing verbs** (snapshot + inspect both extended with `--capture` opt-in flag — same verb count). Phase 6 11/11 closed.
-- **2 lib helpers added in Phase 7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`. Sanitize lib gained `sanitize_inspect_reply` helper in 7-1-iii.
+- **2 lib helpers added in Phase 7**: `scripts/lib/capture.sh` (gained optional `sanitized` arg in 7-1-iv), `scripts/lib/sanitize.sh` (gained `sanitize_inspect_reply` helper in 7-1-iii).
 - **3 of 4 adapters real-mode**: playwright-cli, playwright-lib, chrome-devtools-mcp. obscura → Phase 8.
 - **3 of 3 Tier-1 credential backends**.
-- **~713 tests pass / 0 fail / lint exit 0** locally (CI-authoritative; local hangs on real-playwright e2e files when playwright globally installed; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing, tracked as follow-up).
-- **60 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii + Phase 11 design + skill model-routing; not counting future HANDOFF refresh).
+- **~723 tests pass / 0 fail / lint exit 0** locally (CI-authoritative; local hangs on real-playwright e2e files when playwright globally installed; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing, tracked as follow-up).
+- **62 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii/1-iv + Phase 11 design + skill model-routing; not counting future HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-i)
 
@@ -43,33 +43,38 @@ Per-aspect files arrive incrementally:
 
 `meta.json` and `_index.json` schemas are **frozen at v1** for Phase 7. Field additions are non-breaking; renames/removals bump `schema_version`.
 
-## Next session: pick up at Phase 7 part 1-iv (`--unsanitized` opt-out)
+## Next session: pick up at Phase 7 part 1-v (retention/prune) — Phase 7 closure
 
-Recommended start: **`--unsanitized` typed-phrase ack (Phase 7 part 1-iv)**. The capture+sanitize pipeline now ships sanitized-by-default. 7-1-iv adds the typed-phrase escape-hatch for users who legitimately need raw network/console data (e.g. debugging an auth flow that the sanitizer is hiding).
+Recommended start: **`capture_prune` retention/prune (Phase 7 part 1-v)**. **Last sub-part of Phase 7.** Closes the capture pipeline. Self-contained; no jq filter complexity (unlike 7-1-ii); no typed-phrase plumbing (unlike 7-1-iv); no per-aspect file orchestration (unlike 7-1-iii). Pure prune-by-policy logic + `_index.json` recompute + config thresholds.
 
 Surface:
 
 ```bash
-# Triggers a typed-phrase confirmation. Cannot be passed via flag value;
-# user must echo the exact phrase via stdin or interactive prompt.
-bash scripts/browser-inspect.sh --capture-console --capture-network --capture --unsanitized
-# → asks for: "I want raw network/console data including auth tokens"
-# → on confirm: captures/NNN/{console.json, network.har} written RAW
-#                meta.json::sanitized = false (audit field)
-# → on mismatch: EXIT_USAGE_ERROR; capture aborted
+# Auto-prune triggered after capture_finish when count > threshold OR
+# age > threshold. Idempotent — re-running on already-pruned state is no-op.
+bash scripts/browser-snapshot.sh --capture
+# → captures/NNN/ written
+# → if count > 500 OR oldest_age > 14 days: oldest non-baseline pruned
+# → _index.json recomputed (count, total_bytes, latest)
+# → emit_summary includes pruned_ids[] when pruning happened
+
+# Manual cleanup verb (per parent spec §3 verb table — verb #29 "clean"):
+bash scripts/browser-clean.sh [--keep N] [--days D]
+# → forces prune by policy or override; safer than rm -rf manual deletion
 ```
 
 Scope:
-- `scripts/browser-inspect.sh` — accept `--unsanitized`; require typed-phrase confirmation (mirror `creds-show --reveal` precedent for typed-phrase pattern).
-- When `--unsanitized` confirmed: skip `sanitize_inspect_reply` for that capture; persist RAW console.json + network.har; write `meta.json::sanitized = false` (new field). Stdout still emits raw too (consistent with disk).
-- `scripts/browser-doctor.sh` — count captures with `sanitized:false` in `meta.json`; surface as warning in doctor output ("N captures with sanitization disabled — review captures/NNN/").
-- `scripts/lib/capture.sh::capture_finish` — accept optional `sanitized` flag to write into meta.json. Default true; overrideable.
-- Bats: ~6-8 cases — typed-phrase happy + mismatch → error + canary survives in raw mode + meta.sanitized:false written + doctor counter increments.
-- **Privacy guard:** `--unsanitized` MUST require interactive typed-phrase OR explicit env var `BROWSER_SKILL_UNSANITIZED_ACK=1` (for scripted use). Never bypassed by `-y` or `--yes` shortcuts. Mirrors the strict typed-phrase pattern from creds-show.
+- `scripts/lib/capture.sh::capture_prune` — new function. Reads `${BROWSER_SKILL_HOME}/config.json` for thresholds (`retention_count`, `retention_days`); walks `captures/*/meta.json`; computes age + total count; spliuces oldest-first while either threshold exceeded; recomputes `_index.json`. Idempotent.
+- `scripts/lib/capture.sh::capture_finish` — calls `capture_prune` at the end (after meta.json finalize + _index.json update). Auto-prune on every successful capture.
+- `scripts/lib/common.sh::init_paths` — exports `CONFIG_FILE="${BROWSER_SKILL_HOME}/config.json"`.
+- `scripts/install.sh` — writes default `config.json` with `{retention_days: 14, retention_count: 500, warn_at_pct: 90}` per parent spec §4.5.
+- (Optional) `scripts/browser-clean.sh` — force-prune verb. May defer to a follow-up sub-part.
+- **Baseline-protection**: per parent spec §4.5, `capture_prune` never prunes a capture that's a baseline. **But Phase 8 ships baselines.** So 7-1-v ships prune logic that ignores baseline-protection (no baselines exist yet); 7-1-v's prune simply skips capture dirs whose meta has `is_baseline:true` (forward-compat).
+- Bats: ~6-8 cases — prune-by-count threshold; prune-by-age threshold; combined; idempotent (no-op on already-pruned); `_index.json` correctness post-prune; baseline-protection (forward-compat); config.json missing → defaults applied.
 
-Estimated size: medium. Comparable to 7-1-iii. ~6-8 bats + verb script edit + capture-finish optional flag + doctor counter + typed-phrase plumbing.
+Estimated size: small-medium. Pure-filesystem logic; no IPC, no typed-phrase, no fixture authoring. ~150 lines of capture.sh additions + ~8 bats.
 
-After 7-1-iv: 7-1-v (retention/prune + `_index.json` recompute + config.json thresholds), then Phase 8 (obscura adapter).
+**Phase 7 closure after 7-1-v.** Then Phase 8 (obscura adapter), Phase 9 (flow runner — needs to land before Phase 11 memory per design doc), Phase 10 (schema migration), Phase 11 (memory).
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
 
@@ -166,9 +171,10 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 
 1. `git checkout main && git pull --ff-only origin main`
 2. Confirm tag is `v0.34.0-phase-07-part-1-ii-sanitize-lib` and main HEAD matches.
-3. **Recommended:** Phase 7 part 1-iv — `--unsanitized` typed-phrase opt-out + `meta.sanitized:false` audit flag + doctor counter. Branch `feature/phase-07-part-1-iv-unsanitized-flag`. Plan-doc + RED bats + GREEN inspect-script edit + capture-finish flag extension + doctor counter + lint + tag + PR + CI + squash-merge + reset main.
-4. Read parent spec §8.5 (Audit & observability) — "Did a verb run --unsanitized? meta.json carries `sanitized:false`; doctor counts these" defines the exact contract.
-5. Read existing typed-phrase precedent in `scripts/browser-creds-show.sh::--reveal` for the `--unsanitized` plumbing pattern. Mirror the strict-confirmation mechanic; never bypassable by `-y` / `--yes`.
-6. **Privacy guard test**: bats case that asserts `--unsanitized` WITHOUT typed-phrase confirmation → `EXIT_USAGE_ERROR`. Plus a positive case where the typed phrase is supplied → raw data passes through; meta.json carries `sanitized: false`.
+3. **Recommended:** Phase 7 part 1-v — `capture_prune` retention/prune (Phase 7 closure). Branch `feature/phase-07-part-1-v-capture-prune`. Plan-doc + RED bats + GREEN capture.sh additions + install.sh config-default + lint + tag + PR + CI + squash-merge + reset main.
+4. Read parent spec §4.5 for the exact prune algorithm: `while count > 500 OR (oldest.age_days > 14 AND oldest is not a baseline AND not in flight): rm -rf captures/$oldest_id`.
+5. Default thresholds in `~/.browser-skill/config.json`: `{retention_days: 14, retention_count: 500, warn_at_pct: 90}` (per spec §4.5).
+6. **Baseline-protection forward-compat:** Phase 8 ships baselines. 7-1-v's prune ignores `meta.is_baseline:true` entries. No baselines exist yet so logic is dormant; lands now to avoid retroactive change later.
+7. **`scripts/browser-clean.sh`** (parent spec §3 verb #29) — force-prune verb. Optional in 7-1-v; can defer to a follow-up sub-part if scope grows.
 
-Start with: read CHANGELOG since `v0.35.0-phase-07-part-1-iii-inspect-capture-wireup` to confirm no in-flight work, then propose 7-1-iv sub-part scope (or alternative if user prefers). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG since `v0.36.0-phase-07-part-1-iv-unsanitized-flag` to confirm no in-flight work, then propose 7-1-v sub-part scope (or alternative if user prefers). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
