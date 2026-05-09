@@ -112,3 +112,23 @@ teardown() { teardown_temp_home; }
   jq -e '.count == 2'      "${CAPTURES_DIR}/_index.json" >/dev/null
   jq -e '.next_id == 3'    "${CAPTURES_DIR}/_index.json" >/dev/null
 }
+
+# ---------- Phase 7 part 1-iv: capture_finish [status] [sanitized] ----------
+
+@test "capture_finish ok true: meta.sanitized = true" {
+  capture_start inspect
+  capture_finish ok true
+  jq -e '.sanitized == true' "${CAPTURE_DIR}/meta.json" >/dev/null
+}
+
+@test "capture_finish ok false: meta.sanitized = false (audit flag)" {
+  capture_start inspect
+  capture_finish ok false
+  jq -e '.sanitized == false' "${CAPTURE_DIR}/meta.json" >/dev/null
+}
+
+@test "capture_finish (default args): meta.sanitized = true" {
+  capture_start snapshot
+  capture_finish
+  jq -e '.sanitized == true' "${CAPTURE_DIR}/meta.json" >/dev/null
+}

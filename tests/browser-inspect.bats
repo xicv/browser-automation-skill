@@ -114,3 +114,48 @@ teardown() { teardown_temp_home; }
   assert_status 0
   [ ! -d "${BROWSER_SKILL_HOME}/captures" ] || fail "captures dir created without --capture flag"
 }
+
+# ---------- Phase 7 part 1-iv: --unsanitized typed-phrase opt-out ----------
+
+@test "browser-inspect --unsanitized: typed-phrase mismatch → EXIT_USAGE_ERROR; no captures dir" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash -c "printf '%s\n' 'wrong phrase' | bash '${SCRIPTS_DIR}/browser-inspect.sh' --capture-console --capture-network --capture --unsanitized"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "confirmation mismatch"
+  [ ! -d "${BROWSER_SKILL_HOME}/captures" ] || fail "captures dir created despite phrase mismatch"
+}
+
+@test "browser-inspect --unsanitized: correct phrase → meta.sanitized=false + canary survives raw" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash -c "printf '%s\n' 'I want raw network/console data including auth tokens' | bash '${SCRIPTS_DIR}/browser-inspect.sh' --capture-console --capture-network --capture --unsanitized"
+  assert_status 0
+  [ -f "${BROWSER_SKILL_HOME}/captures/001/meta.json" ] || fail "meta.json not written"
+  jq -e '.sanitized == false' "${BROWSER_SKILL_HOME}/captures/001/meta.json" >/dev/null
+  # Canaries from the 7-1-iii fixture must survive raw (no redaction applied).
+  grep -q "HEADER-CANARY-7-1-iii" "${BROWSER_SKILL_HOME}/captures/001/network.har" \
+    || fail "expected raw Authorization canary to survive in unsanitized network.har"
+  grep -q "PWD-CANARY-7-1-iii"    "${BROWSER_SKILL_HOME}/captures/001/console.json" \
+    || fail "expected raw password canary to survive in unsanitized console.json"
+}
+
+@test "browser-inspect --unsanitized: confirmed mode → stdout also RAW (consistent with disk)" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash -c "printf '%s\n' 'I want raw network/console data including auth tokens' | bash '${SCRIPTS_DIR}/browser-inspect.sh' --capture-console --capture-network --capture --unsanitized"
+  assert_status 0
+  printf '%s\n' "${lines[@]}" | grep -q "HEADER-CANARY-7-1-iii" \
+    || fail "expected raw Authorization canary on stdout in --unsanitized mode"
+}
+
+@test "browser-inspect (no --unsanitized, default): meta.sanitized=true" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-inspect.sh" --capture-console --capture-network --capture
+  assert_status 0
+  jq -e '.sanitized == true' "${BROWSER_SKILL_HOME}/captures/001/meta.json" >/dev/null
+}
+
+@test "browser-inspect --unsanitized: leading-whitespace phrase mismatch → error (strict equality)" {
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash -c "printf '%s\n' ' I want raw network/console data including auth tokens' | bash '${SCRIPTS_DIR}/browser-inspect.sh' --capture-console --capture-network --capture --unsanitized"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "confirmation mismatch"
+}

@@ -154,11 +154,17 @@ _capture_inventory() {
   fi
 }
 
-# capture_finish [status]
-#   Default status: "ok". Updates meta.json (finished_at, status, total_bytes,
-#   files); updates _index.json (count, latest, total_bytes).
+# capture_finish [status] [sanitized]
+#   Default status: "ok". Default sanitized: "true".
+#   Updates meta.json (finished_at, status, sanitized, total_bytes, files);
+#   updates _index.json (count, latest, total_bytes).
+#
+# Phase 7 part 1-iv: optional 2nd arg `sanitized` ∈ {true, false}. Writes
+# meta.sanitized field for audit. Field is always present in v1+ schema;
+# default true matches the sanitized-by-default contract.
 capture_finish() {
   local status="${1:-ok}"
+  local sanitized="${2:-true}"
   : "${CAPTURE_DIR:?capture_finish: CAPTURE_DIR not set (call capture_start first)}"
   : "${CAPTURE_ID:?capture_finish: CAPTURE_ID not set (call capture_start first)}"
 
@@ -173,9 +179,10 @@ capture_finish() {
   jq \
     --arg     finished_at "$(_capture_iso_now)" \
     --arg     status "${status}" \
+    --argjson sanitized "${sanitized}" \
     --argjson total_bytes "${total_bytes}" \
     --argjson files "${files_json}" \
-    '. + {finished_at: $finished_at, status: $status, total_bytes: $total_bytes, files: $files}' \
+    '. + {finished_at: $finished_at, status: $status, sanitized: $sanitized, total_bytes: $total_bytes, files: $files}' \
     "${meta}" > "${tmp}"
   chmod 600 "${tmp}"
   mv "${tmp}" "${meta}"
