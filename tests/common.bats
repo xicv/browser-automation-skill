@@ -97,6 +97,18 @@ load helpers
   assert_status "$EXIT_USAGE_ERROR"
 }
 
+@test "common.sh: summary_json handles JSON keys that collide with jq reserved keywords (label, def, or, and, not)" {
+  # Regression for the `--arg label X` → `$label` parser collision in jq's
+  # grammar. summary_json must accept any field name in {label, def, or, and,
+  # not, if, then, else, end, as, reduce, foreach, try, catch, import,
+  # include, module, true, false, null, break} — all jq reserved words. Field
+  # names are part of the wire contract; we cannot rename them, so the
+  # implementation prefixes the internal jq variable name to decouple.
+  run bash -c "source '${LIB_DIR}/common.sh'; summary_json verb=test status=ok label=Big def=alpha or=beta and=gamma not=delta"
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.label == "Big" and .def == "alpha" and .or == "beta" and .and == "gamma" and .not == "delta"' >/dev/null
+}
+
 @test "common.sh: with_timeout returns command's exit code on success" {
   run bash -c "source '${LIB_DIR}/common.sh'; with_timeout 5 true"
   assert_status 0

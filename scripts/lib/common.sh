@@ -132,6 +132,12 @@ summary_json() {
     die "${EXIT_USAGE_ERROR}" "summary_json: no key=value pairs supplied"
   fi
 
+  # JSON field names (e.g. `label`, `def`, `or`) can collide with jq's
+  # reserved keywords when used as VARIABLE names — `--arg label X` followed by
+  # `$label` in the filter triggers `syntax error, unexpected label`. Decouple
+  # the two name spaces: every jq variable is `$_v_<key>`, while the JSON field
+  # name stays `<key>`. Prefix is intentionally awkward to avoid colliding with
+  # any caller-supplied key like `v_url`.
   local args=()
   local pair key value
   for pair in "$@"; do
@@ -143,11 +149,11 @@ summary_json() {
         # integers (e.g. capture_id "001") so they stay as strings — leading
         # zeros are intentional padding, never numeric.
         if [[ "${value}" =~ ^-?(0|[1-9][0-9]*)(\.[0-9]+)?$ ]]; then
-          args+=(--argjson "${key}" "${value}")
+          args+=(--argjson "_v_${key}" "${value}")
         elif [ "${value}" = "true" ] || [ "${value}" = "false" ] || [ "${value}" = "null" ]; then
-          args+=(--argjson "${key}" "${value}")
+          args+=(--argjson "_v_${key}" "${value}")
         else
-          args+=(--arg "${key}" "${value}")
+          args+=(--arg "_v_${key}" "${value}")
         fi
         ;;
       *)
@@ -156,11 +162,12 @@ summary_json() {
     esac
   done
 
-  # Build the object dynamically: jq -n accepts our --arg/--argjson names.
+  # Build the object dynamically: jq -n binds the prefixed variable names; the
+  # filter places each value under its caller-supplied JSON field name.
   local jq_filter='. = {}'
   for pair in "$@"; do
     key="${pair%%=*}"
-    jq_filter="${jq_filter} | .${key} = \$${key}"
+    jq_filter="${jq_filter} | .${key} = \$_v_${key}"
   done
   jq -nc "${args[@]}" "${jq_filter}"
 }
