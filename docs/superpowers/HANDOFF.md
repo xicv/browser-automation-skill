@@ -1,17 +1,19 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-10 — Phase 8 part 1-ii shipped)
+## Where the project stands (as of 2026-05-10 — Phase 8 part 1-iii shipped + jq-keyword fix)
 
-main is at tag `v0.39.0-phase-08-part-1-ii-extract-scrape` (HEAD `907b641`). **Phases 1-7 SHIPPED.** Phase 6 closed at 11/11 verbs; **Phase 7 closed at 5/5 sub-parts** — full capture pipeline (foundation + sanitize lib + inspect wire-up + `--unsanitized` audit + retention/prune). **Phase 8 1-i + 1-ii shipped** — obscura adapter shell + first real-mode verb backend (`tool_extract --scrape` wrapping `obscura scrape`). Path A still — `--scrape` requires `--tool obscura`; router promotion (Path B) lands in 8-2-i.
+main is at tag `v0.40.0-phase-08-part-1-iii-extract-stealth` (HEAD `29495d7`). **Phases 1-7 SHIPPED.** Phase 6 closed at 11/11 verbs; **Phase 7 closed at 5/5 sub-parts** — full capture pipeline (foundation + sanitize lib + inspect wire-up + `--unsanitized` audit + retention/prune). **Phase 8 1-i + 1-ii + 1-iii shipped** — obscura adapter shell + `tool_extract --scrape` (`obscura scrape`) + `tool_extract --stealth` (`obscura fetch --stealth --eval`). Path A still — `--scrape` / `--stealth` require `--tool obscura`; router promotion (Path B) lands in 8-2-i. **Phase 8 closure ~1 PR away.**
 
-### Phase 8 progress (PRs #68, #70) — 2 of (3+) sub-parts shipped
+**`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
+
+### Phase 8 progress (PRs #68, #70, #72) — 3 of (3+) sub-parts shipped
 
 | Sub-part | Scope | Status |
 |---|---|---|
 | 8-1-i | obscura adapter shell — `tool_metadata` + `tool_capabilities` (verbs: extract) + `tool_doctor_check` + 8 verb-dispatch fns (all 41-stubs). Path A "ship-without-promotion" (zero `router.sh` edits). Cheatsheet doc; `tests/stubs/obscura` `--version` mock. doctor enumerates 4 adapters now (was 3). | ✅ |
 | 8-1-ii | `tool_extract --scrape <urls...>` real-mode — wraps `obscura scrape u1 u2 ... [--eval EXPR] [--concurrency N] --format json`. Per-URL streaming JSON event (direct jq emit; preserves `eval`'s `serde_json::Value` typing) + aggregate summary (`mode=scrape / total_urls / successful / failed`). Stub upgraded to fixture-based (`--version` short-circuits before STUB_LOG_FILE write); 3 fixtures. `--scrape` flag plumbing in `browser-extract.sh`. | ✅ |
-| 8-1-iii | `tool_extract --stealth` real-mode — wraps `obscura fetch <url> --stealth --eval`. `--stealth` flag plumbing in `browser-extract.sh`. | 🔲 next |
-| 8-2-i | Router promotion (Path B) — adds `rule_scrape_flag` + `rule_stealth_flag` to `ROUTING_RULES`. Promotes obscura to default for `--scrape` / `--stealth`. | 🔲 |
+| 8-1-iii | `tool_extract --stealth <url>` real-mode — wraps `obscura fetch <url> --stealth --eval EXPR`. Single URL; `--eval` required (without it `obscura fetch` dumps full HTML). One `extract_stealth` event with `{event, url, eval}` (eval always emitted as string — typed parsing deferred). `tool_extract` refactored to thin mode-dispatcher with `_tool_extract_scrape` + `_tool_extract_stealth` internal helpers. Modes mutually exclusive. New fixture; `--stealth` flag plumbing in `browser-extract.sh`. | ✅ |
+| 8-2-i | Router promotion (Path B) — adds `rule_scrape_flag` + `rule_stealth_flag` to `ROUTING_RULES`. Promotes obscura to default for `--scrape` / `--stealth`. **Closes Phase 8.** | 🔲 next |
 
 ### Phase 7 progress (PRs #56, #60, #62, #64, #66) — ✅ COMPLETE
 
@@ -25,12 +27,12 @@ main is at tag `v0.39.0-phase-08-part-1-ii-extract-scrape` (HEAD `907b641`). **P
 
 ### Counters
 
-- **34 user-facing verbs** (extract gained `--scrape` mode in 8-1-ii — same verb count). Phase 6 11/11 closed.
+- **34 user-facing verbs** (extract gained `--scrape` + `--stealth` modes in 8-1-ii / 8-1-iii — same verb count). Phase 6 11/11 closed.
 - **2 lib helpers shipped in Phase 7**: `scripts/lib/capture.sh` (gained `capture_prune` + `sanitized` arg + cross-platform age parser), `scripts/lib/sanitize.sh` (gained `sanitize_inspect_reply` helper).
-- **4 of 4 adapter shells exist**; **obscura partial** — 1 of 8 verb-dispatch fns now real-mode (`tool_extract --scrape`); remaining 7 are 41-stubs by design (obscura is intentionally one-shot extract-only). doctor enumerates `adapters_ok:4`.
+- **4 of 4 adapter shells exist**; **obscura partial** — `tool_extract` now real-mode for **two modes** (`--scrape` + `--stealth`); remaining 7 verb-dispatch fns are 41-stubs by design (obscura is intentionally one-shot extract-only). doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **~759 tests pass / 1 pre-existing fail / lint exit 0** locally (CI-authoritative; `tests/browser-select.bats:6` fails locally on newer jq versions where `label` is reserved — pre-existing since Phase 6, tracked as follow-up).
-- **67 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 design + skill model-routing + 5 HANDOFF refreshes + Phase 8 parts 1-i/1-ii; not counting this HANDOFF refresh).
+- **770 tests pass / 0 fail / lint exit 0** locally (the formerly-quarantined `browser-select.bats:6` jq-`label`-keyword failure is now FIXED at the lib level via `summary_json`'s `_v_` prefix — PR #73).
+- **70 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 design + skill model-routing + 5 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii + summary_json jq-keyword fix; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -63,31 +65,29 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at Phase 8 part 1-iii (`tool_extract --stealth`)
+## Next session: pick up at Phase 8 part 2-i (router promotion / Path B → CLOSES Phase 8)
 
-Phase 8 1-i shipped the adapter shell; 8-1-ii shipped the first real verb backend (`--scrape`). **8-1-iii ships the second** — `tool_extract --stealth` wrapping `obscura fetch <url> --stealth --eval EXPR`. Adapter inventory after 8-1-ii:
+Phase 8 1-i + 1-ii + 1-iii all shipped. **8-2-i closes Phase 8** — adds `rule_scrape_flag` + `rule_stealth_flag` to `scripts/lib/router.sh::ROUTING_RULES`. Promotes obscura to default when `--scrape` or `--stealth` is set; drops the "must pass `--tool obscura`" friction. Per adapter-extension-model spec §4.4 (Path B). Tiny PR (~30 LOC + ~3 bats).
 
 | Adapter | Real-mode status |
 |---|---|
 | chrome-devtools-mcp | ✅ Full (8/8 verbs; daemon-resident bridge) |
 | playwright-cli | ✅ Full |
 | playwright-lib | ✅ Full |
-| **obscura** | ⚠️ **Partial** — `tool_extract --scrape` real-mode (8-1-ii). `tool_extract --stealth` deferred (8-1-iii). All other 7 verb-dispatch fns 41-stub by design (one-shot extract-only adapter). |
+| **obscura** | ⚠️ **Partial** — `tool_extract` real-mode for **both** `--scrape` (8-1-ii) and `--stealth` (8-1-iii). All other 7 verb-dispatch fns 41-stub by design (one-shot extract-only adapter). |
 
-**Recommended next sub-part split:**
-- **8-1-iii: `tool_extract --stealth` real-mode** — wraps `obscura fetch <url> --stealth --eval EXPR` (single URL; not `obscura scrape`). Adds `--stealth` flag plumbing in `browser-extract.sh`; new fixture(s) under `tests/fixtures/obscura/` for fetch+stealth argv shape. Smaller PR than 8-1-ii (~80 LOC + ~4 bats) since stub + flag-plumbing infrastructure already exists. Path A still — `--stealth` requires `--tool obscura` until 8-2-i.
-- **8-2-i: router promotion (Path B)** — adds `rule_scrape_flag` + `rule_stealth_flag` to `ROUTING_RULES`. Promotes obscura to default for `--scrape` / `--stealth`. Smallest of the trio (~30 LOC + ~3 bats). Drops the "must pass `--tool obscura`" friction.
-
-**Smallest reviewable PR with user-visible value:** 8-1-iii. Adds the second obscura mode; reuses the stub + fixture infrastructure shipped in 8-1-ii.
+**Recommended next sub-part:**
+- **8-2-i: router promotion (Path B)** — adds two precedence rules to `ROUTING_RULES`:
+  - `rule_scrape_flag`: `--scrape` set → obscura
+  - `rule_stealth_flag`: `--stealth` set → obscura
+  Both rules placed BEFORE `rule_extract_default` (which currently routes extract to chrome-devtools-mcp). Bats: assert pick_tool routes correctly for each flag; assert capability filter still rejects mismatched verbs. Closes Phase 8.
 
 **Alternative picks (small):**
 - `browser-clean.sh` force-prune verb (parent spec §3 verb #29) as a Phase 7 follow-up. ~50 lines + ~3 bats. Wraps existing `capture_prune` with `--keep N` / `--days D`. Verb count 34 → 35.
-- `tests/browser-select.bats:6` jq-`label` reserved-keyword cleanup. Pre-existing local-only failure since Phase 6.
-
-**Open shape question for 8-1-iii:** does `obscura fetch <url> --stealth --eval EXPR` output JSON or raw eval result? From `crates/obscura-cli/src/main.rs::run_fetch`, `--eval` prints the `serde_json::Value` result on stdout (string → unquoted, other → JSON-encoded). NOT a wrapped JSON object. Adapter parser will need to read raw stdout + emit a single `extract_url` event with shape `{event, url, title?, eval, time_ms}` — title might require a separate eval-expression hack since `--dump html` and `--eval` are mutually exclusive. Decide during plan-doc.
+- Begin Phase 9 (flow runner) design doc — Phase 11 memory implementation queues AFTER Phase 9.
 
 **Phase ordering recap:**
-- Phase 8 — obscura adapter (2/3+ sub-parts shipped; 8-1-iii + 8-2-i remain)
+- Phase 8 — obscura adapter (3/4 sub-parts shipped; 8-2-i router promotion closes Phase 8)
 - Phase 9 — flow runner (`flow record` / `flow run` / `replay` / `history`). Phase 11 memory design doc says Phase 11 implementation comes AFTER Phase 9.
 - Phase 10 — schema migration tooling
 - Phase 11 — memory (per-archetype selector/action cache; design doc shipped, implementation queued)
@@ -124,7 +124,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 
 **Cost compounding.** Memory hits = zero LLM tokens. Combined with model-routing default (`model: sonnet` + `effort: low` per skill turn) + `/model opusplan` parent session, fully realized memory is the **largest cost lever in the roadmap**. Target: ≥ 70% cache hit rate after 20+ similar actions per archetype (Agent-E-validated threshold).
 
-## Workflow expectations (proven across 67 PRs)
+## Workflow expectations (proven across 70 PRs)
 
 - **TDD muscle-memory**: branch + bats RED → GREEN → lint → tag → push → PR → CI → squash-merge → reset main. ~95%+ CI-green-first-try across the project.
 - **Phase 6 sub-part shape** (mechanical): bridge daemon dispatch case + capability declaration + tool dispatcher + router rule + verb script + bats + stub handler + drift sync (`scripts/regenerate-docs.sh all`) + plan-doc + CHANGELOG.
@@ -144,10 +144,12 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Padded-NNN-id-as-string pattern** (codified in 7-1-i): zero-padded identifiers (`001`, `042`, `999`) are **strings**, not integers — `summary_json`'s numeric regex now rejects leading-zero ints. Future padded-id fields (capture_id today; possibly baseline_id in flow runner) preserve padding through the summary serializer.
 - **Failure-path-finalize pattern** (codified in 7-1-i): when a verb opens a side-effect resource (capture dir, lock file, temp dir), the failure branch must run the same finalization as success — never leave `in_progress` orphans on disk. Test the failure-finalize directly; agents discovering an `in_progress` capture dir is a regression.
 - **Defense-in-depth validation pattern** (codified in 7-ii): same validation at three layers (bash verb → bridge → daemon-child). Each layer is cheap (<10 lines). Daemon-child layer is the only required test surface for non-CLI IPC paths.
-- **HANDOFF-refresh-as-separate-PR pattern** (proven 7 times now: PR #47, #50, #52, #54, #67, #69, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh).
+- **HANDOFF-refresh-as-separate-PR pattern** (proven 8 times now: PR #47, #50, #52, #54, #67, #69, #71, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh). **Combined-refresh exception** (this PR): when two substantive PRs land back-to-back without HANDOFF-impacting differences (e.g. 8-1-iii + a focused jq-fix), one combined refresh works.
 - **New-adapter-CI-trap pattern** (codified in 8-1-i CI fixup): adding a 4th adapter without a stub binary breaks the **two existing tests** that assert `"all checks passed"` (doctor.bats:12 + install.bats:103). Reason: doctor's exit-status matrix returns `partial` (still exit 0) when ≥1 adapter is OK but ≥1 fails — the **output assertion** fails (warn line replaces "all checks passed") even though `assert_status 0` passes. Fix shape: ship `tests/stubs/<adapter>` mirroring `tests/stubs/playwright-cli`'s shape + wire `<ADAPTER>_BIN=${STUBS_DIR}/<adapter>` into both tests. **Future adapter PRs MUST include the stub + test wiring in the same PR** — CI failure on first push otherwise. Two precedents now (playwright-cli stub + obscura stub).
 - **Streaming-events-via-direct-jq pattern** (codified in 8-1-ii): when an adapter's per-result events carry **arbitrary JSON values** (e.g. `eval` field is `serde_json::Value` upstream — can be string/number/array/null/object), `emit_event` falls short — its `key=value` autodetect only handles scalar types. Bypass `emit_event` for those streaming events and emit via direct `jq -c '...'` over the upstream payload (with `+ {event:"name"}` add and field projection). `emit_summary` stays the path for **summary** lines (fixed scalar fields, validation guards). Lint tier 3 only requires the adapter sources `output.sh`; not every line must go through emit helpers.
 - **Stub-version-short-circuit-before-log pattern** (codified in 8-1-ii): when a fixture-based stub's binary doubles as a `--version` health-check responder (cf. tests/stubs/obscura), the `--version` branch MUST short-circuit and return BEFORE the STUB_LOG_FILE write. Otherwise, doctor probes during unrelated tests pollute argv-shape assertion logs and cause spurious matches in subsequent grep-based tests. Pattern is enforced by a dedicated bats case (`stub --version short-circuits before fixture lookup`).
+- **Adapters-don't-source-common pattern** (codified in 8-1-iii): adapters MUST NOT call `common.sh` helpers (e.g. `now_ms`, `assert_safe_name`) directly. Production paths always have `common.sh` loaded BEFORE the adapter is sourced (verb script → common.sh → router.sh → adapter), but adapter unit tests source the adapter standalone. Calling `now_ms` from inside the adapter works in production but fails in tests with `command not found`. Pattern: **don't fabricate values that the upstream tool doesn't provide** (e.g. obscura `fetch` doesn't report `time_ms`, so the adapter omits it; the verb-script's `duration_ms` covers end-to-end timing). When adapters genuinely need a helper, hoist it to the adapter's own private `_<name>_<helper>` namespace OR have the verb-script pre-compute and pass via flag.
+- **Decouple-jq-variable-names-from-JSON-field-names pattern** (codified in PR #73): `--arg <name> X` followed by `$<name>` triggers jq's tokenizer keyword collision when `<name>` matches a reserved word (`label`, `def`, `or`, `and`, `not`, `if`, `then`, `else`, `end`, `as`, `reduce`, `foreach`, `try`, `catch`, `import`, `include`, `module`, `true`, `false`, `null`, `break`). Even though `--arg label X` "should" bind a variable, jq parses `label` as the early-exit-syntax keyword instead. Fix: prefix internal jq variable names with `_v_` so the variable-name space is decoupled from caller-supplied JSON field names. **Same pattern applies anywhere bash builds jq filters dynamically from user-supplied identifiers.** Lint candidate: grep for `--arg <key> ... \\$<key>` patterns; flag if `<key>` matches the reserved set. Deferred until a third instance surfaces.
 
 ## Daemon state slots (shipped through 7-1-i — unchanged)
 
@@ -189,16 +191,16 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 ## When you start (next session)
 
 1. `git checkout main && git pull --ff-only origin main`
-2. Confirm tag is `v0.39.0-phase-08-part-1-ii-extract-scrape` and main HEAD matches `907b641`.
-3. **Recommended:** Phase 8 part 1-iii — `tool_extract --stealth` real-mode (single-URL via `obscura fetch <url> --stealth --eval EXPR`). Smaller PR than 8-1-ii (~80 LOC + ~4 bats) — stub + flag-plumbing infrastructure already exists.
-4. **Alternative (smallest path-B):** Phase 8 part 2-i — router promotion. Adds `rule_scrape_flag` + `rule_stealth_flag` to `ROUTING_RULES`. Could ship before or after 8-1-iii; landing first means `--stealth` is auto-routed even before its backend exists (rejected by capability filter, but routes correctly). Better order: 1-iii first → 2-i after.
-5. **Alternative (small):** ship `browser-clean.sh` force-prune verb (parent spec §3 verb #29) as a Phase 7 follow-up. Tiny PR; wraps existing `capture_prune` with `--keep N` / `--days D` flags.
-6. **Alternative (cleanup):** address the pre-existing `tests/browser-select.bats:6` jq-label-keyword failure that's been local-only since Phase 6. Not blocking; small impact; satisfying to clear before continuing Phase 8.
+2. Confirm tag is `v0.40.0-phase-08-part-1-iii-extract-stealth` and main HEAD matches `29495d7`.
+3. **Recommended:** Phase 8 part 2-i — router promotion (Path B). Adds `rule_scrape_flag` + `rule_stealth_flag` to `scripts/lib/router.sh::ROUTING_RULES`. Drops the `--tool obscura` friction. Closes Phase 8. Tiny PR (~30 LOC + ~3 bats).
+4. **Alternative (small):** ship `browser-clean.sh` force-prune verb (parent spec §3 verb #29) as a Phase 7 follow-up. Tiny PR; wraps existing `capture_prune` with `--keep N` / `--days D` flags.
+5. **Alternative (next phase prep):** begin Phase 9 (flow runner) design doc — Phase 11 memory implementation queues AFTER Phase 9.
 
-Start with: read CHANGELOG since `v0.39.0-phase-08-part-1-ii-extract-scrape` to confirm no in-flight work, then propose Phase 8 part 1-iii sub-part split (or alternative). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG since `v0.40.0-phase-08-part-1-iii-extract-stealth` to confirm no in-flight work, then propose Phase 8 part 2-i sub-part split (or alternative). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
 
-**Reading priority for Phase 8-1-iii:**
-1. `scripts/lib/tool/obscura.sh::tool_extract` — current `--scrape` real-mode (8-1-ii). The new `--stealth` mode lands as a sibling branch in the same function (mode select via flag).
-2. `crates/obscura-cli/src/main.rs::run_fetch` (upstream — already researched 8-1-ii; via `mcp__zread__read_file h4ckf0r0day/obscura crates/obscura-cli/src/main.rs`) — `obscura fetch --eval` prints raw `serde_json::Value` to stdout (string unquoted, other JSON-encoded). NOT a wrapped object like `scrape`. Adapter parser + fixture shape diverge accordingly.
-3. `tests/stubs/obscura` — fixture-based stub already supports the argv-hash lookup. Just add new fixture(s) for `fetch --stealth --eval` argv shape.
-4. `scripts/browser-extract.sh` — `--scrape` mode plumbing pattern from 8-1-ii is the template; `--stealth` adds a sibling branch.
+**Reading priority for Phase 8-2-i:**
+1. `scripts/lib/router.sh::ROUTING_RULES` — array of rule-function names; new rules append to it. Top-down precedence.
+2. `scripts/lib/router.sh::rule_*` (existing rules) — pattern: a function that returns 0 if the rule fires for the (verb, flags) combination + emits `tool_name\twhy` on stdout. Rules like `rule_audit_or_perf` (line ~110) are the closest analog — single-flag check.
+3. `tests/router.bats` — adapter-routing test patterns (positive + negative per rule). Add 2 cases per new rule (positive: flag set → routes to obscura; negative: flag unset → falls through).
+4. `tests/routing-capability-sync.bats` — drift check; add `--scrape` and `--stealth` to the `for verb in ...` loop so the new rules are exercised. Or extend the test with new dedicated cases.
+5. `references/obscura-cheatsheet.md` — "When the router picks this adapter" table; flip both `--scrape` and `--stealth` from "planned 8-2-i" to "yes (default)" once shipped.
