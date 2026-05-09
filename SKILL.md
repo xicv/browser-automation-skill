@@ -61,6 +61,7 @@ for the rules):
 | Tool | Strengths | Cheatsheet |
 |---|---|---|
 | chrome-devtools-mcp | declares 18 verbs | [references/chrome-devtools-mcp-cheatsheet.md](references/chrome-devtools-mcp-cheatsheet.md) |
+| obscura | declares 1 verbs | [references/obscura-cheatsheet.md](references/obscura-cheatsheet.md) |
 | playwright-cli | declares 4 verbs | [references/playwright-cli-cheatsheet.md](references/playwright-cli-cheatsheet.md) |
 | playwright-lib | declares 5 verbs | [references/playwright-lib-cheatsheet.md](references/playwright-lib-cheatsheet.md) |
 <!-- END AUTOGEN: tools-table -->

@@ -14,6 +14,7 @@ load helpers
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
     run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
   assert_status 0
@@ -25,6 +26,7 @@ load helpers
   mkdir -p "${BROWSER_SKILL_HOME}"
   chmod 700 "${BROWSER_SKILL_HOME}"
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
     run bash "${SCRIPTS_DIR}/browser-doctor.sh"
   teardown_temp_home
   assert_status 0
