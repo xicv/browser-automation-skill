@@ -1,0 +1,11 @@
+{
+  "total_urls": 3,
+  "concurrency": 10,
+  "total_time_ms": 950,
+  "avg_time_ms": 316.7,
+  "results": [
+    {"url": "https://a.example.com", "title": "A page", "eval": "A page", "time_ms": 320, "worker": 0},
+    {"url": "https://b.example.com", "title": "B page", "eval": "B page", "time_ms": 380, "worker": 1},
+    {"url": "https://c.example.com", "error": "navigate failed: connection refused", "time_ms": 250}
+  ]
+}

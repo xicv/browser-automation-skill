@@ -1,0 +1,10 @@
+{
+  "total_urls": 2,
+  "concurrency": 10,
+  "total_time_ms": 800,
+  "avg_time_ms": 400.0,
+  "results": [
+    {"url": "https://example.com", "title": "Example Domain", "eval": null, "time_ms": 380, "worker": 0},
+    {"url": "https://example.org", "title": "Example.org", "eval": null, "time_ms": 420, "worker": 1}
+  ]
+}

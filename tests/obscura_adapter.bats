@@ -98,12 +98,80 @@ teardown() {
   [ "${status}" = "41" ] || fail "expected 41, got ${status}"
 }
 
-@test "obscura adapter: tool_extract returns 41 (STUB — real impl in 8-1-ii / 8-1-iii)" {
+@test "obscura adapter: tool_extract without flags returns 41 (8-1-iii / other modes deferred)" {
   run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract"
-  [ "${status}" = "41" ] || fail "expected 41 stub, got ${status}"
+  [ "${status}" = "41" ] || fail "expected 41 (no-mode), got ${status}"
 }
 
 @test "obscura adapter: tool_eval returns 41" {
   run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_eval"
   [ "${status}" = "41" ] || fail "expected 41, got ${status}"
+}
+
+# --- Phase 8 part 1-ii: tool_extract --scrape real-mode ---
+
+@test "obscura adapter (8-1-ii): tool_extract --scrape with 3 URLs + --eval emits 3 scrape_url events" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --scrape --eval document.title https://example.com https://example.org https://example.net"
+  assert_status 0
+  # Three event lines, one per URL.
+  count="$(printf '%s\n' "${output}" | jq -e -s 'map(select(.event=="scrape_url")) | length')"
+  [ "${count}" = "3" ] || fail "expected 3 scrape_url events, got ${count}"
+  # First event has expected fields.
+  printf '%s' "${lines[0]}" | jq -e '.url == "https://example.com" and .title == "Example Domain" and (.eval | type == "string")' >/dev/null
+}
+
+@test "obscura adapter (8-1-ii): tool_extract --scrape mixed-results emits success + error events" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --scrape --eval document.title https://a.example.com https://b.example.com https://c.example.com"
+  assert_status 0
+  # 3 total events; 2 with .title (success), 1 with .error (failure).
+  succ="$(printf '%s\n' "${output}" | jq -s 'map(select(.event=="scrape_url" and (.title // false))) | length')"
+  err="$(printf '%s\n'  "${output}" | jq -s 'map(select(.event=="scrape_url" and (.error // false))) | length')"
+  [ "${succ}" = "2" ] || fail "expected 2 success events, got ${succ}"
+  [ "${err}"  = "1" ] || fail "expected 1 error event, got ${err}"
+}
+
+@test "obscura adapter (8-1-ii): tool_extract --scrape with no URLs returns 2 (USAGE_ERROR)" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --scrape --eval document.title"
+  [ "${status}" = "2" ] || fail "expected EXIT_USAGE_ERROR (2) for empty URL list, got ${status}"
+}
+
+@test "obscura adapter (8-1-ii): tool_extract --scrape without --eval emits events with eval:null" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --scrape https://example.com https://example.org"
+  assert_status 0
+  printf '%s' "${lines[0]}" | jq -e '.eval == null' >/dev/null \
+    || fail "first event should have eval=null when --eval omitted"
+}
+
+@test "obscura adapter (8-1-ii): tool_extract --scrape passes scrape + URLs + --format json to obscura argv" {
+  STUB_LOG_FILE="$(mktemp)"
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash -c "source '${LIB_TOOL_DIR}/obscura.sh'; tool_extract --scrape --eval document.title https://example.com https://example.org https://example.net"
+  assert_status 0
+  grep -qE '^scrape$'                "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing scrape subcommand"; }
+  grep -qE '^https://example\.com$'  "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing url 1"; }
+  grep -qE '^https://example\.org$'  "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing url 2"; }
+  grep -qE '^--eval$'                "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing --eval"; }
+  grep -qE '^--format$'              "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing --format"; }
+  grep -qE '^json$'                  "${STUB_LOG_FILE}" || { rm -f "${STUB_LOG_FILE}"; fail "missing json"; }
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "obscura adapter (8-1-ii): stub --version short-circuits before fixture lookup (doctor + install tests stay green)" {
+  STUB_LOG_FILE="$(mktemp)"
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run "${STUBS_DIR}/obscura" --version
+  assert_status 0
+  printf '%s' "${output}" | grep -qE '^obscura ' || fail "stub --version should print version line"
+  # MUST NOT log to STUB_LOG_FILE — the short-circuit happens before the log write.
+  [ ! -s "${STUB_LOG_FILE}" ] || { rm -f "${STUB_LOG_FILE}"; fail "stub --version should NOT touch STUB_LOG_FILE"; }
+  rm -f "${STUB_LOG_FILE}"
 }
