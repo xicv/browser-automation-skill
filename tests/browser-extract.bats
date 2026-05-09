@@ -56,3 +56,43 @@ teardown() { teardown_temp_home; }
   assert_status "$EXIT_USAGE_ERROR"
   assert_output_contains "does not support"
 }
+
+# --- Phase 8 part 1-ii: --scrape end-to-end via obscura adapter ---
+
+@test "browser-extract (8-1-ii): --tool obscura --scrape --eval EXPR url1 url2 url3 emits 3 events + ok summary" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --scrape \
+      --eval document.title https://example.com https://example.org https://example.net
+  assert_status 0
+  evt_count="$(printf '%s\n' "${lines[@]}" | jq -s 'map(select(.event=="scrape_url")) | length')"
+  [ "${evt_count}" = "3" ] || fail "expected 3 scrape_url events, got ${evt_count}"
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.verb == "extract" and .tool == "obscura" and .status == "ok"' >/dev/null
+  printf '%s' "${last_line}" | jq -e '.mode == "scrape" and .total_urls == 3 and .successful == 3 and .failed == 0' >/dev/null
+}
+
+@test "browser-extract (8-1-ii): --scrape with mixed results → status=partial" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --scrape \
+      --eval document.title https://a.example.com https://b.example.com https://c.example.com
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.status == "partial" and .successful == 2 and .failed == 1' >/dev/null
+}
+
+@test "browser-extract (8-1-ii): --scrape with no URLs fails EXIT_USAGE_ERROR" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --scrape --eval document.title
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "--scrape requires at least one URL"
+}
+
+@test "browser-extract (8-1-ii): --scrape --dry-run prints plan with mode=scrape and skips adapter" {
+  run bash "${SCRIPTS_DIR}/browser-extract.sh" --dry-run --scrape \
+    --eval document.title https://example.com https://example.org
+  assert_status 0
+  assert_output_contains "dry-run"
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.mode == "scrape" and .total_urls == 2 and .dry_run == true' >/dev/null
+}

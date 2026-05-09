@@ -1,14 +1,50 @@
 #!/usr/bin/env bash
-# tests/stubs/obscura — minimal mock obscura binary for doctor + install tests.
+# tests/stubs/obscura — mock obscura binary for adapter contract tests.
 #
-# Responds to `--version` (the only call obscura's tool_doctor_check makes
-# during health checks) so doctor reports `ok:true` for the obscura adapter.
-# Real-mode verb-dispatch tests (8-1-ii / 8-1-iii) will replace this with a
-# fixture-based stub similar to tests/stubs/playwright-cli.
+# Behavior:
+#   1. `--version` short-circuit: prints `obscura 0.0.0-stub` and exits 0
+#      WITHOUT logging or fixture lookup (this path supports doctor + install
+#      tests that wire OBSCURA_BIN=${STUBS_DIR}/obscura — see HANDOFF
+#      "new-adapter-CI-trap" pattern).
+#   2. For all other invocations:
+#      a. Logs argv (newline-separated) to ${STUB_LOG_FILE:-/tmp/obscura-stub.log}
+#         so tests can grep argv for leak / shape assertions.
+#      b. Computes sha256 of argv (joined by NULs) and looks up
+#         tests/fixtures/obscura/<sha>.json. If found, prints contents to
+#         stdout and exits 0.
+#      c. If no fixture matches, prints a JSON error line and exits with the
+#         EXIT_TOOL_UNSUPPORTED_OP code (41) so tests detect missing fixtures
+#         explicitly rather than silently passing.
+#
+# Mirrors tests/stubs/playwright-cli's fixture-based shape (Phase 8 part 1-ii).
+# Real-browser integration lives in a separate suite (not part of this stub).
 
 set -euo pipefail
 
-case "${1:-}" in
-  --version) printf 'obscura 0.0.0-stub\n' ;;
-  *)         printf '{"verb":"stub","status":"error","note":"obscura stub: only --version implemented in 8-1-i"}\n'; exit 41 ;;
-esac
+# `--version` MUST short-circuit before logging — doctor + install tests call
+# the stub indirectly via the adapter's tool_doctor_check, which reads version
+# during health-check enumeration. Logging there would pollute STUB_LOG_FILE
+# during tests that are unrelated to scrape-argv shape assertions.
+if [ "${1:-}" = "--version" ]; then
+  printf 'obscura 0.0.0-stub\n'
+  exit 0
+fi
+
+LOG_FILE="${STUB_LOG_FILE:-/tmp/obscura-stub.log}"
+
+{
+  printf '%s\n' "--- $(date -u +%Y-%m-%dT%H:%M:%SZ) ---"
+  for a in "$@"; do printf '%s\n' "${a}"; done
+} >> "${LOG_FILE}"
+
+hash="$(printf '%s\0' "$@" | shasum -a 256 | awk '{print $1}')"
+
+FIXTURES_DIR="${OBSCURA_FIXTURES_DIR:-tests/fixtures/obscura}"
+if [ -f "${FIXTURES_DIR}/${hash}.json" ]; then
+  cat "${FIXTURES_DIR}/${hash}.json"
+  exit 0
+fi
+
+printf '{"status":"error","reason":"no fixture for argv-hash %s","argv":%s}\n' \
+  "${hash}" "$(printf '%s\n' "$@" | jq -R . | jq -sc .)"
+exit 41

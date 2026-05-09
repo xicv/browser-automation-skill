@@ -13,6 +13,27 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 8 part 1-ii — `tool_extract --scrape` real-mode (obscura backend; first real verb on the new adapter)
+
+- [feat] `scripts/lib/tool/obscura.sh::tool_extract` — first real-mode verb backend on the obscura adapter. Wraps `obscura scrape u1 u2 ... [--eval EXPR] [--concurrency N] --format json`. Parses obscura's pretty-printed aggregate JSON dump (`{total_urls, concurrency, total_time_ms, avg_time_ms, results: [...]}` per `crates/obscura-cli/src/main.rs::run_parallel_scrape`); reshapes per-URL `.results[]` into one streaming `scrape_url` event line per URL. Per-result shape divergence handled by jq branching: success → `{event,url,title,eval,time_ms}`; error → `{event,url,error,time_ms}`. The `worker` field is internal (process index) and dropped from the event surface. **Direct jq emit** for events (bypasses `emit_event`) preserves the `eval` field's JSON typing — eval is `serde_json::Value` upstream, so it can be string/number/array/null/object; `emit_event`'s `key=value` shape can't carry arbitrary JSON values.
+- [feat] `scripts/browser-extract.sh` — new `--scrape` mode flag + URL-list collection + `--concurrency N` pass-through. URLs are positional after `--scrape`; mode bypasses the require-selector-or-eval check. **Path A still:** `--scrape` requires `--tool obscura` in 8-1-ii; router promotion to default for `--scrape` is 8-2-i. Summary line emits `mode=scrape`, `total_urls`, `successful`, `failed`; status mapping = ok (all OK) / partial (mixed) / error (all failed or adapter rc≠0). New `--dry-run --scrape` plan path emits the planned action with URL count; skips the adapter.
+- [feat] `tests/stubs/obscura` upgrade — promoted from `--version`-only mock to fixture-based stub mirroring `tests/stubs/playwright-cli`. Behavior: `--version` short-circuits (preserves doctor + install tests landed in 8-1-i); other invocations sha256-hash argv, look up `tests/fixtures/obscura/<sha>.json`, dump file to stdout + exit 0; missing-fixture emits an error line + exits 41. **`--version` short-circuit happens BEFORE STUB_LOG_FILE write** — doctor probes won't pollute argv-shape assertion logs in unrelated tests.
+- [internal] new `tests/fixtures/obscura/` — three fixtures: `54234ff7...json` (3-URL success + eval); `e263bd9f...json` (3-URL mixed: 2 ok + 1 error); `7dc46f78...json` (2-URL no-eval; null eval values).
+- [internal] `tests/obscura_adapter.bats` (+6 cases, total 24) — `tool_extract --scrape` with 3 URLs + eval emits 3 events with correct shape; mixed-results split into success/error events; empty URL list → exit 2; `--scrape` without `--eval` → events with `eval:null`; argv-shape via STUB_LOG_FILE grep (scrape subcommand + URLs + `--eval` + `--format json` all present); stub `--version` short-circuit doesn't touch STUB_LOG_FILE.
+- [internal] `tests/browser-extract.bats` (+4 cases, total 10) — end-to-end `--tool obscura --scrape --eval EXPR u1 u2 u3` reaches adapter + emits 3 events + summary `status:ok / mode:scrape / total_urls:3 / successful:3 / failed:0`; mixed-results → `status:partial / successful:2 / failed:1`; `--scrape` with no URLs → `EXIT_USAGE_ERROR` with "--scrape requires at least one URL"; `--scrape --dry-run` → plan with `mode:scrape / total_urls:N / dry_run:true`.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-08-part-1-ii-extract-scrape.md` — phase plan with upstream JSON shape research (obscura `serde_json::to_string_pretty` output; per-result shape divergence; eval typing constraints) + skill output contract + sub-scope bounds.
+
+**Sub-scope (8-1-ii):**
+- **No `--stealth` mode.** That's 8-1-iii (wraps `obscura fetch <url> --stealth --eval EXPR`).
+- **No router promotion.** `--scrape` doesn't auto-route to obscura yet; user must pass `--tool obscura`. Promotion is 8-2-i (Path B).
+- **No `--selector` for `--scrape`.** Obscura's scrape command takes `--eval` only. `--selector` + `--scrape` combination not exercised; rejected naturally by the adapter.
+- **No `--site` support for `--scrape`.** Scrape mode doesn't apply per-URL session storageState. Documented as a limitation.
+- **No retention/capture-write integration.** Phase 7 capture pipeline composes with `inspect`; combining with `extract --scrape` deferred.
+
+**Adapter inventory after 8-1-ii:** chrome-devtools-mcp ✅ + playwright-cli ✅ + playwright-lib ✅ + **obscura** ⚠️ partial (1 of 8 verb-dispatch fns now real-mode — `tool_extract --scrape`; remaining 7 are 41-stubs by design — obscura is intentionally one-shot extract-only).
+
+**Phase 8 progress: 2 of (3+) sub-parts shipped.** Remaining: 8-1-iii (`--stealth`), 8-2-i (router promotion / Path B).
+
 ### Phase 8 part 1-i — obscura adapter shell (Path A "ship-without-promotion")
 
 - [adapter] new `scripts/lib/tool/obscura.sh` — fourth tool adapter shell. Implements the Tool Adapter Extension Model contract from `docs/superpowers/specs/2026-04-30-tool-adapter-extension-model-design.md` §2: `tool_metadata` (name=`obscura`, abi_version=1, version_pin=`0.x`, cheatsheet_path), `tool_capabilities` (only `extract` declared with advisory flags `--scrape` / `--stealth` / `--eval` / `--selector`), `tool_doctor_check` (binary discovery + install hint), 8 verb-dispatch functions all returning `EXIT_TOOL_UNSUPPORTED_OP` (41). `tool_extract` is a stub in 8-1-i — real-mode `--scrape` lands in 8-1-ii, real-mode `--stealth` lands in 8-1-iii.
