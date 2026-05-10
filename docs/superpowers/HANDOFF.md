@@ -1,23 +1,23 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-10 — Phase 9 part 1-iii shipped)
+## Where the project stands (as of 2026-05-10 — Phase 9 part 1-iv shipped)
 
-main is at tag `v0.44.0-phase-09-part-1-iii-flow-record` (HEAD `1df78f0`). **Phases 1-8 SHIPPED.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 sub-parts (full capture pipeline); Phase 8 closed at 4/4 sub-parts (obscura adapter). **Phase 9 1-i + 1-ii + 1-iii shipped** — flow run foundation + refs resolution + assert verb + flow record (codegen wrapper). Recorded YAMLs round-trip with `flow run`; passwords detected and replaced with `${secrets.password}` placeholder before persisting.
+main is at tag `v0.45.0-phase-09-part-1-iv-replay` (HEAD `523d6c1`). **Phases 1-8 SHIPPED.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 sub-parts (full capture pipeline); Phase 8 closed at 4/4 sub-parts (obscura adapter). **Phase 9 1-i + 1-ii + 1-iii + 1-iv shipped** — flow run foundation + refs/assert + flow record (codegen) + replay (re-execute + structured diff). Phase 9 at 80%; one sub-part (9-1-v history+baseline) closes the phase.
 
 **Phase 9 design doc shipped earlier in this session arc.** `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` locks decisions F1-F8. Five-sub-part split (9-1-i through 9-1-v); storage shape frozen.
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
 
-### Phase 9 progress (PRs #77 design, #78 9-1-i, #80 9-1-ii, #82 9-1-iii) — 3 of 5 sub-parts shipped
+### Phase 9 progress (PRs #77 design, #78, #80, #82, #84) — 4 of 5 sub-parts shipped
 
 | Sub-part | Scope | Status |
 |---|---|---|
 | 9 design | Phase 9 design doc (`2026-05-10-phase-09-flow-runner-design.md`). Locks F1-F8. | ✅ |
-| 9-1-i | `flow run <file>` foundation. Bash-side YAML parser. `_kind`-tagged JSON. `${var}` substitution. Whole-flow capture. `--var` / `--dry-run`. | ✅ |
-| 9-1-ii | `${refs.NAME}` resolution + `assert` step. flow_apply_vars refs-mode; flow_dispatch extracts refs[] from snapshot; main loop harvests into FLOW_REFS (latest-wins). New `scripts/browser-assert.sh` (composition; no adapter ABI changes). | ✅ |
-| 9-1-iii | `flow record` — wraps `playwright codegen`; new `scripts/lib/flow_record.sh` (3-fn API: transform / detect_password / emit_step). Regex-based JS→YAML mapper (6 patterns). Password canary on recorder write side: `/password/i` name match → `${secrets.password}` placeholder; literal value dropped. Stderr audit per redaction. `--tool obscura` rejected. `--out FILE` REQUIRED. PLAYWRIGHT_CODEGEN_BIN env override for testability. | ✅ |
-| 9-1-iv | `replay <id>` — re-execute capture's steps; structured diff (status / output / per-aspect file). New `--strict` flag. | 🔲 next |
-| 9-1-v | `history list/show/diff/clear` + `baseline save/list/remove`. **Closes Phase 9.** Folds in HANDOFF's "browser-clean.sh" follow-up as `history clear`. | 🔲 |
+| 9-1-i | `flow run <file>` foundation. Bash-side YAML parser. `_kind`-tagged JSON. `${var}`. Whole-flow capture. `--var` / `--dry-run`. | ✅ |
+| 9-1-ii | `${refs.NAME}` resolution + `assert` step. flow_apply_vars refs-mode; flow_dispatch extracts refs[]; FLOW_REFS latest-wins. New `browser-assert.sh` (composition; no adapter ABI changes). | ✅ |
+| 9-1-iii | `flow record` — wraps `playwright codegen`; `scripts/lib/flow_record.sh`. Regex-based JS→YAML mapper. Password canary write-side: `/password/i` → `${secrets.password}` placeholder; literal dropped. `--tool obscura` rejected. `--out` required. | ✅ |
+| 9-1-iv | `replay <id>` — `scripts/browser-replay.sh` + `flow_diff_steps` helper. Loads capture's meta+steps.jsonl; re-dispatches via flow_dispatch; per-step `replay_diff` events + aggregate `replay_diff_summary`; new capture with `replay_of`+`replay_match`. `--strict` exits 13 (matches assert verb). Strips `duration_ms` before comparison (timing not semantic). Locked decisions D1-D4 + R1. | ✅ |
+| 9-1-v | `history list/show/diff/clear` + `baseline save/list/remove`. **Closes Phase 9.** Folds in HANDOFF's "browser-clean.sh" follow-up as `history clear`. | 🔲 next |
 
 ### Phase 8 progress (PRs #68, #70, #72, #75) — ✅ COMPLETE
 
@@ -40,12 +40,12 @@ main is at tag `v0.44.0-phase-09-part-1-iii-flow-record` (HEAD `1df78f0`). **Pha
 
 ### Counters
 
-- **37 user-facing verbs** (Phase 9 1-iii adds `flow record` — third new parent row in Phase 9).
-- **4 lib helpers shipped post-Phase-7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`, `scripts/lib/flow.sh`, `scripts/lib/flow_record.sh` (NEW in 9-1-iii).
+- **38 user-facing verbs** (Phase 9 1-iv adds `replay` — fourth new parent row in Phase 9).
+- **4 lib helpers shipped post-Phase-7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`, `scripts/lib/flow.sh` (gained `flow_diff_steps` in 9-1-iv), `scripts/lib/flow_record.sh`.
 - **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **814 tests pass / 0 fail / lint exit 0** locally.
-- **79 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 7 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii; not counting this HANDOFF refresh).
+- **824 tests pass / 0 fail / lint exit 0** locally.
+- **81 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 8 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -78,26 +78,25 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at Phase 9 part 1-iv (`replay <id>` — re-execute + structured diff)
+## Next session: pick up at Phase 9 part 1-v (`history` + `baseline` — CLOSES Phase 9)
 
-Phase 9 1-i + 1-ii + 1-iii all shipped. Flows now: declarative YAML run end-to-end with refs + assertions; recorded from headed sessions with password redaction. **9-1-iv adds replay** — re-execute a prior capture's steps + diff against original.
+Phase 9 1-i + 1-ii + 1-iii + 1-iv all shipped. **9-1-v closes Phase 9** — read-side ops over the captures pipeline + named-blessed-capture management.
 
 **Recommended next sub-part:**
-- **9-1-iv: `replay <id>`** — loads `captures/NNN/meta.json` + `steps.jsonl`; re-executes the steps verbatim (or against `--session NEW`); writes `captures/MMM/` with `replay_of: NNN` field; emits structured diff (status / output / per-aspect file). New `--strict` flag flips the partial→error mapping. Estimated medium PR (~150 LOC + ~6-8 bats).
+- **9-1-v: `history list/show/diff/clear` + `baseline save/list/remove`** — read-side composition over Phase 7's capture pipeline. `history clear` folds in HANDOFF's `browser-clean.sh` follow-up (Phase 7 carry-over: prune-with-flags `--keep N` / `--days D`). `baseline` is thin wrapper over `meta.is_baseline:true` (Phase 7's prune skip-rule already honors this; no migration needed). Estimated medium-large PR (~200 LOC + ~10 bats).
 
-**Open shape questions for 9-1-iv (decide during plan-doc):**
-- Diff structure: per-step status diff + per-step output diff, OR aggregate flow-level summary diff only? Lean per-step (more useful for debugging); aggregate is summary-level.
-- Replay capture chain: forward-only (`captures/MMM` references `captures/NNN`) OR two-way back-reference (NNN's meta gains `replayed_by: MMM`)? Lean forward-only (cheaper writes; reverse-lookup via grep when needed).
-- `--strict` semantics: any divergence → exit non-zero, OR specifically per-step status divergence vs per-step output divergence? Lean any-divergence-fails for v1 (simpler; expand if user demand surfaces).
-- Per-aspect file diff (console.json, network.har): structured (jq-diff) OR raw byte sha256? Lean structured for JSON/HAR (more useful); raw byte sha256 for screenshots (already in captures schema).
+**Open shape questions for 9-1-v (decide during plan-doc):**
+- `history` = single verb with sub-modes (`history list`, `history show`, `history diff`, `history clear`) OR separate verbs? Lean sub-modes (cleaner; matches `flow run`/`flow record` shape).
+- `history diff <id1> <id2>` reuse `flow_diff_steps` (9-1-iv lib) OR new file-level diff? Lean reuse — `flow_diff_steps` already exists; composes cleanly for capture-vs-capture diff.
+- `baseline save <id> --as NAME` writes to `${BROWSER_SKILL_HOME}/baselines.json` (per design doc storage shape) — schema design first-pass: `{schema_version:1, baselines:[{name, capture_id, saved_at, summary}]}`.
+- `history clear` flag set: `--keep N` (keep newest N) + `--days D` (purge older than D days) + `--not-baseline` (purge except baselines). All three composable? Or single `--keep` modeled on Phase 7's auto-prune? Lean Phase-7-symmetric.
 
 **Alternative picks:**
-- Skip to 9-1-v (`history` + `baseline`) — read-side ops; doesn't depend on 9-1-iv. Could ship in parallel.
-- Ship the new `references/recipes/flow-record-secrets.md` recipe-doc as a tiny pure-docs PR before 9-1-iv. Per Phase 9-1-iii closure note. Tiny PR; doesn't block 9-1-iv.
+- Ship the new `references/recipes/flow-record-secrets.md` recipe-doc as a tiny pure-docs PR before 9-1-v. Per 9-1-iii closure note. Doesn't block 9-1-v.
 
 **Phase ordering recap:**
 - Phase 8 ✅ COMPLETE (4/4 sub-parts shipped — obscura adapter + router promotion)
-- Phase 9 🔲 design doc + 1-i + 1-ii + 1-iii shipped (3 of 5 sub-parts). 9-1-iv / 9-1-v remain.
+- Phase 9 🔲 design doc + 1-i + 1-ii + 1-iii + 1-iv shipped (4 of 5 sub-parts). 9-1-v closes Phase 9.
 - Phase 10 🔲 — schema migration tooling
 - Phase 11 🔲 — memory (per-archetype selector/action cache; design doc shipped, implementation queued AFTER Phase 9)
 
@@ -133,7 +132,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 
 **Cost compounding.** Memory hits = zero LLM tokens. Combined with model-routing default (`model: sonnet` + `effort: low` per skill turn) + `/model opusplan` parent session, fully realized memory is the **largest cost lever in the roadmap**. Target: ≥ 70% cache hit rate after 20+ similar actions per archetype (Agent-E-validated threshold).
 
-## Workflow expectations (proven across 79 PRs)
+## Workflow expectations (proven across 81 PRs)
 
 - **TDD muscle-memory**: branch + bats RED → GREEN → lint → tag → push → PR → CI → squash-merge → reset main. ~95%+ CI-green-first-try across the project.
 - **Phase 6 sub-part shape** (mechanical): bridge daemon dispatch case + capability declaration + tool dispatcher + router rule + verb script + bats + stub handler + drift sync (`scripts/regenerate-docs.sh all`) + plan-doc + CHANGELOG.
@@ -153,7 +152,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Padded-NNN-id-as-string pattern** (codified in 7-1-i): zero-padded identifiers (`001`, `042`, `999`) are **strings**, not integers — `summary_json`'s numeric regex now rejects leading-zero ints. Future padded-id fields (capture_id today; possibly baseline_id in flow runner) preserve padding through the summary serializer.
 - **Failure-path-finalize pattern** (codified in 7-1-i): when a verb opens a side-effect resource (capture dir, lock file, temp dir), the failure branch must run the same finalization as success — never leave `in_progress` orphans on disk. Test the failure-finalize directly; agents discovering an `in_progress` capture dir is a regression.
 - **Defense-in-depth validation pattern** (codified in 7-ii): same validation at three layers (bash verb → bridge → daemon-child). Each layer is cheap (<10 lines). Daemon-child layer is the only required test surface for non-CLI IPC paths.
-- **HANDOFF-refresh-as-separate-PR pattern** (proven 12 times now: PR #47, #50, #52, #54, #67, #69, #71, #74, #76, #79, #81, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh). **Combined-refresh exception** (PR #74): when two substantive PRs land back-to-back without HANDOFF-impacting differences (e.g. 8-1-iii + a focused jq-fix), one combined refresh works.
+- **HANDOFF-refresh-as-separate-PR pattern** (proven 13 times now: PR #47, #50, #52, #54, #67, #69, #71, #74, #76, #79, #81, #83, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh). **Combined-refresh exception** (PR #74): when two substantive PRs land back-to-back without HANDOFF-impacting differences (e.g. 8-1-iii + a focused jq-fix), one combined refresh works.
 - **New-adapter-CI-trap pattern** (codified in 8-1-i CI fixup): adding a 4th adapter without a stub binary breaks the **two existing tests** that assert `"all checks passed"` (doctor.bats:12 + install.bats:103). Reason: doctor's exit-status matrix returns `partial` (still exit 0) when ≥1 adapter is OK but ≥1 fails — the **output assertion** fails (warn line replaces "all checks passed") even though `assert_status 0` passes. Fix shape: ship `tests/stubs/<adapter>` mirroring `tests/stubs/playwright-cli`'s shape + wire `<ADAPTER>_BIN=${STUBS_DIR}/<adapter>` into both tests. **Future adapter PRs MUST include the stub + test wiring in the same PR** — CI failure on first push otherwise. Two precedents now (playwright-cli stub + obscura stub).
 - **Streaming-events-via-direct-jq pattern** (codified in 8-1-ii): when an adapter's per-result events carry **arbitrary JSON values** (e.g. `eval` field is `serde_json::Value` upstream — can be string/number/array/null/object), `emit_event` falls short — its `key=value` autodetect only handles scalar types. Bypass `emit_event` for those streaming events and emit via direct `jq -c '...'` over the upstream payload (with `+ {event:"name"}` add and field projection). `emit_summary` stays the path for **summary** lines (fixed scalar fields, validation guards). Lint tier 3 only requires the adapter sources `output.sh`; not every line must go through emit helpers.
 - **Stub-version-short-circuit-before-log pattern** (codified in 8-1-ii): when a fixture-based stub's binary doubles as a `--version` health-check responder (cf. tests/stubs/obscura), the `--version` branch MUST short-circuit and return BEFORE the STUB_LOG_FILE write. Otherwise, doctor probes during unrelated tests pollute argv-shape assertion logs and cause spurious matches in subsequent grep-based tests. Pattern is enforced by a dedicated bats case (`stub --version short-circuits before fixture lookup`).
@@ -169,6 +168,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Privacy-canary-on-write-side pattern** (codified in 9-1-iii recorder; complements the read-side canary from Phase 7-1-iii inspect): when a verb WRITES caller-supplied data to disk (e.g. recorder writes user keystrokes to a flow file), apply sentinel-canary tests to prove sensitive bytes never reach the persisted artifact. Recorder fixture carries literal "PWD-CANARY-9-1-iii"; transformer output verified to NEVER contain that string. Generalizes to: any future "save user input to disk" verb (e.g. cookie export, form-data dump). **Different from read-side canaries** (Phase 7's HAR/console sanitization is on data the verb READS from the browser); both share the same enforcement contract — sentinel literal in fixture; bats grep MUST NOT find it in output.
 - **Cross-platform-stat-trap pattern** (re-confirmed by 9-1-iii CI fixup): GNU `stat -f` does NOT fail — it dumps filesystem-status info instead. Always use `stat -c '%a' (GNU first) || stat -f '%Lp' (BSD fallback)` ordering for file-mode checks; reverse order yields garbage on Linux + breaks the test silently. Same precedent as common.sh::file_mode (HANDOFF prior entry). **Every new bats test using `stat` for file-mode MUST follow this ordering.**
 - **gh-pr-checks-watch race-condition pattern** (proven 2× this session — PRs #70 + #82): `until ! grep -q IN_PROGRESS <<< "$(gh pr view ... statusCheckRollup ...)"; do sleep 25; done` exits prematurely when the PR's CI checks haven't materialized yet (empty rollup → grep returns 1 → `! grep` returns 0 → loop exits). Fix: require BOTH `[ -n "${s}" ]` AND `! grep -q IN_PROGRESS <<<"${s}"`. Single-line bash-pattern fix; saves 5+ min on every CI fixup-and-watch cycle.
+- **Strip-timing-from-semantic-comparison pattern** (codified in 9-1-iv `flow_diff_steps`): when comparing two run outputs for "did this match", strip timing-sensitive fields (`duration_ms`, `started_at`, `finished_at`) BEFORE the comparison — they always vary between runs and aren't semantic differences. Without this, EVERY replay would diverge on EVERY step. Generalizes to any "did the output match" check across runs (Phase 11 cache-prediction-vs-actual checks, future flow vs flow comparison, future capture-vs-baseline diff). **Always pre-strip timing fields in any cross-run comparison.**
 
 ## Daemon state slots (shipped through 7-1-i — unchanged)
 
@@ -210,16 +210,15 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 ## When you start (next session)
 
 1. `git checkout main && git pull --ff-only origin main`
-2. Confirm tag is `v0.44.0-phase-09-part-1-iii-flow-record` and main HEAD matches `1df78f0`.
-3. **Recommended:** Phase 9 part 1-iv — `replay <id>` (re-execute capture's steps + structured diff). Per the open-shape questions in the "Next session" block above (diff structure / capture-chain direction / `--strict` semantics / per-aspect file diff).
-4. **Alternative (parallelizable):** Phase 9 part 1-v (`history` + `baseline`) — read-side ops; doesn't depend on 9-1-iv.
-5. **Alternative (small):** ship `references/recipes/flow-record-secrets.md` recipe-doc (per 9-1-iii closure note). Tiny pure-docs PR; doesn't block 9-1-iv.
+2. Confirm tag is `v0.45.0-phase-09-part-1-iv-replay` and main HEAD matches `523d6c1`.
+3. **Recommended:** Phase 9 part 1-v — `history list/show/diff/clear` + `baseline save/list/remove`. **Closes Phase 9.** Per the open-shape questions in the "Next session" block above (single-verb-with-sub-modes vs separate verbs / history diff reuses flow_diff_steps / baselines.json schema / history clear flag set).
+4. **Alternative (small):** ship `references/recipes/flow-record-secrets.md` recipe-doc (per 9-1-iii closure note). Tiny pure-docs PR; doesn't block 9-1-v.
 
-Start with: read CHANGELOG since `v0.44.0-phase-09-part-1-iii-flow-record` to confirm no in-flight work, then propose 9-1-iv sub-part split (or alternative). User prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG since `v0.45.0-phase-09-part-1-iv-replay` to confirm no in-flight work, then propose 9-1-v sub-part split (or alternative). User prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
 
-**Reading priority for Phase 9-1-iv:**
-1. `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` §3 F5 — replay's structured diff contract. Status / output / per-aspect file diff dimensions.
-2. `scripts/browser-flow.sh` — current `run` sub-mode. Replay = `run` + load-from-capture + diff-against-original. Mostly composes existing `flow_dispatch`.
-3. `scripts/lib/capture.sh::capture_start` — replay writes a NEW capture (with `replay_of: NNN` + `replay_match: bool` fields). Schema additions are non-breaking.
-4. `${CAPTURES_DIR}/NNN/steps.jsonl` — what `flow run` actually writes per step. Replay reads this back + re-dispatches each step's `verb` + `args`. **Cross-reference 9-1-i for the steps.jsonl shape contract.**
-5. `references/recipes/body-bytes-not-body.md` — per-aspect file diff for HAR responses ships `body_bytes_diff` not `body_diff`. Same discipline as Phase 6 part 7-ii route fulfill.
+**Reading priority for Phase 9-1-v:**
+1. `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` §3 F7 + F8 — history surface (pure read-side except `history clear`); baseline as thin wrapper over Phase 7's `meta.is_baseline:true`.
+2. `scripts/lib/capture.sh::capture_prune` — already exists in Phase 7. `history clear` wraps it with manual override flags (`--keep N` / `--days D` / `--not-baseline`).
+3. `scripts/lib/flow.sh::flow_diff_steps` — 9-1-iv lib. `history diff <id1> <id2>` reuses this for capture-vs-capture step comparison. Composition over re-implementation.
+4. Parent spec §3.4 — `baselines.json` is pre-allocated in the storage layout; v1 schema design first-pass: `{schema_version:1, baselines:[{name, capture_id, saved_at, summary}]}`.
+5. `${CAPTURES_DIR}/_index.json` — Phase 7's per-captures index. `history list` reads it for fast enumeration; `history clear` recomputes after prune.
