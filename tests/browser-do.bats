@@ -515,6 +515,26 @@ EOF
     || fail "stdin path failed; got ${prop}"
 }
 
+@test "browser-do --verb fill: cache hit dispatches fill stub with --selector + --text" {
+  _register_site app
+  # Archetype-id MUST match _derive_archetype_id('/login') → 'login'.
+  _seed_cache app login '/login' "type email" "input.email"
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb fill \
+      --intent "type email" \
+      --pattern '/login' \
+      -- --text alice@example.com
+  assert_status 0
+  grep -q '^fill$'              "${STUB_LOG_FILE}" || fail "stub did not record fill verb"
+  grep -q '^input.email$'       "${STUB_LOG_FILE}" || fail "stub did not see cached selector as target"
+  grep -q '^alice@example.com$' "${STUB_LOG_FILE}" || fail "stub did not see forwarded --text"
+  rm -f "${STUB_LOG_FILE}"
+}
+
 @test "browser-do propose: slug-shaped segments don't cluster (no numeric/UUID)" {
   _register_site app
   run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \

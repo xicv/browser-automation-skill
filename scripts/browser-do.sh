@@ -30,11 +30,10 @@ init_paths
 SUMMARY_T0="$(now_ms)"
 
 # --- Whitelist: verbs that accept --selector as primary target ---
-# v1 = [click]. Other selector-target verbs (fill, hover, press, select)
-# currently take only --ref eN — refs are snapshot-relative and can't be
-# cached across snapshots. They're added here when their adapter ABI gains
-# selector-mode plumbing (a follow-up sub-part).
-readonly DO_VERB_WHITELIST=(click)
+# Whitelist grows as adapter ABI gains selector-mode plumbing per verb.
+# Phase 11 part 2-iii (PR #99 onward) extended fill; hover/press/select
+# join when their selector-mode plumbing lands.
+readonly DO_VERB_WHITELIST=(click fill)
 
 _verb_in_whitelist() {
   local needle="$1" v

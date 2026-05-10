@@ -71,3 +71,31 @@ teardown() {
   assert_status "$EXIT_USAGE_ERROR"
   assert_output_contains "mutually exclusive"
 }
+
+# --- selector-mode plumbing (Phase 11 cache enabler — mirrors click precedent) ---
+
+@test "browser-fill --selector: passes selector to adapter as target" {
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash "${SCRIPTS_DIR}/browser-fill.sh" \
+      --tool=playwright-cli --selector 'input.email' --text alice@example.com
+  # Stub records argv → fill / input.email / alice@example.com.
+  grep -q '^fill$'              "${STUB_LOG_FILE}" || fail "stub did not record fill verb"
+  grep -q '^input.email$'       "${STUB_LOG_FILE}" || fail "stub did not see selector as target"
+  grep -q '^alice@example.com$' "${STUB_LOG_FILE}" || fail "stub did not see --text"
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "browser-fill: --selector AND --ref fails EXIT_USAGE_ERROR (mutually exclusive)" {
+  run bash "${SCRIPTS_DIR}/browser-fill.sh" --selector 'input.x' --ref e1 --text hi
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "mutually exclusive"
+}
+
+@test "browser-fill: neither --selector nor --ref fails EXIT_USAGE_ERROR" {
+  run bash "${SCRIPTS_DIR}/browser-fill.sh" --text hello
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "selector"
+}

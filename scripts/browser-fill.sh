@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# scripts/browser-fill.sh — fill an input by --ref eN with --text or --secret-stdin.
+# scripts/browser-fill.sh — fill an input by --ref eN or --selector CSS with --text or --secret-stdin.
 # Usage: bash scripts/browser-fill.sh [--site NAME] [--tool NAME] [--dry-run]
-#                                     [--raw] --ref eN (--text VALUE | --secret-stdin)
+#                                     [--raw] (--ref eN | --selector CSS)
+#                                     (--text VALUE | --secret-stdin)
 #
 # CRITICAL: --secret-stdin reads the secret from this script's stdin and pipes
 # it to the adapter; the secret never appears on argv (anti-pattern AP-7).
 # Test: tests/browser-fill.bats::secret-not-in-argv.
+#
+# --selector path enables Phase 11 cache dispatch (cache stores selectors,
+# not snapshot-relative refs). Mirrors browser-click.sh's --ref/--selector
+# precedent.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -35,7 +40,7 @@ parse_verb_globals "$@"
 # (which natively supports --secret-stdin via stdin-pipe to driver).
 resolve_session_storage_state
 
-ref="" text="" use_stdin=0
+ref="" selector="" text="" use_stdin=0
 verb_argv=()
 i=0
 while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
@@ -44,6 +49,12 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       ref="${REMAINING_ARGV[i+1]:-}"
       [ -n "${ref}" ] || die "${EXIT_USAGE_ERROR}" "--ref requires a value"
       verb_argv+=(--ref "${ref}")
+      i=$((i + 2))
+      ;;
+    --selector)
+      selector="${REMAINING_ARGV[i+1]:-}"
+      [ -n "${selector}" ] || die "${EXIT_USAGE_ERROR}" "--selector requires a value"
+      verb_argv+=(--selector "${selector}")
       i=$((i + 2))
       ;;
     --text)
@@ -64,7 +75,12 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
   esac
 done
 
-[ -n "${ref}" ] || die "${EXIT_USAGE_ERROR}" "fill requires --ref eN"
+if [ -n "${ref}" ] && [ -n "${selector}" ]; then
+  die "${EXIT_USAGE_ERROR}" "--ref and --selector are mutually exclusive"
+fi
+if [ -z "${ref}" ] && [ -z "${selector}" ]; then
+  die "${EXIT_USAGE_ERROR}" "fill requires --ref eN or --selector CSS"
+fi
 if [ -n "${text}" ] && [ "${use_stdin}" = "1" ]; then
   die "${EXIT_USAGE_ERROR}" "--text and --secret-stdin are mutually exclusive"
 fi
@@ -73,8 +89,8 @@ if [ -z "${text}" ] && [ "${use_stdin}" = "0" ]; then
 fi
 
 if [ "${ARG_DRY_RUN:-0}" = "1" ]; then
-  ok "dry-run: would fill ${ref}"
-  emit_summary verb=fill tool=none why=dry-run status=ok ref="${ref}" dry_run=true
+  ok "dry-run: would fill ${ref:-${selector}}"
+  emit_summary verb=fill tool=none why=dry-run status=ok ref="${ref}" selector="${selector}" dry_run=true
   exit 0
 fi
 
@@ -94,8 +110,8 @@ set -e
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 
 if [ "${adapter_rc}" -eq 0 ]; then
-  emit_summary verb=fill tool="${tool_name}" why="${why}" status=ok ref="${ref}"
+  emit_summary verb=fill tool="${tool_name}" why="${why}" status=ok ref="${ref}" selector="${selector}"
   exit 0
 fi
-emit_summary verb=fill tool="${tool_name}" why="${why}" status=error ref="${ref}"
+emit_summary verb=fill tool="${tool_name}" why="${why}" status=error ref="${ref}" selector="${selector}"
 exit "${adapter_rc}"
