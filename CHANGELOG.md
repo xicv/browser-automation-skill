@@ -13,6 +13,34 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 11 part 1-ii — `browser-do` verb (cache lookup + dispatch + explicit write-back)
+
+- [feat] new `scripts/browser-do.sh` — first user-visible memory feature. Two sub-modes:
+  - `browser-do --verb VERB --intent "..." [--site NAME] [--url URL] [-- VERB_ARG ...]` — resolves archetype via `memory_resolve_archetype`; calls `memory_lookup` for cached selector. **Hit:** dispatches `bash scripts/browser-VERB.sh --selector "$cached" $extra_args` (forwards exit code; bumps `success_count` + `hit_count` best-effort). **Miss:** emits `_kind:cache_miss` event with `intent`, `archetype_id`, `reason`, `suggestion:"snapshot+pick+record"`; exits `EXIT_EMPTY_RESULT (11)` so agents can branch on it.
+  - `browser-do record --intent "..." --selector "..." --url "..." [--site NAME] [--pattern PAT] [--archetype NAME]` — explicit write-back through `memory_record_pattern` + `memory_record`. Auto-derives `--pattern` from URL pathname (`s|/[0-9]+|/:id|g`); auto-derives `--archetype` from pattern (`devices/:id` → `devices-id`).
+- [feat] **Skill stays model-agnostic:** no LLM call inside the verb. On miss, parent agent picks ref via its own snapshot+reasoning, then calls `record` to fill the cache.
+- [security] **Privacy canary:** verb refuses to record if `--intent` OR `--selector` contains the literal sentinel `PASSWORD-CANARY`; exits `EXIT_BLOCKLIST_REJECTED (28)`. Backs the recipe-pattern privacy-canary tests; not a real secret-detector (entropy scanning is a future hardening pass).
+- [feat] **`--verb` whitelist (defensive):** v1 = `[click]` only. Other selector-target verbs (`fill`, `hover`, `press`, `select`) currently take only `--ref eN` — refs are snapshot-relative and can't be cached across snapshots. They get added to the whitelist when adapter ABI gains selector-mode plumbing (a follow-up sub-part). Whitelist also blocks accidental dispatch of credential-handling verbs (`extract`, `audit`) and verbs that don't fit the lookup-by-intent model (`open`, `snapshot`, `assert`).
+- [feat] **Best-effort cache write-back:** if `memory_record` / `memory_record_pattern` fails post-dispatch, the dispatched verb's exit code is forwarded unchanged; cache failure is logged via `warn:` to stderr only. Action correctness > cache freshness.
+- [feat] **Site context resolution:** `--site NAME` flag wins; falls back to `current_get` (Phase 1); empty current → `EXIT_USAGE_ERROR`. Mirrors existing verbs.
+- [feat] **No `memory_record_failure` invocation:** the storage primitive is in place from 11-1-i, but 11-1-ii does NOT wire it into the dispatch failure path — that's 11-1-iii's job (self-heal orchestration loop).
+- [internal] new `tests/browser-do.bats` (15 cases) — cache-hit dispatch + `success_count` bump · cache-miss `no_pattern_for_url` · cache-miss `intent_not_cached` · `--verb` whitelist enforcement · `--site` required when no current · `--site` overrides current · record writes mode 0600 · record auto-derives pattern · `--pattern` override · `--archetype` override · canary in intent + selector (both refused) · missing `--intent` / `--selector` / `--url`.
+- [internal] new `tests/fixtures/playwright-cli/6b0bbf75…json` — argv-hash fixture for `["click","button.delete"]`; reused by tests 1 + 6.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-11-part-1-ii-browser-do.md` — phase plan with locked decisions Q1–Q8.
+
+**Sub-scope (11-1-ii):**
+- **No self-heal loop** — `memory_record_failure` is not invoked from `browser-do`. Verb dispatch failure forwards the verb's exit code unmodified. 11-1-iii wires the failure path.
+- **No LLM call** — skill stays model-agnostic.
+- **No multi-verb intent dispatch** — `--verb VERB` is required and singular.
+- **No `--auto-record` flag** — agent must explicitly call `record` after a successful manual resolution. Reduces accidental cache pollution.
+- **No UUID/slug pattern derivation** — only `/[0-9]+/` segments. UUID detection in 11-2-ii.
+- **No cache invalidation by age / TTL** — design doc §12 open-question; not for v1.
+- **No cross-site memory consultation** — strict per-site boundary (design doc §12).
+- **No `--verb fill/hover/press/select`** — these don't accept `--selector` yet; selector-mode plumbing is a follow-up sub-part.
+- **No extra-args forwarding test** — implemented but not exercised in v1 because click takes no useful forwardable args. Test lands when fill/hover/press get `--selector` support.
+
+User-facing verb count: 40 → **41** (`browser-do` is a new parent row).
+
 ### Phase 11 part 1-i — `lib/memory.sh` foundation (URL→archetype + interaction cache I/O)
 
 - [feat] new `scripts/lib/memory.sh` — pure read/write API for the per-archetype selector cache (no verb integration yet — that's 11-1-ii). Public functions:
