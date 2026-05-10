@@ -13,6 +13,36 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 11 part 2-ii — `browser-do propose` (CLOSES Phase 11 part 2)
+
+- [feat] new `browser-do propose [--site NAME] [--threshold N] [--url URL ...]` sub-mode — auto-cluster URL pattern detection. Reads URLs from `--url` args + stdin (one per line; `^#` comments + blanks ignored); clusters by templated pathname; emits `_kind:proposal` events for clusters meeting threshold AND not already in `patterns.json`.
+- [feat] **C1 — Pure compute, no new persistence.** Agent owns URL collection. NO `recent_urls.jsonl` or other observation log. Composable with shell pipes (`tac history.log | propose`); active observation deferred to a future enhancement.
+- [feat] **C2 — Heuristic scope = numeric + UUID only for v1.** Numeric segment (`^[0-9]+$`) → `:id`. UUID segment (8-4-4-4-12 hex) → `:uuid`. Slug heuristic deferred (too high-entropy → false-positive prone).
+- [feat] **C3 — Threshold default `N=3`** (smallest count justifying generalization); configurable via `--threshold N`. Lower = more proposals + noise; higher = miss real patterns.
+- [feat] **C4 — Suppress already-known patterns.** Skip proposing URL patterns that are already in `<site>/patterns.json` (any archetype). Prevents re-emitting patterns the user already accepted; keeps the verb pipe-friendly. Pattern-equivalence canonicalization (`/devices/:id` vs `/devices/:deviceId`) deferred.
+- [feat] **C5 — Always emit proposal events; never auto-record.** Agent decides whether to call `record --pattern X --archetype Y` to land the proposal. Avoids surprise pattern landings + reviewable agent behavior.
+- [feat] **C6 — Always exits 0.** Proposing zero clusters is not an error — it's a valid result ("no patterns worth proposing yet"). Exit 0 + summary `proposals:0`. Agents pipe through `jq` to act on `_kind:proposal` events.
+- [feat] **C7 — Site context resolution** mirrors existing verbs: `--site NAME` flag wins → `current_get` fallback → empty current dies `EXIT_USAGE_ERROR`.
+- [feat] new `scripts/lib/node/url-pattern-cluster.mjs` — pure-compute URL templating helper (mirrors 1-i `url-pattern-resolver.mjs` precedent — keeps URL parsing in node, not bash regex). Reads `{urls:[...]}` from stdin; writes `{clusters:[{templated, urls, count}]}` to stdout. Emits clusters only where templated form differs from at least one constituent URL's pathname (filters single-segment-no-template noise).
+- [internal] `tests/browser-do.bats` gains 8 cases (total 32): 3 numeric URLs → `/:id` proposal · 3 UUID URLs → `/:uuid` proposal · below threshold (2 URLs) → 0 proposals · mixed unrelated → 0 proposals · already-known pattern → suppressed · `--threshold 5` override · stdin input · slugs don't cluster (negative case).
+- [docs] `docs/superpowers/plans/2026-05-10-phase-11-part-2-ii-propose.md` — phase plan with locked decisions C1–C7.
+
+**Sub-scope (11-2-ii):**
+- **No persistent observation log** — agent owns URL collection (C1).
+- **No slug heuristic** — too high-entropy for v1 (C2).
+- **No auto-record on proposal** — agent must explicitly call `record` (C5).
+- **No pattern-equivalence canonicalization** — distinct `:id` vs `:itemId` are separate (C4 future refinement).
+- **No cross-site clustering** — strict per-site boundary (parent design doc §12).
+- **No proposal ranking by frequency** — emitted in cluster-discovery order; agents that want ranking can `jq sort_by(.count)`.
+- **No `--auto-record` flag** — defer.
+- **No new lib helpers in `memory.sh`** — propose is self-contained in browser-do.sh + the node-helper.
+
+**Phase 11 part 2 ✅ CLOSED.** Both sub-parts shipped:
+1. Manual `--pattern` / `--archetype` flags in `--intent` mode (2-i)
+2. Auto-cluster `propose` sub-mode (this PR — 2-ii)
+
+**Phase 11 ✅ feature-complete for v1.** Future Phase 11 work is hardening (slug heuristic, auto-record, pattern-equivalence canonicalization, active observation) — all post-v1 backlog items.
+
 ### Phase 11 part 2-i — `--pattern` / `--archetype` flags in `browser-do --intent` mode
 
 - [feat] `scripts/browser-do.sh --intent` gains two new optional flags:

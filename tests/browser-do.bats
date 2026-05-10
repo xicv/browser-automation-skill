@@ -413,3 +413,115 @@ EOF
   reason="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="cache_miss"))[0].reason')"
   [ "${reason}" = "no_pattern_for_url" ] || fail "expected reason:no_pattern_for_url; got ${reason}"
 }
+
+# --- 2-ii browser-do propose (auto-cluster URL patterns) ---
+#
+# Pure-compute. Reads URLs from --url args + stdin; clusters by templated
+# pathname (numeric → :id; UUID → :uuid); emits _kind:proposal events for
+# clusters meeting threshold AND not already in patterns.json.
+
+@test "browser-do propose: 3 numeric URLs cluster to /:id pattern" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3'
+  assert_status 0
+  prop="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal"))')"
+  [ "$(printf '%s' "${prop}" | jq 'length')" = "1" ] \
+    || fail "expected 1 proposal; got ${prop}"
+  printf '%s' "${prop}" | jq -e '
+    .[0].url_pattern == "/devices/:id" and
+    .[0].archetype_id == "devices-id" and
+    .[0].count == 3
+  ' >/dev/null || fail "shape wrong: ${prop}"
+}
+
+@test "browser-do propose: 3 UUID URLs cluster to /:uuid pattern" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/items/12345678-1234-1234-1234-123456789abc' \
+    --url 'https://app.example.com/items/abcdef00-1111-2222-3333-444455556666' \
+    --url 'https://app.example.com/items/00000000-0000-0000-0000-000000000000'
+  assert_status 0
+  prop="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal"))[0]')"
+  printf '%s' "${prop}" | jq -e '
+    .url_pattern == "/items/:uuid" and
+    .archetype_id == "items-uuid" and
+    .count == 3
+  ' >/dev/null || fail "shape wrong: ${prop}"
+}
+
+@test "browser-do propose: below threshold (2 URLs) → 0 proposals; exit 0" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] || fail "expected 0 proposals; got ${count}"
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.proposals == 0' >/dev/null \
+    || fail "summary should report proposals:0; got ${last}"
+}
+
+@test "browser-do propose: mixed unrelated URLs → 0 proposals (each cluster size 1)" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/a' \
+    --url 'https://app.example.com/b' \
+    --url 'https://app.example.com/c'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] || fail "expected 0 proposals; got ${count}"
+}
+
+@test "browser-do propose: already-known pattern in patterns.json suppresses proposal" {
+  _register_site app
+  # Seed patterns.json with /devices/:id already known.
+  source "${LIB_DIR}/memory.sh"
+  memory_record_pattern app '/devices/:id' devices-id
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] || fail "expected 0 proposals (suppressed); got ${count}"
+}
+
+@test "browser-do propose: --threshold 5 + 4 URLs → 0 proposals" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --threshold 5 \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3' \
+    --url 'https://app.example.com/devices/4'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] || fail "expected 0 proposals (threshold 5 unmet); got ${count}"
+}
+
+@test "browser-do propose: URLs from stdin (one per line)" {
+  _register_site app
+  printf 'https://app.example.com/devices/1\nhttps://app.example.com/devices/2\nhttps://app.example.com/devices/3\n' \
+    | run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app
+  # bats run+pipe pitfall: pipe to run reads from stdin AFTER run captures.
+  # Use bash -c instead so the pipe and the run share stdin.
+  run bash -c "printf 'https://app.example.com/devices/1\nhttps://app.example.com/devices/2\nhttps://app.example.com/devices/3\n' | bash '${SCRIPTS_DIR}/browser-do.sh' propose --site app"
+  assert_status 0
+  prop="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal"))[0]')"
+  printf '%s' "${prop}" | jq -e '.url_pattern == "/devices/:id" and .count == 3' >/dev/null \
+    || fail "stdin path failed; got ${prop}"
+}
+
+@test "browser-do propose: slug-shaped segments don't cluster (no numeric/UUID)" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/posts/my-post' \
+    --url 'https://app.example.com/posts/your-post' \
+    --url 'https://app.example.com/posts/their-post'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] || fail "expected 0 proposals (slugs out of scope v1); got ${count}"
+}
