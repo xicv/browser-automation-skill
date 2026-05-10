@@ -1,8 +1,10 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-10 — Phase 8 ✅ COMPLETE)
+## Where the project stands (as of 2026-05-10 — Phase 8 ✅ COMPLETE; Phase 9 design doc shipped)
 
 main is at tag `v0.41.0-phase-08-part-2-i-router-promotion` (HEAD `60d2009`). **Phases 1-8 SHIPPED.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 sub-parts (full capture pipeline); **Phase 8 closed at 4/4 sub-parts** — obscura adapter (shell + `--scrape` + `--stealth` + router promotion). Adapter roster locked at 4 of 4 (chrome-devtools-mcp + playwright-cli + playwright-lib + obscura); routing precedence locked across all default verbs; `--scrape` / `--stealth` auto-route to obscura without `--tool` flag.
+
+**Phase 9 design doc shipped.** `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` locks decisions for the flow runner: YAML format, single-key-map step shape, `${var}` + `${refs.NAME}` templating, one-capture-per-flow with `steps.jsonl`, structured replay diff, codegen-wrapped recorder, baseline as thin wrapper over Phase 7's `meta.is_baseline`. Five-sub-part split (9-1-i through 9-1-v). Storage shape frozen.
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
 
@@ -65,32 +67,27 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at Phase 9 (flow runner) — design doc first
+## Next session: pick up at Phase 9 part 1-i (`flow run` foundation)
 
-Phase 8 ✅ COMPLETE. The 4-adapter roster is locked; routing precedence is locked; `--scrape` / `--stealth` auto-route to obscura. Adapter inventory final state:
+Phase 8 ✅ COMPLETE. Phase 9 design doc shipped (this session, pure-docs PR). Implementation starts at 9-1-i.
 
-| Adapter | Real-mode status |
-|---|---|
-| chrome-devtools-mcp | ✅ Full (8/8 verbs; daemon-resident bridge) |
-| playwright-cli | ✅ Full |
-| playwright-lib | ✅ Full |
-| **obscura** | ✅ Real-mode for the unique-lane verb (`tool_extract --scrape` + `tool_extract --stealth`); 7 other verb-dispatch fns are 41-stub by design (one-shot extract-only adapter) |
+| Sub-part | Scope | Size |
+|---|---|---|
+| **9-1-i** | `flow run <file>` foundation. Node-helper YAML parser + per-step bash verb dispatch + `${var}` templating + whole-flow capture (meta.json + steps.jsonl). NO `${refs.NAME}` resolution yet. NO `assert` step. | medium |
+| 9-1-ii | `${refs.NAME}` resolution + `assert` step. Snapshot-step populates per-flow refMap; subsequent steps resolve refs via accessibility-tree name match. | medium |
+| 9-1-iii | `flow record` — wrap `playwright codegen`; transformer JS → YAML. Privacy canary on recorder write side (passwords → `${secrets.password}` placeholder). | medium-large |
+| 9-1-iv | `replay <id>` — re-run capture's steps; structured diff (status / output / per-aspect file). New `--strict` flag. | medium |
+| 9-1-v | `history list/show/diff/clear` + `baseline save/list/remove`. **Closes Phase 9.** Folds in HANDOFF's "browser-clean.sh" follow-up as `history clear`. | medium-large |
 
-**Recommended next sub-part: Phase 9 design doc.** Per parent spec §12 (sequencing): Phase 9 = flow runner (`flow record` / `flow run` / `replay` / `history`). Phase 11 (memory) implementation queues AFTER Phase 9 per design-doc decision. Design doc first to lock decisions before code lands — same "design before code" cadence as Phase 11 design doc (`docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`). Open questions to lock:
+**Smallest reviewable PR with user-visible value:** 9-1-i. Ships the runner foundation; first hand-authored `.flow.yaml` files become executable.
 
-- **Storage shape** — `~/.browser-skill/flows/<name>.flow.yaml`? Or `.json`?
-- **Recording mechanism** — bridge-daemon eventstream? bash-side pre/post hooks? Hybrid?
-- **Replay semantics** — strict (exit on any divergence) vs lenient (best-effort with diff)? Both?
-- **Capture composition** — does each step get its own capture dir, or does the whole flow share one?
-- **Variables / templating** — Mustache-style `{{site}}` in YAML? Skipped in v1?
-
-**Alternative picks (small):**
-- `browser-clean.sh` force-prune verb (parent spec §3 verb #29) as a Phase 7 follow-up. Tiny PR (~50 LOC + ~3 bats). Wraps existing `capture_prune` with `--keep N` / `--days D` flags. Verb count 34 → 35.
-- Begin shape work for Phase 11 (memory) — but the sequencing-locked design doc says wait for Phase 9 to ship first.
+**Alternative picks:**
+- Skip ahead to 9-1-iii (flow record) if recording-from-headed-session is the user's higher-value need (then 9-1-i runs as a follow-up to validate recorded outputs).
+- Defer all of Phase 9 and begin Phase 11 (memory) — sequencing-locked design says wait for Phase 9 first; this would break the locked order.
 
 **Phase ordering recap:**
 - Phase 8 ✅ COMPLETE (4/4 sub-parts shipped — obscura adapter + router promotion)
-- Phase 9 🔲 next — flow runner (`flow record` / `flow run` / `replay` / `history`). Phase 11 memory design doc says Phase 11 implementation comes AFTER Phase 9.
+- Phase 9 🔲 design doc shipped; implementation queued at 9-1-i. 5 sub-parts (9-1-i through 9-1-v).
 - Phase 10 🔲 — schema migration tooling
 - Phase 11 🔲 — memory (per-archetype selector/action cache; design doc shipped, implementation queued AFTER Phase 9)
 
@@ -154,6 +151,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Decouple-jq-variable-names-from-JSON-field-names pattern** (codified in PR #73): `--arg <name> X` followed by `$<name>` triggers jq's tokenizer keyword collision when `<name>` matches a reserved word (`label`, `def`, `or`, `and`, `not`, `if`, `then`, `else`, `end`, `as`, `reduce`, `foreach`, `try`, `catch`, `import`, `include`, `module`, `true`, `false`, `null`, `break`). Even though `--arg label X` "should" bind a variable, jq parses `label` as the early-exit-syntax keyword instead. Fix: prefix internal jq variable names with `_v_` so the variable-name space is decoupled from caller-supplied JSON field names. **Same pattern applies anywhere bash builds jq filters dynamically from user-supplied identifiers.** Lint candidate: grep for `--arg <key> ... \\$<key>` patterns; flag if `<key>` matches the reserved set. Deferred until a third instance surfaces.
 - **Path A → Path B adapter rollout pattern** (Phase 8 closure proof): Phase 8 split the obscura adapter rollout into Path A (`--tool obscura` only; zero `router.sh` edits) for 8-1-i / 8-1-ii / 8-1-iii, then Path B (router promotion adds default-routing) in 8-2-i. Each PR carried single-concern risk: Path A PRs reviewed adapter / verb backend / fixture-stub design without routing entanglement; Path B PR reviewed two precedence rules with full capability-filter test coverage. The pattern lives in `docs/superpowers/specs/2026-04-30-tool-adapter-extension-model-design.md` §4.4 and proved its value end-to-end across 4 PRs and 4 sub-parts of Phase 8. **Adopt for any future adapter (Phase 9+ if applicable).**
 - **Capability-filter-as-safety-net pattern** (highlighted by 8-2-i): when a precedence rule fires for a verb the named tool doesn't support (e.g. `open --scrape` triggers `rule_scrape_flag` → obscura, but obscura doesn't declare `open`), the capability filter rejects + emits `warn: rule X picked TOOL but it doesn't support verb=Y; falling through` and the router walks to the next rule. **Routing-rule typos are caught at runtime, not in production traffic** — the cost is one extra `_tool_supports` jq call per fall-through. Codified in `tests/router.bats` (`open --scrape falls through to playwright-cli`). Future precedence rules should NOT defensively add their own verb checks; trust the capability filter.
+- **Design-doc-first-at-phase-boundary pattern** (proven 3 times now: parent spec authorship pre-Phase-1, Phase 11 design PR #58 pre-Phase-11, Phase 9 design pre-Phase-9): when opening a multi-sub-part phase, ship the design doc as its own PR (or fold inline if pure-docs) BEFORE coding starts. Locks decisions; surfaces open questions; gives reviewers something to push back on without diff-context. The design doc is never code; it's the contract that subsequent sub-part plan-docs reference. **Skip only if the phase is one sub-part with obvious shape.**
 
 ## Daemon state slots (shipped through 7-1-i — unchanged)
 
@@ -195,16 +193,15 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 ## When you start (next session)
 
 1. `git checkout main && git pull --ff-only origin main`
-2. Confirm tag is `v0.41.0-phase-08-part-2-i-router-promotion` and main HEAD matches `60d2009`.
-3. **Recommended:** Begin Phase 9 (flow runner) **design doc**. Same pattern as Phase 11 design doc — lock decisions before code lands. Open questions enumerated in the "Next session" block above (storage shape, recording mechanism, replay semantics, capture composition, variables/templating).
-4. **Alternative (small):** ship `browser-clean.sh` force-prune verb (parent spec §3 verb #29) as a Phase 7 follow-up. Tiny PR (~50 LOC + ~3 bats). Verb count 34 → 35.
-5. **Alternative (cleanup):** review parent spec Appendix A verbs vs current shipped roster — surface gaps for Phase 9+ planning.
+2. Confirm latest commit includes the Phase 9 design-doc-fold PR (this PR's merge commit). Tag remains `v0.41.0-phase-08-part-2-i-router-promotion` (design-doc PRs don't get version tags per recipe-doc precedent in PR #55, #58).
+3. **Recommended:** Phase 9 part 1-i — `flow run <file>` foundation. Per design doc §4 (sub-part split). Node-helper YAML parser + per-step bash verb dispatch + `${var}` templating + whole-flow capture (meta.json + steps.jsonl). NO `${refs.NAME}` resolution yet (deferred to 9-1-ii). NO `assert` step (deferred to 9-1-ii).
+4. **Alternative (small):** ship `browser-clean.sh` force-prune verb as a Phase 7 follow-up — but Phase 9 design doc folds this into `history clear` (9-1-v). Skipping the standalone verb saves duplicate work. Lean toward proceeding with 9-1-i.
 
-Start with: read CHANGELOG since `v0.41.0-phase-08-part-2-i-router-promotion` to confirm no in-flight work, then propose Phase 9 design-doc structure (or alternative). The user prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG since `v0.41.0-phase-08-part-2-i-router-promotion` to confirm no in-flight work, then propose 9-1-i sub-part split-or-not. User prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
 
-**Reading priority for Phase 9 design doc:**
-1. `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` §3 verbs 31-33 (`flow run / record`, `replay`, `history`, `baseline`) — parent-spec scope for Phase 9.
-2. `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md` — design-doc-first template; same shape applies.
-3. `examples/*.flow.yaml` — five existing example YAMLs (morning-check, post-commit-verify, reproduce-bug-template, visual-regression, form-fill-template) — already define the v1 surface for what `flow run` consumes. Design must match (or explicitly extend) this YAML shape.
-4. `scripts/lib/capture.sh` — capture pipeline (Phase 7) is the composition target. Design doc must decide: per-step capture or per-flow capture (or both).
-5. `scripts/lib/tool/obscura.sh` (post-8-2-i) — the multi-mode dispatcher pattern from `tool_extract`. Flow runner is similar in spirit (one entry point, multiple sub-modes via flags).
+**Reading priority for Phase 9-1-i:**
+1. `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` — the design contract this PR ships against. Decisions F1-F8 locked.
+2. `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` §4.3 (multi-step interactive flow YAML example) — the parent-spec example IS the v1 surface contract.
+3. `scripts/lib/node/playwright-driver.mjs` — existing node-helper precedent. `flow-runner.mjs` will live alongside it.
+4. `scripts/lib/capture.sh::capture_start` + `capture_finish` — flow run wraps a single capture; design §3 F4 locks the shape (one capture per flow; `steps.jsonl` for per-step events).
+5. `scripts/browser-snapshot.sh` and `scripts/browser-fill.sh` — existing verb-script shape that flow steps will dispatch into. The runner shells out to these scripts per step.
