@@ -13,6 +13,36 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 11 part 1-i — `lib/memory.sh` foundation (URL→archetype + interaction cache I/O)
+
+- [feat] new `scripts/lib/memory.sh` — pure read/write API for the per-archetype selector cache (no verb integration yet — that's 11-1-ii). Public functions:
+  - `memory_init_dir` — lazy-creates `${BROWSER_SKILL_HOME}/memory/` mode 0700; idempotent (mirrors Phase 7's captures/ + Phase 9-1-v's baselines.json precedent).
+  - `memory_load_archetype <site> <archetype_id>` — echoes archetype JSON or empty.
+  - `memory_save_archetype <site> <archetype_id> <json>` — atomic write mode 0600; per-site dir mode 0700 (mirror `lib/site.sh`).
+  - `memory_lookup <site> <archetype_id> <intent>` — echoes cached selector or empty; skips `disabled:true` interactions.
+  - `memory_record <site> <archetype_id> <intent> <selector>` — upsert: new intent → first_used+last_used+success_count:1; existing intent → success_count++ + last_used advances + first_used preserved.
+  - `memory_record_failure <site> <archetype_id> <intent>` — increments fail_count; `fail_count > 3` sets `disabled:true` (H1 self-heal threshold; orchestration loop deferred to 11-1-iii).
+  - `memory_record_pattern <site> <url_pattern> <archetype_id>` — upserts into `<site>/patterns.json`; idempotent on same `(pattern, archetype)` pair.
+  - `memory_resolve_archetype <site> <url>` — first-match-wins archetype lookup via hand-rolled regex matcher; empty on miss.
+- [feat] new `scripts/lib/node/url-pattern-resolver.mjs` — pathname-pattern → RegExp compiler (`:name` → `[^/]+`, `*` → `.*`). Reads `{patterns, url}` JSON on stdin; writes `{matched_pattern, archetype_id}` or `null` on stdout. **Deviation from design doc §3 U1 (URLPattern web standard):** the global `URLPattern` is only stable in Node 23.8+, and CI runners default to Node 20 until June 2026. The hand-rolled matcher keeps behavior deterministic across all Node versions and avoids the npm-polyfill cost; native `URLPattern` can replace it when CI baseline lifts.
+- [feat] **Storage shape (frozen at v1, per design doc §4):**
+  - `${BROWSER_SKILL_HOME}/memory/` mode 0700 (lazy-created)
+  - `<site>/patterns.json` mode 0600 — `{schema_version:1, patterns:[{url_pattern, archetype_id, first_seen, last_seen, hit_count}]}`
+  - `<site>/archetypes/<id>.json` mode 0600 — `{schema_version:1, archetype_id, url_pattern, first_seen, last_seen, use_count, interactions:[{intent, selector, first_used, last_used, success_count, fail_count, disabled, self_heal_history:[]}]}`
+  - `[PERSONAL]` per parent spec §3.4 (selectors reveal user flows).
+- [internal] new `tests/memory.bats` (12 cases) — init_dir mode 0700 + idempotent · save+load round-trip + per-site dir mode 0700 + archetype mode 0600 · lookup hit + miss + missing-archetype empty · record new + record existing-intent (success_count++ + first_used preserved) · record_failure under-threshold + at-threshold (disabled:true) · record_pattern mode 0600 + idempotent · resolve_archetype `/devices/:id` matches `/devices/123` + non-matching empty.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-11-part-1-i-memory-foundation.md` — phase plan with locked decisions M1+U1+E1+H1, storage shape v1, and acceptance criteria.
+
+**Sub-scope (11-1-i):**
+- **No `browser-do` verb integration** — that's 11-1-ii. This PR ships only the lib API; nothing executes against the cache yet.
+- **No self-heal orchestration loop** (resolve → execute → mark-fail → re-resolve). Deferred to 11-1-iii. The `memory_record_failure` storage primitive lands here so 11-1-iii has the threshold mechanic in place.
+- **No `_index.json` writes** — per design doc §4 ("best-effort/coalesced"). Lands when `browser-do` knows the cross-site picture.
+- **No manual `--pattern` flag** (11-2-i) or auto-cluster pattern detection (11-2-ii).
+- **No `cache-write-security.md` recipe** — per design doc §6, ships AFTER Phase 11 part 1.
+- **No verb-level privacy canary** — wrong surface for the lib layer; lands with 11-1-ii.
+
+User-facing verb count unchanged (lib-only PR; no new shell entry point).
+
 ### Phase 9 part 1-v — `history` + `baseline` (CLOSES Phase 9)
 
 - [feat] new `scripts/browser-history.sh` — single verb with sub-modes (per locked decision H1):
