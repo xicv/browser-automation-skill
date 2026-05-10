@@ -13,6 +13,36 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 9 part 1-iii — `flow record` (codegen wrapper + JS→YAML transformer + password canary)
+
+- [feat] `scripts/browser-flow.sh::record` — new sub-mode alongside existing `run`. Usage: `bash scripts/browser-flow.sh record --url URL --out FILE [--name NAME] [--tool TOOL]`. Spawns `playwright codegen --target javascript <URL>`; captures emitted JS; transforms to flow YAML; writes `${OUT}` mode 0600. Per locked decisions:
+  - **W1 — recorder rejects `--tool obscura`** (codegen targets Playwright/Chrome; obscura's stateless one-shot model has no interactive recording surface). Helpful error message.
+  - **O1 — `--out FILE` REQUIRED** (no default location; recorded flows are personal artifacts; user opting-in is friction-by-design per `creds-show --reveal` precedent).
+  - **Path security** — realpath canonicalize on `--out`; sensitive-pattern reject (`/.ssh/`, `/.aws/`, `/.gnupg/`, `/.netrc`, `/private_key*`, `/id_rsa*`, `/id_ed25519*`). Mirrors `references/recipes/path-security.md`.
+- [feat] new `scripts/lib/flow_record.sh` — three-fn library:
+  - `flow_record_transform <out-name>` — pure function: reads codegen JS on stdin; emits flow YAML on stdout. Per locked decision F6-a, regex-based mapper for 6 codegen patterns (`page.goto` / `getByRole(...).click()` / `getByRole(...).fill()` / `getByLabel(...).click()` / `getByLabel(...).fill()` / `locator(CSS).click()` / `locator(CSS).fill()`). Auto-inserts `- snapshot: {}` step before any step that uses `${refs.X}`, deduplicating consecutive snapshots.
+  - `flow_record_detect_password <name>` — case-insensitive substring match on `password`. Returns 0 if match. Per locked decision S1: any name containing "password" (case-insensitive) is treated as a password field.
+  - `flow_record_emit_step <verb> <inline-args-yaml>` — helper that prints `  - <verb>: <args>` step lines.
+- [security] **Privacy canary on recorder write side.** When the transformer encounters `getByRole(... name: 'X' ...).fill('VAL')` AND `X` matches `/password/i`, it writes `${secrets.password}` placeholder INSTEAD of `VAL`. The literal value is **dropped entirely** — never written to disk. Stderr audit line per redaction: `flow record: redacted password field "X" → ${secrets.password} placeholder`. Per locked decision S1; rejected: S2 (strict `input[type=password]` only — codegen rarely emits underlying input type), S3 (no detection — security regression).
+- [security] **Privacy canary test** (bats case 7): fixture `with-password.codegen.js` carries literal "PWD-CANARY-9-1-iii"; transformer output MUST NOT contain that string. Belt-and-suspenders: any "PWD-CANARY" substring leak fails the test. Same enforcement shape as Phase 7's `--unsanitized` audit canaries.
+- [feat] `flow_record_transform` exposes globals `FLOW_RECORD_PASSWORD_REDACTIONS` + `FLOW_RECORD_STEP_COUNT` for callers to surface in summary lines. `browser-flow.sh::record` emits both in the summary line: `password_redactions: N / step_count: M`.
+- [feat] **Out-of-scope codegen patterns gracefully skipped** — XPath selectors emit `# TODO(flow record): unsupported xpath selector — <line>` comment and skip; `waitForLoadState` and `storageState` (codegen's session-save) silently dropped (the latter is replaced by flow.yaml's `session: NAME` field).
+- [internal] new `tests/flow-record.bats` (12 cases) — `flow_record_detect_password` 4 cases (Email no-match / Password match / lowercase match / substring match); `flow_record_transform` 5 cases (simple-fixture shape + password-placeholder + privacy canary + xpath skip + audit line); `browser-flow.sh record` 3 cases (--tool obscura rejected / missing --out USAGE_ERROR / mock-codegen wrapper writes file mode 0600 + correct summary).
+- [internal] new `tests/fixtures/flow-record/` — 3 fixtures: `simple.codegen.js` (3 actions: goto + fill + click); `with-password.codegen.js` (includes literal canary "PWD-CANARY-9-1-iii"); `with-xpath.codegen.js` (XPath selector to test skip-with-comment).
+- [internal] new `tests/stubs/playwright-codegen-mock` — minimal stub binary that emits a fixed codegen-style JS payload on stdout. Wired via `PLAYWRIGHT_CODEGEN_BIN` env var so the wrapper-smoke test doesn't need real Playwright.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-09-part-1-iii-flow-record.md` — phase plan with locked decisions F6-a + S1 + W1 + O1 + the 6 codegen patterns + out-of-scope mappings + the 4 sub-scope categories.
+
+**Sub-scope (9-1-iii):**
+- **No AST-based parser** — regex mapper only. Limits documented in plan-doc + cheatsheet (future).
+- **No support for codegen `--target` other than `javascript`** — Python/Java/etc. emit different JS-like syntax. v1 is JS-only.
+- **No secrets-management UI** — `${secrets.password}` is a literal placeholder; user wires up resolution via `--var password=X` at flow-run time. (Future iteration: pull from `~/.browser-skill/credentials/`.)
+- **No round-trip validation** — recorder writes; user can run. v1 doesn't auto-run the recorded flow to verify correctness. (Future iteration: `flow record --validate` flag.)
+- **No re-recording / merge** — if the user wants to extend an existing flow, they must hand-edit. v1 is greenfield-only.
+- **No env-var → ${secrets.X} pull-through** — users who want session-token recording have to manually craft.
+- **No `--site SITE` resolution** — `--url URL` is required (or `--site` is accepted but ignored in v1). Site-base-URL resolution deferred.
+
+**Phase 9 progress: 3 of 5 sub-parts shipped.** Remaining: 9-1-iv (replay + diff), 9-1-v (history + baseline → CLOSES Phase 9). New recipe candidate post-9-1-iii: `references/recipes/flow-record-secrets.md` — codifies the password-detection + ${secrets.X} placeholder pattern (per design doc §8).
+
 ### Phase 9 part 1-ii — `${refs.NAME}` resolution + `assert` step
 
 - [feat] `scripts/lib/flow.sh::flow_apply_vars` — `${refs.NAME}` no longer literal-pass-through (was the deferred behavior in 9-1-i). Resolves via global `FLOW_REFS` assoc array (text → ref). Missing ref → `EXIT_USAGE_ERROR` with helpful message ("no snapshot has surfaced \"X\" — add a snapshot step first OR check the accessible name"). Per design doc §3 F3 fail-loud contract.

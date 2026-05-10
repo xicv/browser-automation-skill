@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# tests/stubs/playwright-codegen-mock — emits a fixed codegen-style JS payload
+# on stdout then exits, simulating user closing the codegen window after a
+# brief recorded session. Used by tests/flow-record.bats wrapper-smoke test.
+
+set -euo pipefail
+
+cat <<'EOF'
+const { test, expect } = require('@playwright/test');
+
+test('test', async ({ page }) => {
+  await page.goto('https://example.com/users/new');
+  await page.getByRole('textbox', { name: 'Email' }).fill('alice@example.com');
+  await page.getByRole('button', { name: 'Sign in' }).click();
+});
+EOF

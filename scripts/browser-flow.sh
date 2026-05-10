@@ -44,7 +44,93 @@ shift
 
 case "${sub_mode}" in
   run) ;;
-  record) die "${EXIT_USAGE_ERROR}" "browser-flow record: not yet implemented (Phase 9 part 1-iii)" ;;
+  record)
+    # Phase 9 part 1-iii: wraps `playwright codegen <url>`; transforms emitted
+    # JS → flow YAML; writes ${OUT} mode 0600. Privacy canary on recorder
+    # write side: passwords detected via /password/i name match, replaced
+    # with ${secrets.password} placeholder.
+    # shellcheck source=lib/flow_record.sh
+    # shellcheck disable=SC1091
+    source "${SCRIPT_DIR}/lib/flow_record.sh"
+
+    record_url=""
+    record_out=""
+    record_name=""
+    record_tool=""
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --url)  record_url="$2"; shift 2 ;;
+        --out)  record_out="$2"; shift 2 ;;
+        --name) record_name="$2"; shift 2 ;;
+        --tool) record_tool="$2"; shift 2 ;;
+        --site) shift 2 ;;  # accepted; site resolution deferred
+        *)      die "${EXIT_USAGE_ERROR}" "browser-flow record: unknown flag '$1'" ;;
+      esac
+    done
+
+    # Per locked decision W1: codegen targets Playwright/Chrome; obscura's
+    # stateless one-shot model has no interactive recording surface.
+    if [ "${record_tool}" = "obscura" ]; then
+      die "${EXIT_USAGE_ERROR}" "browser-flow record: recorder does not support obscura (codegen targets Playwright; obscura is stateless one-shot — no interactive recording surface)"
+    fi
+
+    # Per locked decision O1: --out is REQUIRED.
+    [ -n "${record_out}" ] || die "${EXIT_USAGE_ERROR}" "browser-flow record: --out FILE is required"
+    [ -n "${record_url}" ] || die "${EXIT_USAGE_ERROR}" "browser-flow record: --url URL is required (or --site NAME — deferred to follow-up)"
+
+    # Path security: realpath canonicalize + sensitive-pattern reject. Mirror
+    # references/recipes/path-security.md.
+    record_out_dir="$(dirname "${record_out}")"
+    [ -d "${record_out_dir}" ] || mkdir -p "${record_out_dir}"
+    record_out_abs="$(cd "${record_out_dir}" && pwd)/$(basename "${record_out}")"
+    case "${record_out_abs}" in
+      */.ssh/*|*/.aws/*|*/.gnupg/*|*/.netrc*|*/private_key*|*/id_rsa*|*/id_ed25519*)
+        die "${EXIT_USAGE_ERROR}" "browser-flow record: --out path matches sensitive pattern (refusing): ${record_out_abs}"
+        ;;
+    esac
+
+    # Default flow name = basename of --out (sans .flow.yaml).
+    [ -z "${record_name}" ] && record_name="$(basename "${record_out}" .flow.yaml)"
+
+    # Spawn codegen (or mock via env-var override).
+    codegen_bin="${PLAYWRIGHT_CODEGEN_BIN:-}"
+    if [ -z "${codegen_bin}" ]; then
+      codegen_bin="$(command -v playwright || true)"
+      [ -z "${codegen_bin}" ] && die "${EXIT_PREFLIGHT_FAILED}" "playwright not found on PATH (set PLAYWRIGHT_CODEGEN_BIN to override)"
+      codegen_args=(codegen --target javascript "${record_url}")
+    else
+      codegen_args=()
+    fi
+
+    # Capture codegen stdout. Real codegen blocks until user closes the headed
+    # window; mock exits immediately.
+    set +e
+    codegen_js="$("${codegen_bin}" "${codegen_args[@]}" 2>/dev/null)"
+    codegen_rc=$?
+    set -e
+    if [ "${codegen_rc}" -ne 0 ]; then
+      die "${EXIT_TOOL_CRASHED}" "playwright codegen failed (rc=${codegen_rc})"
+    fi
+
+    # Transform JS → YAML. flow_record_transform sets globals
+    # FLOW_RECORD_PASSWORD_REDACTIONS + FLOW_RECORD_STEP_COUNT.
+    yaml_out="$(printf '%s' "${codegen_js}" | flow_record_transform "${record_name}" 2>/tmp/flow-record-stderr-$$.log)"
+    redaction_msgs="$(cat /tmp/flow-record-stderr-$$.log 2>/dev/null || true)"
+    rm -f /tmp/flow-record-stderr-$$.log
+    [ -n "${redaction_msgs}" ] && printf '%s\n' "${redaction_msgs}" >&2
+
+    # Write to --out, mode 0600.
+    tmp="${record_out_abs}.tmp.$$"
+    printf '%s' "${yaml_out}" > "${tmp}"
+    chmod 600 "${tmp}"
+    mv "${tmp}" "${record_out_abs}"
+
+    emit_summary verb=flow tool=playwright-cli why=record status=ok mode=record \
+      flow_name="${record_name}" out_file="${record_out_abs}" \
+      step_count="${FLOW_RECORD_STEP_COUNT}" \
+      password_redactions="${FLOW_RECORD_PASSWORD_REDACTIONS}"
+    exit 0
+    ;;
   *)    die "${EXIT_USAGE_ERROR}" "browser-flow: unknown sub-mode '${sub_mode}'" ;;
 esac
 
