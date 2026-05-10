@@ -13,6 +13,23 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 9 — flow runner design doc (declarative composition + record + replay + history; queued AFTER Phase 8)
+
+- [docs] new `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` — full design for the flow runner phase. Locks decisions F1+F2+F3+F4+F5+F6+F7+F8 (YAML format; single-key-map step shape; `${var}` + `${refs.NAME}` templating; one-capture-per-flow-run with `steps.jsonl`; structured replay diff; codegen-wrapped recorder; pure-read history; baseline as thin wrapper over Phase 7's `meta.is_baseline`). Five-sub-part split: 9-1-i (flow run foundation), 9-1-ii (refs + assert), 9-1-iii (flow record), 9-1-iv (replay + diff), 9-1-v (history + baseline → CLOSES Phase 9). Storage shape frozen at Phase 9 ship — adds `~/.browser-skill/flows/<name>.flow.yaml` + `baselines.json` + per-capture `steps.jsonl`. Schema additions to `meta.json` are non-breaking (no version bump).
+- [docs] State-of-the-art (May 2026) check: parent spec §4.3 commits to YAML format; Playwright codegen is the practical recording mechanism; Phase 7's prune skip-rule on `is_baseline:true` already pre-allocates the baseline contract. New verbs counted: `flow run / record`, `assert`, `replay`, `history list/show/diff/clear`, `baseline save/list/remove` (~5 parent rows; user-facing verb count 34 → ~40).
+- [docs] `docs/superpowers/HANDOFF.md` — Phase 9 sub-part table + storage shape + sequencing note (Phase 11 implementation comes AFTER Phase 9 per memory design doc §13). Workflow-expectations gain a "Design-doc-first-at-phase-boundary" pattern note (proven 3 times now: Phase 11 design PR #58, Phase 9 design this PR; pre-Phase-7 also followed by parent spec authorship).
+
+**Why now (design only, no code):** Phase 9 implementation is queued as the next coding effort. Design doc ships first to lock decisions before code lands — same "design before code" cadence as Phase 11 design (`2026-05-08-phase-11-memory-design.md`) and the parent spec (`2026-04-27-browser-automation-skill-design.md`). HANDOFF + CHANGELOG updates fold into this PR per the pure-docs-fold exception to the alternation pattern (PRs #55, #58, this one).
+
+**Cost compounding once shipped.** Saved flows are the third leg of the cost-reduction trio:
+1. Model routing (skill → Sonnet) — ~3× cheaper per turn (already shipped).
+2. Memory (Phase 11) — ~70% turns skipped on repeat actions; ~3× cheaper compounding (queued).
+3. Saved flows (Phase 9, this design) — ~50× cheaper for any multi-step pattern that fits a flow.
+
+Memory + flows compose: memory remembers individual action mappings; flows compose them into runnable sequences. After both ship, a returning user's typical session shrinks from N×LLM turns to 1×LLM turn (`flow run` invocation) + zero memory misses.
+
+**Open follow-ups documented (decided during Phase 9 implementation, not now):** `assert` verb predicate set (text-equality / regex / JSON-path); recorder password detection by name pattern (in addition to `input[type=password]`); replay capture chain (one-way vs two-way back-reference); `history diff` support matrix for non-flow captures; `baselines.json` migration semantics for orphaned references; `flow record` against obscura adapter (rejected by recorder; documented limitation). All deferred until Phase 9 implementation surfaces a concrete need.
+
 ### Phase 8 part 2-i — router promotion for `--scrape` / `--stealth` (Path B → CLOSES Phase 8)
 
 - [feat] `scripts/lib/router.sh` — two new precedence rules placed BEFORE `rule_extract_default`:
