@@ -327,3 +327,89 @@ EOF
     .[0].fail_count == 0
   ' "${arch_path}" >/dev/null || fail "expected healed shape after record; got $(jq -c '.interactions[0]' "${arch_path}")"
 }
+
+# --- 2-i --pattern / --archetype flags in --intent mode ---
+#
+# Per plan-doc R1: resolution priority is --archetype > --pattern > --url.
+# Most-explicit-wins. All three flags optional; missing all → existing
+# cache_miss reason:no_pattern_for_url (backwards-compat preserved).
+
+@test "browser-do --intent --pattern: works without --url; cache hit dispatches click" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click delete" "button.delete"
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click delete" \
+      --pattern '/devices/:id'
+  assert_status 0
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.cache_hit == true' >/dev/null \
+    || fail "expected cache_hit:true; got ${last}"
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "browser-do --intent --archetype: direct lookup without --url or --pattern" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click delete" "button.delete"
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click delete" \
+      --archetype devices-id
+  assert_status 0
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "browser-do --intent: --archetype wins over --pattern (most-explicit)" {
+  _register_site app
+  # Cache only under devices-id; --pattern would resolve to "/different/:thing" → "different-thing"
+  # archetype which doesn't exist. --archetype wins → hits.
+  _seed_cache app devices-id '/devices/:id' "click delete" "button.delete"
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click delete" \
+      --archetype devices-id \
+      --pattern '/different/:thing' \
+      --url 'https://app.example.com/totally/unrelated'
+  assert_status 0
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "browser-do --intent: --pattern wins over --url (skips memory_resolve_archetype)" {
+  _register_site app
+  # Cache under "explicit-id" archetype derived from --pattern '/explicit/:id'.
+  _seed_cache app explicit-id '/explicit/:id' "click delete" "button.delete"
+  # No patterns.json entry mapping URL → explicit-id; URL-derived path would miss.
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click delete" \
+      --pattern '/explicit/:id' \
+      --url 'https://app.example.com/devices/123'
+  assert_status 0
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "browser-do --intent: missing --url AND --pattern AND --archetype → cache_miss (backwards-compat)" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" \
+    --site app --verb click \
+    --intent "click delete"
+  assert_status 11
+  reason="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="cache_miss"))[0].reason')"
+  [ "${reason}" = "no_pattern_for_url" ] || fail "expected reason:no_pattern_for_url; got ${reason}"
+}

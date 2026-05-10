@@ -13,6 +13,29 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 11 part 2-i — `--pattern` / `--archetype` flags in `browser-do --intent` mode
+
+- [feat] `scripts/browser-do.sh --intent` gains two new optional flags:
+  - `--pattern '/devices/:id'` — explicit URL pattern; archetype-id derived via `_derive_archetype_id` (reuses 1-ii helper). Skips URL→archetype lookup.
+  - `--archetype devices-id` — explicit archetype-id; bypasses both URL lookup and pattern derivation. Most-explicit-wins.
+- [feat] **R1 — Resolution priority (most-explicit-wins):** `--archetype NAME` > `--pattern PAT` > `--url URL` > none → existing `cache_miss reason:no_pattern_for_url` (backwards-compat preserved). All three flags optional + independently overrideable.
+- [feat] **R2 — `--archetype` honors `assert_safe_name`** (constrained to `^[A-Za-z0-9_-]+$`); mirrors `record --archetype` 1-ii behavior. Consistent treatment across sub-modes.
+- [feat] **R3 — `--pattern` is read-side only** — does NOT call `memory_record_pattern`. Decouples explicit-pattern lookup from cache persistence; `record` remains the sole pattern-writing path.
+- [feat] **R4/R5 — No new `cache_miss` reason variants.** Nonexistent `--archetype NAME` → falls through to `cache_miss reason:intent_not_cached` (matches 1-iii D3 disabled-vs-never-cached precedent: agent response identical → no behavior gain from distinguishing).
+- [feat] Symmetry with `record` sub-mode: `record --pattern` + `record --archetype` already shipped in 1-ii. This PR makes `--intent` accept the same flags.
+- [internal] `tests/browser-do.bats` gains 5 cases (total 24): `--intent --pattern` works without `--url` · `--intent --archetype` direct lookup · `--archetype` wins over `--pattern` (most-explicit) · `--pattern` wins over `--url` (skips `memory_resolve_archetype`) · missing all three preserves `cache_miss reason:no_pattern_for_url` (backwards-compat).
+- [docs] `docs/superpowers/plans/2026-05-10-phase-11-part-2-i-pattern-flag.md` — phase plan with locked decisions R1–R5.
+
+**Sub-scope (11-2-i):**
+- **No auto-cluster pattern detection** — that's 11-2-ii.
+- **No `--pattern` write-side change** — `record --pattern` already supported (1-ii); this PR is read-side only (R3).
+- **No new `cache_miss` reason variants** (R4).
+- **No selector-mode plumbing for fill/hover/press/select** — independent prerequisite; tracked as separate follow-up.
+- **No multi-pattern fallback** — caller passes ONE pattern; if it doesn't match, no auto-fallback to URL-derive. Single-path resolution per call.
+- **No opportunistic `memory_record_pattern` from `--intent --pattern`** (R3); revisit if explicit-pattern users find themselves calling `record` redundantly.
+
+User-facing verb count unchanged. Phase 11 part 2 in flight — 1/2 sub-parts shipped (manual flag; auto-cluster queued).
+
 ### Recipe — `cache-write-security.md` (codifies Phase 11 part 1 cache-write contract)
 
 - [docs] new `references/recipes/cache-write-security.md` — codifies the five cache-write rules established across Phase 11 part 1's three substantive PRs (1-i lib + 1-ii verb + 1-iii self-heal):
