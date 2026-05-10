@@ -92,16 +92,87 @@ teardown() { teardown_temp_home; }
   assert_output_contains "undefined var"
 }
 
-@test "flow_apply_vars: leaves \${refs.NAME} literal (deferred to 9-1-ii)" {
+# --- Phase 9 part 1-ii: ${refs.NAME} resolution ---
+
+@test "flow_apply_vars (9-1-ii): resolves \${refs.NAME} via global FLOW_REFS" {
   run bash -c "
     source '${LIB_DIR}/common.sh'; init_paths
     source '${LIB_DIR}/flow.sh'
     declare -gA FLOW_VARS=()
-    step_in='{\"step_index\": 0, \"verb\": \"fill\", \"args\": {\"ref\": \"\${refs.Name}\", \"text\": \"x\"}}'
+    declare -gA FLOW_REFS=( [Email]=e3 [Submit]=e7 )
+    step_in='{\"step_index\": 0, \"verb\": \"fill\", \"args\": {\"ref\": \"\${refs.Email}\", \"text\": \"x\"}}'
     flow_apply_vars \"\${step_in}\"
   "
   assert_status 0
-  printf '%s' "${output}" | jq -e '.args.ref == "${refs.Name}"' >/dev/null
+  printf '%s' "${output}" | jq -e '.args.ref == "e3"' >/dev/null
+}
+
+@test "flow_apply_vars (9-1-ii): missing ref errors loudly with EXIT_USAGE_ERROR" {
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/flow.sh'
+    declare -gA FLOW_VARS=()
+    declare -gA FLOW_REFS=( [Email]=e3 )
+    step_in='{\"step_index\": 0, \"verb\": \"click\", \"args\": {\"ref\": \"\${refs.GhostName}\"}}'
+    flow_apply_vars \"\${step_in}\"
+  "
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "GhostName"
+}
+
+@test "flow_dispatch (9-1-ii): snapshot step extracts refs[] from event line into step.refs" {
+  step_in='{"step_index": 0, "verb": "snapshot", "args": {}}'
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash -c "
+      source '${LIB_DIR}/common.sh'; init_paths
+      source '${LIB_DIR}/flow.sh'
+      flow_dispatch '${step_in}'
+    "
+  assert_status 0
+  # step-event has .refs array.
+  printf '%s' "${output}" | jq -e '.refs | type == "array" and length >= 1' >/dev/null \
+    || fail "expected step-event to carry refs[] from snapshot event line; got: ${output}"
+  # Stub fixture has Sign in → e2.
+  printf '%s' "${output}" | jq -e '.refs | map(select(.text == "Sign in")) | length == 1' >/dev/null
+}
+
+@test "browser-flow.sh (9-1-ii): with-refs flow resolves \${refs.Sign in} via prior snapshot" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-flow.sh" run "${FIXTURES_DIR}/flows/with-refs.flow.yaml"
+  assert_status 0
+  capture_dir="$(ls -d "${BROWSER_SKILL_HOME}/captures/"*/ 2>/dev/null | head -1)"
+  [ -d "${capture_dir}" ] || fail "no capture dir"
+  # Step 1 (fill) should have args.ref resolved to e2 (the stub's "Sign in" → e2).
+  step1="$(sed -n '2p' "${capture_dir}steps.jsonl")"
+  printf '%s' "${step1}" | jq -e '.args.ref == "e2"' >/dev/null \
+    || fail "expected step 1 args.ref resolved to e2; got: ${step1}"
+}
+
+@test "browser-flow.sh (9-1-ii): two snapshots → second replaces FLOW_REFS wholesale (latest-wins)" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-flow.sh" run "${FIXTURES_DIR}/flows/two-snapshots.flow.yaml"
+  assert_status 0
+  capture_dir="$(ls -d "${BROWSER_SKILL_HOME}/captures/"*/ 2>/dev/null | head -1)"
+  # Both snapshot step events should carry refs[].
+  step0_refs="$(jq -r 'select(.step_index==0) | .refs | length' "${capture_dir}steps.jsonl")"
+  step1_refs="$(jq -r 'select(.step_index==1) | .refs | length' "${capture_dir}steps.jsonl")"
+  [ "${step0_refs}" -ge 1 ] || fail "step 0 should carry refs[]; got: ${step0_refs}"
+  [ "${step1_refs}" -ge 1 ] || fail "step 1 should carry refs[]; got: ${step1_refs}"
+}
+
+@test "browser-flow.sh (9-1-ii): missing-ref flow exits non-zero with helpful message" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  BROWSER_SKILL_LIB_STUB=1 \
+    run bash "${SCRIPTS_DIR}/browser-flow.sh" run "${FIXTURES_DIR}/flows/missing-ref.flow.yaml"
+  [ "${status}" -ne 0 ] || fail "expected non-zero exit for missing ref; got 0"
+  assert_output_contains "GhostName"
 }
 
 # --- flow_dispatch ---

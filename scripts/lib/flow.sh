@@ -234,13 +234,25 @@ _flow_inline_to_json() {
   jq -nc "${jq_args[@]}" "${jq_filter}"
 }
 
-# flow_apply_vars <step-json> — reads global FLOW_VARS; substitutes ${var} in
-# step.args.* string values; emits modified step JSON. ${refs.NAME} passes
-# through literal (resolution lands in 9-1-ii).
+# flow_apply_vars <step-json> [refs-mode] — substitutes ${var} via FLOW_VARS
+# and ${refs.NAME} via FLOW_REFS in step.args.* string values; emits modified
+# step JSON. Both globals are assoc arrays the caller MUST declare:
+#
+#   declare -gA FLOW_VARS=( [key]=val ... )       # populated by flow_parse + --var
+#   declare -gA FLOW_REFS=( [name]=ref ... )      # populated by browser-flow.sh
+#                                                  # after each snapshot step's
+#                                                  # event line (latest-wins).
+#
+# refs-mode (default "strict"):
+#   strict — resolve ${refs.X} via FLOW_REFS or die EXIT_USAGE_ERROR (per
+#            design doc §3 F3 — fail loud).
+#   skip   — leave ${refs.X} as literal pass-through. Used by --dry-run, where
+#            FLOW_REFS isn't populated (no snapshot has actually run).
+#
+# Missing FLOW_VARS[<name>] always dies EXIT_USAGE_ERROR (vars are static).
 flow_apply_vars() {
   local step="$1"
-  # For each arg key whose value is a string containing ${name}, look up
-  # FLOW_VARS[name]. If not found AND the placeholder is not refs.*, die.
+  local refs_mode="${2:-strict}"
   local arg_keys
   arg_keys="$(printf '%s' "${step}" | jq -r '.args | keys[]?' 2>/dev/null || printf '')"
   local key val
@@ -248,7 +260,7 @@ flow_apply_vars() {
     [ -z "${key}" ] && continue
     val="$(printf '%s' "${step}" | jq -r --arg k "${key}" '.args[$k]')"
     [ "${val}" = "null" ] && continue
-    # Find all ${...} occurrences in val. Iterate.
+    # Walk all ${...} occurrences; substitute via FLOW_VARS or FLOW_REFS.
     local rest="${val}"
     local out=""
     while [[ "${rest}" == *'${'*'}'* ]]; do
@@ -258,8 +270,16 @@ flow_apply_vars() {
       rest="${rest#*\}}"
       case "${placeholder}" in
         refs.*)
-          # Pass-through; reconstruct literal.
-          out="${out}\${${placeholder}}"
+          local ref_name="${placeholder#refs.}"
+          if [ "${refs_mode}" = "skip" ]; then
+            # Leave literal pass-through (dry-run mode — no snapshot has run).
+            out="${out}\${${placeholder}}"
+          elif [ -z "${FLOW_REFS[${ref_name}]+x}" ]; then
+            die "${EXIT_USAGE_ERROR}" \
+              "flow_apply_vars: undefined ref '\${${placeholder}}' in step ${key} (no snapshot has surfaced \"${ref_name}\" — add a snapshot step first OR check the accessible name)"
+          else
+            out="${out}${FLOW_REFS[${ref_name}]}"
+          fi
           ;;
         *)
           if [ -z "${FLOW_VARS[${placeholder}]+x}" ]; then
@@ -345,6 +365,19 @@ flow_dispatch() {
     status="error"
   fi
 
+  # Phase 9 part 1-ii: snapshot verbs emit an `event:snapshot` line carrying
+  # `refs[]` (text → ref accessibility map). Extract it; attach as step.refs
+  # so browser-flow.sh's main loop can update the global FLOW_REFS map.
+  # Other verbs: refs stays null. Defensive jq -e for "no event line found".
+  local refs_json="null"
+  if [ "${verb}" = "snapshot" ]; then
+    refs_json="$(
+      printf '%s\n' "${verb_out}" \
+        | jq -c -s 'map(select(.event == "snapshot")) | .[0].refs // null' 2>/dev/null \
+        || printf 'null'
+    )"
+  fi
+
   jq -nc \
     --argjson step_index  "${step_index}" \
     --arg     verb        "${verb}" \
@@ -353,7 +386,8 @@ flow_dispatch() {
     --argjson duration_ms "${duration_ms}" \
     --argjson exit_code   "${verb_exit}" \
     --argjson summary     "${summary_json}" \
-    '{step_index: $step_index, verb: $verb, args: $args, status: $status, duration_ms: $duration_ms, exit_code: $exit_code, summary: $summary}'
+    --argjson refs        "${refs_json}" \
+    '{step_index: $step_index, verb: $verb, args: $args, status: $status, duration_ms: $duration_ms, exit_code: $exit_code, summary: $summary, refs: $refs}'
 
   return 0
 }

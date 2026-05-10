@@ -1,0 +1,5 @@
+name: with-refs
+session: task-1
+steps:
+  - snapshot: {}
+  - fill: { ref: ${refs.Sign in}, text: alice@example.com, dry-run: true }

@@ -1,0 +1,4 @@
+name: missing-ref
+steps:
+  - snapshot: {}
+  - fill: { ref: ${refs.GhostName}, text: nope, dry-run: true }

@@ -1,0 +1,4 @@
+name: two-snapshots
+steps:
+  - snapshot: {}
+  - snapshot: {}
