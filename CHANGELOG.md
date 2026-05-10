@@ -13,6 +13,36 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 9 part 1-i — `flow run <file>` foundation (declarative YAML composition; first runnable end-to-end)
+
+- [feat] new `scripts/browser-flow.sh` — entry point with `run` sub-mode. Usage: `bash scripts/browser-flow.sh run <flow-file> [--var key=val ...] [--dry-run]`. Path security: realpath canonicalization + sensitive-pattern reject (mirrors `references/recipes/path-security.md` shape from Phase 6 part 6 upload). `<flow-file>` resolves relative to CWD first, then `${BROWSER_SKILL_HOME}/flows/`.
+- [feat] new `scripts/lib/flow.sh` — three-fn library API:
+  - `flow_parse <file>` — parses the v1 YAML subset (flat top-level + flow-style step bodies); emits one `{_kind: "meta", name, session, vars}` line followed by per-step `{_kind: "step", step_index, verb, args}` lines on stdout. The `_kind`-tagged shape is **subshell-survivable** — callers can do `parsed="$(flow_parse FILE)"` and re-parse meta from the captured output, vs. the rejected pattern of relying on globals propagating across subshell boundaries.
+  - `flow_apply_vars <step-json>` — substitutes `${var}` in step.args.* string values via global `FLOW_VARS` assoc array. **`${refs.NAME}` passes through literal** (resolution is 9-1-ii). Missing var → `EXIT_USAGE_ERROR`.
+  - `flow_dispatch <step-json>` — translates `step.args` map → `bash scripts/browser-<verb>.sh --key val ...` invocation. Boolean `true` → bare flag (e.g. `dry-run: true` → `--dry-run`). Captures the verb's summary line + wraps in step-event JSON `{step_index, verb, args, status, duration_ms, exit_code, summary}`. **flow_dispatch returns 0 always** — failure surfaces in the step-event payload, not the return code, so flow execution can continue partially.
+- [feat] **Capture composition (per design doc §3 F4):** one capture per flow run. `meta.json` carries `verb=flow / flow_name / step_count / successful_steps / failed_steps`. New `steps.jsonl` (mode 0600) is the chronological per-step event stream. Status mapping: ok (all steps OK) / partial (mixed) / error (all steps failed).
+- [feat] `--var key=val` CLI flag — repeatable; overrides `vars:` defaults from the flow file. Late-binding (after parse, before substitution) so file-level defaults are reachable by users not passing CLI overrides.
+- [feat] `--dry-run` mode — parses + validates + prints planned step list; does NOT execute or create captures.
+- [internal] new `tests/flow-runner.bats` (12 cases) — `flow_parse` shape (3-step + missing fields + vars block); `flow_apply_vars` (substitute + missing-var + refs-passthrough); `flow_dispatch` (snapshot success path + unknown-verb 41-stub); `browser-flow.sh` end-to-end (dry-run / 3-step happy-path with capture writes / `--var` override).
+- [internal] new `tests/fixtures/flows/` — 5 fixture flows: `simple.flow.yaml` (3 always-passing steps via `dry-run: true`), `with-vars.flow.yaml` (vars block + `${var}` substitution), `missing-name.flow.yaml` (parse-error case), `missing-steps.flow.yaml` (parse-error case), `refs-passthrough.flow.yaml` (`${refs.NAME}` literal pass-through).
+- [docs] `docs/superpowers/plans/2026-05-10-phase-09-part-1-i-flow-run-foundation.md` — phase plan with v1 YAML subset constraints + sub-scope bounds + cross-references to design doc §3 F1-F4.
+
+**Design choice — bash-side YAML parser (not node-helper).** Design doc §3 F1 mentioned "node helper with js-yaml" but that adds an npm dep ergonomically (Playwright is the only existing node dep). Bash-side parser handles the v1 subset (~80 LOC of pure shell) without new dependencies. Future iteration: if users hit the v1 subset's limits (multi-line strings, nested maps, list values in step bodies), swap in a node-helper or vendored YAML lib in a follow-up. Documented as a deliberate trade-off.
+
+**Design choice — hyphenated YAML keys handled via indexed jq variables + bracket-string field accessors.** YAML keys can contain hyphens (e.g. `dry-run: true`); jq variable names cannot. Solution: emit `--argjson _k0`, `--argjson _k1`, ... (indexed) for values; build the filter with bracket notation `.["dry-run"] = $_k0` instead of `.dry-run = $_k0` (which jq parses as subtraction). Same root-cause class as the PR #73 jq-reserved-keyword fix — **decouple two name spaces that look the same but aren't**. Mirrors the `_v_` prefix trick from `summary_json`.
+
+**Sub-scope (9-1-i):**
+- **No `${refs.NAME}` resolution.** Literal pass-through. 9-1-ii adds resolution.
+- **No `assert` step.** 9-1-ii adds the verb.
+- **No `flow record`.** 9-1-iii.
+- **No `replay <id>`.** 9-1-iv.
+- **No `history` / `baseline` operations.** 9-1-v.
+- **No nested-map step bodies.** Flow-style `{...}` inline only; multi-line block-style step bodies NOT supported in v1.
+- **No multi-line strings or block scalars.** Single-line scalars only.
+- **No env-var pull-through** in `${var}` syntax. Future enhancement if user-asked.
+
+**Phase 9 progress: 1 of 5 sub-parts shipped.** Remaining: 9-1-ii (refs + assert), 9-1-iii (flow record), 9-1-iv (replay + diff), 9-1-v (history + baseline → CLOSES Phase 9).
+
 ### Phase 9 — flow runner design doc (declarative composition + record + replay + history; queued AFTER Phase 8)
 
 - [docs] new `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` — full design for the flow runner phase. Locks decisions F1+F2+F3+F4+F5+F6+F7+F8 (YAML format; single-key-map step shape; `${var}` + `${refs.NAME}` templating; one-capture-per-flow-run with `steps.jsonl`; structured replay diff; codegen-wrapped recorder; pure-read history; baseline as thin wrapper over Phase 7's `meta.is_baseline`). Five-sub-part split: 9-1-i (flow run foundation), 9-1-ii (refs + assert), 9-1-iii (flow record), 9-1-iv (replay + diff), 9-1-v (history + baseline → CLOSES Phase 9). Storage shape frozen at Phase 9 ship — adds `~/.browser-skill/flows/<name>.flow.yaml` + `baselines.json` + per-capture `steps.jsonl`. Schema additions to `meta.json` are non-breaking (no version bump).

@@ -1,0 +1,6 @@
+name: simple-three-step
+session: task-1
+steps:
+  - snapshot: { dry-run: true }
+  - snapshot: { dry-run: true }
+  - snapshot: { dry-run: true }

@@ -1,0 +1,8 @@
+name: with-vars
+vars:
+  url_path: /users/new
+  user_email: alice@example.com
+steps:
+  - open: { url: ${url_path} }
+  - snapshot: {}
+  - fill: { ref: e3, text: ${user_email} }
