@@ -13,6 +13,36 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 9 part 1-iv — `replay <id>` (re-execute capture's steps + structured diff)
+
+- [feat] new `scripts/browser-replay.sh` — verb `replay <capture-id> [--strict] [--session NAME] [--dry-run]`. Loads `${CAPTURES_DIR}/<id>/meta.json` + `steps.jsonl`; re-dispatches each step via `flow_dispatch` (composes 9-1-i); writes a NEW capture with `replay_of` + `replay_match` fields. Per design doc §3 F5.
+- [feat] `scripts/lib/flow.sh::flow_diff_steps` — new helper. Compares two step-event JSON lines from `steps.jsonl`; emits one `event:replay_diff` JSON on stdout. Returns 0 if both `.status` AND `.summary` match; 1 if either diverges. **Strips `.summary.duration_ms` before comparison** — timing always varies between runs and isn't a semantic difference. Per locked decision D4.
+- [feat] **Per-step diff event shape:** `{event:"replay_diff", step_index, verb, status_match, old_status, new_status, output_match, output_diff}`. `output_diff` populated only when `output_match=false` — carries `{old, new}` summary objects.
+- [feat] **Aggregate diff summary line:** `{event:"replay_diff_summary", old_capture_id, new_capture_id, total_steps, matched_steps, diverged_steps, replay_match}`. Emitted once per replay, after all per-step diff lines.
+- [feat] **Status mapping (per locked decision D3):**
+  - All steps match → `status:ok / replay_match:true / exit 0`
+  - Mixed match/diverge → `status:partial / replay_match:false / exit 0`
+  - All steps diverged → `status:error / exit non-zero`
+  - **`--strict` flag**: ANY divergence → exit 13 (`EXIT_ASSERTION_FAILED`), matching `assert` verb's exit code (composability — CI scripts can grep for 13 across both verbs).
+- [feat] **`replay_of` capture-chain (forward-only per locked decision D2)** — new capture's `meta.json` carries `replay_of: <original-capture-id>`. No two-way back-reference (the original capture is NOT mutated). Reverse lookup via grep when needed.
+- [feat] `meta.json` schema additions: `replay_of`, `replay_match`, `total_steps`, `matched_steps`, `diverged_steps`. **All non-breaking** — no `schema_version` bump.
+- [feat] **Mid-flow ref-harvest semantics also apply during replay** — `flow_dispatch` extracts `step.refs` from snapshot steps; replay's main loop populates FLOW_REFS for subsequent steps' `${refs.NAME}` resolution. Same code path as `flow run`.
+- [feat] **Rejects non-flow captures** (e.g. `verb:snapshot`, `verb:inspect`) — only `verb:flow` and `verb:replay` captures carry `steps.jsonl`. Helpful error message.
+- [feat] **`--dry-run` mode** — loads + prints planned step list (the original `steps.jsonl`); no execution; no new capture written.
+- [feat] **`--session NAME`** — overrides original capture's session for the replay (e.g. replay against a fresh login). Optional.
+- [internal] new `tests/replay.bats` (10 cases) — `flow_diff_steps` 3 cases (identical / status divergence / output divergence); `browser-replay.sh` 7 cases (missing-id / nonexistent-id / end-to-end happy-path with replay_of+replay_match / `--strict` divergence exit 13 / `--dry-run` no-side-effect / non-flow-capture rejection / per-step replay_diff event count).
+- [docs] `docs/superpowers/plans/2026-05-10-phase-09-part-1-iv-replay.md` — phase plan with locked decisions D1+D2+D3+D4+R1.
+
+**Sub-scope (9-1-iv):**
+- **No per-aspect file diff** (console.json, network.har, screenshots). Deferred — needs per-file-type decisions (jq-diff for JSON/HAR; sha256 for screenshots) AND most flow runs don't have per-aspect files attached.
+- **No two-way capture chain** (forward-only `replay_of`; no `replayed_by` back-reference).
+- **No replay-of-replay-of-replay tracking** (each replay's `replay_of` points back one level only).
+- **No `--diff-format` flag** (v1 emits one fixed shape; future iteration if user demand surfaces).
+- **No replay-of-non-flow captures** — only consumes `verb:flow` / `verb:replay` captures (steps.jsonl is the input; non-flow captures don't have it).
+- **No `history` / `baseline`** (9-1-v).
+
+**Phase 9 progress: 4 of 5 sub-parts shipped.** Remaining: 9-1-v (history + baseline → CLOSES Phase 9). Phase 9 closure ~1-2 PRs away.
+
 ### Phase 9 part 1-iii — `flow record` (codegen wrapper + JS→YAML transformer + password canary)
 
 - [feat] `scripts/browser-flow.sh::record` — new sub-mode alongside existing `run`. Usage: `bash scripts/browser-flow.sh record --url URL --out FILE [--name NAME] [--tool TOOL]`. Spawns `playwright codegen --target javascript <URL>`; captures emitted JS; transforms to flow YAML; writes `${OUT}` mode 0600. Per locked decisions:
