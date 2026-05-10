@@ -224,3 +224,106 @@ _register_site() {
     --site app --intent "x" --selector "y"
   assert_status "$EXIT_USAGE_ERROR"
 }
+
+# --- 1-iii self-heal: post-dispatch failure trigger ---
+#
+# Tests use BROWSER_DO_DISPATCH_OVERRIDE — a test-only env hook (documented in
+# scripts/browser-do.sh) that lets us mock the dispatched verb's exit code.
+# The wrapper script ignores its argv and exits with $MOCK_DISPATCH_EXIT.
+
+_make_mock_dispatcher() {
+  local exit_code="$1"
+  local script_path="${BATS_TEST_TMPDIR:-/tmp}/mock-dispatch-${BATS_TEST_NUMBER:-x}.sh"
+  cat > "${script_path}" <<EOF
+#!/usr/bin/env bash
+# Mock dispatcher for browser-do self-heal tests. Exit code controlled by env.
+# Args ignored.
+exit ${exit_code}
+EOF
+  chmod +x "${script_path}"
+  printf '%s' "${script_path}"
+}
+
+@test "browser-do --intent (self-heal): dispatched verb exits 11 → memory_record_failure invoked → fail_count == 1" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+  jq -e '.interactions[0].fail_count == 0' "${arch_path}" >/dev/null
+
+  override="$(_make_mock_dispatcher 11)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  # browser-do forwards dispatcher's exit (11). action correctness over cache freshness.
+  assert_status 11
+  jq -e '.interactions[0].fail_count == 1 and .interactions[0].disabled == false' \
+    "${arch_path}" >/dev/null || fail "expected fail_count:1 + disabled:false; got $(jq -c '.interactions[0]' "${arch_path}")"
+}
+
+@test "browser-do --intent (self-heal): dispatched verb exits 13 → memory_record_failure invoked" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+
+  override="$(_make_mock_dispatcher 13)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  assert_status 13
+  jq -e '.interactions[0].fail_count == 1' "${arch_path}" >/dev/null
+}
+
+@test "browser-do --intent (self-heal): dispatched verb exits 30 (network) → fail_count NOT incremented" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+
+  override="$(_make_mock_dispatcher 30)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  assert_status 30
+  jq -e '.interactions[0].fail_count == 0' "${arch_path}" >/dev/null \
+    || fail "fail_count incremented despite environmental error; got $(jq -c '.interactions[0]' "${arch_path}")"
+}
+
+@test "browser-do --intent + record (self-heal end-to-end): 4 failures disable; record heals" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.OLD"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+
+  override="$(_make_mock_dispatcher 11)"
+  for _ in 1 2 3 4; do
+    BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+      bash "${SCRIPTS_DIR}/browser-do.sh" \
+        --site app --verb click --intent "click thing" \
+        --url 'https://app.example.com/devices/123' >/dev/null 2>&1 || true
+  done
+  jq -e '.interactions[0].disabled == true and .interactions[0].fail_count == 4' \
+    "${arch_path}" >/dev/null || fail "expected disabled:true after 4 failures; got $(jq -c '.interactions[0]' "${arch_path}")"
+
+  # Next --intent: lookup transparently skips disabled → cache_miss (intent_not_cached).
+  run bash "${SCRIPTS_DIR}/browser-do.sh" \
+    --site app --verb click --intent "click thing" \
+    --url 'https://app.example.com/devices/123'
+  assert_status 11
+  reason="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="cache_miss"))[0].reason')"
+  [ "${reason}" = "intent_not_cached" ] || fail "expected reason:intent_not_cached after disable; got ${reason}"
+
+  # Agent re-resolves + records: overwrites disabled entry with fresh selector.
+  bash "${SCRIPTS_DIR}/browser-do.sh" record \
+    --site app --intent "click thing" --selector "button.NEW" \
+    --url 'https://app.example.com/devices/123' >/dev/null
+  jq -e '
+    .interactions | length == 1 and
+    .[0].selector == "button.NEW" and
+    .[0].disabled == false and
+    .[0].fail_count == 0
+  ' "${arch_path}" >/dev/null || fail "expected healed shape after record; got $(jq -c '.interactions[0]' "${arch_path}")"
+}
