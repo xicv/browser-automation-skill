@@ -1,19 +1,19 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-10 — Phase 11 part 1-i SHIPPED)
+## Where the project stands (as of 2026-05-10 — Phase 11 part 1-ii SHIPPED)
 
-main is at tag `v0.47.0-phase-11-part-1-i-memory-foundation` (HEAD `987a91b`). **Phases 1-9 SHIPPED + Phase 11 part 1-i (memory lib foundation) SHIPPED.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 sub-parts (full capture pipeline); Phase 8 closed at 4/4 sub-parts (obscura adapter); Phase 9 closed at 5/5 sub-parts (full flow runner); **Phase 11 part 1 in flight — 1/3 sub-parts shipped (lib foundation; verb + self-heal queued).**
+main is at tag `v0.48.0-phase-11-part-1-ii-browser-do` (HEAD `3137b1c`). **Phases 1-9 SHIPPED + Phase 11 part 1-i (memory lib foundation) + Phase 11 part 1-ii (browser-do verb) SHIPPED.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (full capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (full flow runner); **Phase 11 part 1 in flight — 2/3 sub-parts shipped (lib + verb; self-heal queued).**
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
 
-### Phase 11 progress (PR #57 design, PR #88 part 1-i) — IN FLIGHT (1/3 of part 1 shipped)
+### Phase 11 progress (PR #57 design, PR #88 part 1-i, PR #90 part 1-ii) — IN FLIGHT (2/3 of part 1 shipped)
 
 | Sub-part | Scope | Status |
 |---|---|---|
 | 11 design | Phase 11 design doc (`2026-05-08-phase-11-memory-design.md`). Locks M1+U1+E1+H1. | ✅ |
 | 11-1-i | `scripts/lib/memory.sh` foundation — 8-fn API (init_dir, load/save_archetype, lookup, record, record_failure, record_pattern, resolve_archetype). Storage shape v1 frozen (`memory/<site>/{patterns.json, archetypes/<id>.json}` mode 0600 in mode-0700 dirs). H1 mechanic shipped (`fail_count > 3 → disabled:true`). **Deviation from design U1:** URLPattern global only stable in Node 23.8+; CI defaults to Node 20 until June 2026 — swapped to hand-rolled regex matcher (`:name` → `[^/]+`, `*` → `.*`); deterministic across Node versions; native URLPattern can replace when CI baseline lifts. | ✅ |
-| 11-1-ii | `browser-do --intent "..."` verb — cache lookup → hit-direct OR miss-fallback to snapshot+reasoning + write-back via `memory_record` + `memory_record_pattern`. Verb-level privacy canary lands here. | 🔲 next |
-| 11-1-iii | Self-heal loop — wires `memory_record_failure` into `browser-do`'s post-execute step; on threshold-disable, re-snapshot + re-resolve + overwrite. | 🔲 |
+| 11-1-ii | `browser-do` verb — two sub-modes: `--verb VERB --intent "..."` (cache lookup; on hit dispatches existing `browser-VERB.sh --selector $cached`; on miss emits `_kind:cache_miss` event + exit 11) and `record --intent --selector --url` (explicit write-back via `memory_record` + `memory_record_pattern`; auto-derives pattern + archetype-id). **Deviation from design E1:** skill stays **model-agnostic** — verb does NOT call LLM; on miss, parent agent picks ref via its own snapshot+reasoning then explicitly calls `record`. v1 `--verb` whitelist = `[click]` only (other selector-target verbs take only `--ref eN` today; expand when adapter ABI gains selector-mode plumbing). Privacy canary refuses cache writes containing `PASSWORD-CANARY` → exit 28. Best-effort write-back: cache failure is `warn:`-only; doesn't taint dispatched verb's exit code. | ✅ |
+| 11-1-iii | Self-heal loop — wires `memory_record_failure` into `browser-do --intent`'s post-dispatch failure path; on threshold-disable, emits `cache_miss reason:disabled` so agent re-resolves. | 🔲 next |
 
 ### Phase 9 progress (PRs #77 design, #78, #80, #82, #84, #86) — ✅ COMPLETE
 
@@ -47,12 +47,12 @@ main is at tag `v0.47.0-phase-11-part-1-i-memory-foundation` (HEAD `987a91b`). *
 
 ### Counters
 
-- **40 user-facing verbs** (Phase 11 1-i ships lib only; no new verb. `browser-do` lands with 11-1-ii.)
+- **41 user-facing verbs** (Phase 11 1-ii adds `browser-do` — first user-visible memory feature; 1-iii extends it with self-heal but adds no new verb).
 - **5 lib helpers shipped post-Phase-7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`, `scripts/lib/flow.sh` (gained `flow_diff_steps` in 9-1-iv), `scripts/lib/flow_record.sh`, `scripts/lib/memory.sh` (Phase 11 1-i).
 - **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **850 tests pass / 0 fail / lint exit 0** locally (838 baseline + 12 memory.bats from 11-1-i).
-- **85 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 10 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + **Phase 11 part 1-i (PR #88)**; not counting this HANDOFF refresh).
+- **865 tests pass / 0 fail / lint exit 0** locally (850 baseline + 15 browser-do.bats from 11-1-ii).
+- **87 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 11 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 part 1-i (PR #88) + **Phase 11 part 1-ii (PR #90)**; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -85,28 +85,28 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at Phase 11 part 1-ii (`browser-do` verb)
+## Next session: pick up at Phase 11 part 1-iii (self-heal loop)
 
-Phase 11 part 1-i ✅ shipped (PR #88). The lib/memory.sh foundation is in place; nothing executes against the cache yet because no verb consumes it. **Phase 11 part 1-ii (`browser-do --intent "..."` verb) is the natural next sub-part — it lights up everything 1-i built.**
+Phase 11 part 1-ii ✅ shipped (PR #90). `browser-do --intent` does cache-hit dispatch; `browser-do record` does explicit write-back. **Phase 11 part 1-iii — self-heal loop — closes Phase 11 part 1.**
 
 **Recommended next sub-part:**
-- **Phase 11 part 1-ii: `browser-do --intent "..."` verb** — first user-visible memory feature. Resolves current site's archetype via `memory_resolve_archetype`; calls `memory_lookup` for cached selector; on hit, dispatches the cached action through the existing verb router (zero LLM tokens); on miss, runs snapshot + LLM resolution, then writes back via `memory_record` + `memory_record_pattern`. **Verb-level privacy canary lands here** (the right surface — lib-side canary deferred from 11-1-i per design doc §6). Estimated medium-large PR; touches router lookup + snapshot+LLM bridge + cache write-back + ~10 bats (cache hit, cache miss, write-back, no-credential-leak canary, archetype resolution, etc.).
+- **Phase 11 part 1-iii: self-heal loop** — wires `memory_record_failure` (storage primitive shipped in 1-i) into `browser-do --intent`'s post-dispatch failure path. On dispatched-verb failure, increment `fail_count`; threshold-disable at `fail_count > 3`; on next invocation with same intent, emit `_kind:cache_miss reason:disabled` so agent re-resolves + re-records (overwrites the disabled entry via `memory_record`, which resets `fail_count:0` + sets `disabled:false`). Self-heal is end-to-end. Estimated small-medium PR (~80 LOC + ~5 bats — disabled-skip in lookup, increment on dispatch failure, disabled-flag override on re-record).
 
-**Open shape questions for Phase 11-1-ii (decide during plan-doc):**
-- LLM resolution surface: how does `browser-do` express "I need help picking eN" without inlining a model call? Option A — emit a structured `_kind: needs_resolution` event for the parent agent to consume + resume on. Option B — direct adapter call to LLM (couples skill to model choice). Option A preserves model-agnosticism (skill default `model: sonnet` + parent override `/model opusplan`).
-- Site context: `--site NAME` (explicit) or auto-pick from `current` file (per Phase 1's `current_get`)? Likely both, mirroring other verbs.
-- Cache write-back failure mode: if `memory_save_archetype` fails (disk full, perms), does the verb's own action still succeed? Yes — write-back is best-effort (advisory log to stderr; doesn't taint the verb's exit code).
+**Open shape questions for Phase 11-1-iii (decide during plan-doc):**
+- Should `memory_lookup` skip `disabled:true` interactions transparently? **Already does** (lib-side filter shipped in 1-i). 1-iii adds the post-dispatch failure-counting trigger.
+- Should `memory_record_failure` be invoked on ANY non-zero exit, or only on specific exit codes (e.g. element-not-found `EXIT_EMPTY_RESULT`)? Lean toward **specific codes** — selector misses are the canonical self-heal trigger; network errors / tool crashes shouldn't poison the cache. Likely whitelist: 11 (empty), 13 (assertion failed), maybe 22 (session expired — debatable).
+- Re-record-overwrites-disabled semantics: should `memory_record` clobber `disabled:true` back to false on a successful re-resolution? **Yes** — that's the whole point of self-heal. Existing `memory_record` already sets `disabled:false` on insert path; needs a tiny tweak to reset on the upsert path too.
 
 **Alternative picks (if you want smaller before going bigger):**
-- Phase 10 — schema migration tooling (smaller PR; could ship before Phase 11 part 1 closes). Per parent spec §13.6.
+- Phase 10 — schema migration tooling (smaller PR; could ship before closing Phase 11 part 1). Per parent spec §13.6.
 - `references/recipes/flow-record-secrets.md` recipe-doc (per 9-1-iii closure note). Tiny pure-docs PR; not blocking.
-- Phase 9 follow-up: per-aspect file diff for `replay`/`history diff` (deferred from 9-1-iv; needs per-file-type decisions).
+- Selector-mode plumbing for `fill` / `hover` / `press` / `select` adapter ABI — expands `browser-do --verb` whitelist beyond `[click]`. Independent prerequisite for "browser-do dispatches more than just click".
 
 **Phase ordering recap:**
 - Phase 8 ✅ COMPLETE (4/4 sub-parts shipped — obscura adapter + router promotion)
 - Phase 9 ✅ COMPLETE (5/5 sub-parts shipped — full flow runner)
 - Phase 10 🔲 — schema migration tooling
-- Phase 11 IN FLIGHT — 1/3 of part 1 shipped (lib foundation). Next: 11-1-ii (`browser-do` verb), then 11-1-iii (self-heal loop), then part 2 (URL pattern handling).
+- Phase 11 IN FLIGHT — **2/3** of part 1 shipped (lib foundation + browser-do verb). **Next: 11-1-iii (self-heal loop) closes part 1**, then part 2 (URL pattern handling).
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
 
