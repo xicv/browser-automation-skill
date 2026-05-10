@@ -13,6 +13,25 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Selector-mode plumbing for `hover` (2/4 of "expand `browser-do --verb` whitelist beyond `[click]`")
+
+- [feat] `scripts/browser-hover.sh` gains `--selector CSS` flag — mutually exclusive with `--ref eN`. Mirrors `browser-click.sh` + `browser-fill.sh` (PR #99) precedent. Required for Phase 11 cache to dispatch hover (cache stores selectors, not snapshot-relative refs).
+- [feat] `scripts/lib/tool/chrome-devtools-mcp.sh::tool_hover` accepts `--ref|--selector` as target alias (mirrors its `tool_click` + `tool_fill` already-shipped patterns).
+- [feat] `scripts/browser-do.sh` whitelist grows: `[click fill]` → `[click fill hover]`. End-to-end Phase 11 cache dispatch now works for `--verb hover --intent "..."` against chrome-devtools-mcp.
+- [feat] **H2 — Adapter coverage = chrome-devtools-mcp only.** Other adapters (playwright-cli, playwright-lib, obscura) don't define `tool_hover` — `lib/router.sh::rule_hover_default` routes hover exclusively to chrome-devtools-mcp ("only cdt-mcp declares hover today"). Smaller scope than fill (2 adapters) — only one to update.
+- [feat] **H3 — Bridge unchanged.** chrome-devtools-mcp's `_drive hover "${target}"` shells the target string to the bridge; bridge already accepts target strings for click without modification (PR #99 didn't require bridge changes). Same handling expected for hover.
+- [internal] `tests/browser-hover.bats` gains 3 cases (total 8): `--dry-run --selector` accepts selector + summary carries it · `--selector` + `--ref` mutually exclusive → exit 2 · neither `--selector` nor `--ref` → exit 2 with "selector" in message.
+- [internal] `tests/browser-do.bats` gains 1 case (total 34): `--verb hover` whitelist accepted; cache hit dispatches via `BROWSER_DO_DISPATCH_OVERRIDE` mock (avoids depending on chrome-devtools-mcp daemon stub for verb-acceptance test).
+- [docs] `docs/superpowers/plans/2026-05-10-selector-mode-hover.md` — phase plan with locked decisions H1–H3.
+
+**Sub-scope (this PR):**
+- **No additional adapter coverage** (H2; only chrome-devtools-mcp defines `tool_hover` — other adapters' addition is a separate follow-up if hover routing ever expands).
+- **No press/select selector-mode plumbing** — separate sub-PRs of the same parent task. This PR is just `hover`.
+- **No new privacy canary** — hover doesn't ingest secrets; no AP-7 surface.
+- **No route-rule changes**.
+
+`browser-do --verb` whitelist now `[click fill hover]`; expands further as press/select gain selector-mode plumbing in follow-up PRs (2 of 4 verbs done).
+
 ### Selector-mode plumbing for `fill` (1/4 of "expand `browser-do --verb` whitelist beyond `[click]`")
 
 - [feat] `scripts/browser-fill.sh` gains `--selector CSS` flag — mutually exclusive with `--ref eN`. Mirrors `browser-click.sh`'s precedent. Required for Phase 11 cache to dispatch fill (cache stores selectors, not snapshot-relative refs).

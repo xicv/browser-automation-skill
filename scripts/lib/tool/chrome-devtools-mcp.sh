@@ -230,16 +230,16 @@ tool_select() {
 }
 
 tool_hover() {
-  local ref=""
+  local target=""
   local rest=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --ref) ref="$2"; shift 2 ;;
-      *)     rest+=("$1"); shift ;;
+      --ref|--selector) target="$2"; shift 2 ;;
+      *)                rest+=("$1"); shift ;;
     esac
   done
-  [ -n "${ref}" ] || return 41
-  _drive hover "${ref}" "${rest[@]}"
+  [ -n "${target}" ] || return 41
+  _drive hover "${target}" "${rest[@]}"
 }
 
 tool_wait() {

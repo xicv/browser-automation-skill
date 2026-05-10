@@ -515,6 +515,24 @@ EOF
     || fail "stdin path failed; got ${prop}"
 }
 
+@test "browser-do --verb hover: whitelist accepts hover; cache hit dispatches" {
+  _register_site app
+  # Archetype-id MUST match _derive_archetype_id('/page') → 'page'.
+  _seed_cache app page '/page' "hover button" "button.action"
+  # Use BROWSER_DO_DISPATCH_OVERRIDE to mock the dispatched verb (avoids
+  # depending on chrome-devtools-mcp daemon stub for this verb-acceptance test).
+  override="$(_make_mock_dispatcher 0)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb hover \
+      --intent "hover button" \
+      --pattern '/page'
+  assert_status 0
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.verb == "do" and .dispatched_verb == "hover" and .cache_hit == true' >/dev/null \
+    || fail "expected hover dispatch + cache_hit:true; got ${last}"
+}
+
 @test "browser-do --verb fill: cache hit dispatches fill stub with --selector + --text" {
   _register_site app
   # Archetype-id MUST match _derive_archetype_id('/login') → 'login'.

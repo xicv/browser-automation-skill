@@ -47,3 +47,25 @@ teardown() { teardown_temp_home; }
   assert_output_contains "chrome-devtools-mcp"
   assert_output_contains "hover default"
 }
+
+# --- selector-mode plumbing (Phase 11 cache enabler — mirrors fill/click precedent) ---
+
+@test "browser-hover --selector: --dry-run accepts selector + summary carries it" {
+  run bash "${SCRIPTS_DIR}/browser-hover.sh" --dry-run --selector 'button.action'
+  assert_status 0
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.verb == "hover" and .selector == "button.action" and .dry_run == true' >/dev/null \
+    || fail "expected selector in summary; got ${last_line}"
+}
+
+@test "browser-hover: --selector AND --ref fails EXIT_USAGE_ERROR (mutually exclusive)" {
+  run bash "${SCRIPTS_DIR}/browser-hover.sh" --selector 'a.x' --ref e1
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "mutually exclusive"
+}
+
+@test "browser-hover: neither --selector nor --ref → error message mentions 'selector'" {
+  run bash "${SCRIPTS_DIR}/browser-hover.sh"
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "selector"
+}
