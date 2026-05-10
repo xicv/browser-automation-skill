@@ -109,12 +109,13 @@ USAGE
 sub_mode="${1:-}"
 [ -n "${sub_mode}" ] || { usage >&2; die "${EXIT_USAGE_ERROR}" "browser-do: missing sub-mode or flag"; }
 
-# `record` is a literal; otherwise we're in --intent mode (flags handled below).
+# `record` and `propose` are literal sub-modes; otherwise we're in --intent
+# mode (flags handled below).
 case "${sub_mode}" in
-  record) shift ;;
+  record|propose) shift ;;
   -h|--help) usage; exit 0 ;;
   --*) sub_mode="intent" ;;
-  *) die "${EXIT_USAGE_ERROR}" "browser-do: unknown sub-mode '${sub_mode}' (expected 'record' or --intent flag)" ;;
+  *) die "${EXIT_USAGE_ERROR}" "browser-do: unknown sub-mode '${sub_mode}' (expected 'record', 'propose', or --intent flag)" ;;
 esac
 
 # ---------- record sub-mode ----------
@@ -171,6 +172,91 @@ if [ "${sub_mode}" = "record" ]; then
   duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
   summary_json verb=do mode=record site="${site}" archetype_id="${archetype_id}" \
     url_pattern="${pattern}" duration_ms="${duration_ms}" status=ok
+  exit 0
+fi
+
+# ---------- propose sub-mode (Phase 11 part 2-ii) ----------
+# Pure-compute. Reads URLs from --url args + stdin; clusters by templated
+# pathname (numeric → :id, UUID → :uuid); emits _kind:proposal events for
+# clusters meeting threshold AND not already in patterns.json.
+if [ "${sub_mode}" = "propose" ]; then
+  arg_site="" arg_threshold="3"
+  cli_urls=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --site)      arg_site="$2";      shift 2 ;;
+      --threshold) arg_threshold="$2"; shift 2 ;;
+      --url)       cli_urls+=("$2");   shift 2 ;;
+      -h|--help)   usage; exit 0 ;;
+      *) die "${EXIT_USAGE_ERROR}" "browser-do propose: unknown flag '$1'" ;;
+    esac
+  done
+  if [[ ! "${arg_threshold}" =~ ^[0-9]+$ ]]; then
+    die "${EXIT_USAGE_ERROR}" "browser-do propose: --threshold must be a positive integer (got: ${arg_threshold})"
+  fi
+  site="$(_resolve_site "${arg_site}")"
+
+  # Collect URLs from stdin (one per line; skip blank + ^# comments) into
+  # the same list. Stdin is non-blocking — if no pipe is connected, read
+  # immediately returns. -t 0 is "is stdin a TTY?"; we read stdin only if
+  # it's NOT a TTY (i.e. piped or redirected).
+  urls=("${cli_urls[@]+"${cli_urls[@]}"}")
+  if [ ! -t 0 ]; then
+    while IFS= read -r line; do
+      [ -z "${line}" ] && continue
+      [[ "${line}" =~ ^[[:space:]]*# ]] && continue
+      urls+=("${line}")
+    done
+  fi
+
+  # Build node-helper input + invoke. Empty urls → empty cluster set.
+  cluster_helper="$(dirname "${BASH_SOURCE[0]}")/lib/node/url-pattern-cluster.mjs"
+  cluster_input="$(jq -nc --argjson u "$(printf '%s\n' "${urls[@]+"${urls[@]}"}" | jq -R . | jq -sc .)" '{urls: $u}')"
+  cluster_output="$(printf '%s' "${cluster_input}" | node "${cluster_helper}")"
+
+  # Load known patterns from patterns.json (if any) into a sorted unique list.
+  patterns_path="${BROWSER_SKILL_HOME}/memory/${site}/patterns.json"
+  known_json='[]'
+  if [ -f "${patterns_path}" ]; then
+    known_json="$(jq -c '[.patterns[].url_pattern] // []' "${patterns_path}")"
+  fi
+
+  # Filter clusters: count >= threshold AND templated NOT in known.
+  emit_count=0
+  skipped_known=0
+  while IFS= read -r cluster_event; do
+    [ -z "${cluster_event}" ] && continue
+    printf '%s\n' "${cluster_event}"
+    emit_count=$(( emit_count + 1 ))
+  done < <(printf '%s' "${cluster_output}" | jq -c \
+    --argjson threshold "${arg_threshold}" \
+    --argjson known "${known_json}" \
+    --arg site "${site}" \
+    '.clusters
+     | map(select(.count >= $threshold and ([.templated] | inside($known) | not)))
+     | .[] |
+       {_kind:"proposal", site:$site,
+        url_pattern:.templated,
+        archetype_id:(.templated
+                       | sub("^/"; "")
+                       | gsub(":"; "")
+                       | gsub("/"; "-")
+                       | gsub("[^A-Za-z0-9_-]"; "_")
+                       | ascii_downcase),
+        sample_urls:(.urls[0:3]),
+        count:.count}')
+
+  # Count clusters skipped due to "already in patterns.json".
+  skipped_known="$(printf '%s' "${cluster_output}" | jq -r \
+    --argjson threshold "${arg_threshold}" \
+    --argjson known "${known_json}" \
+    '.clusters | map(select(.count >= $threshold and ([.templated] | inside($known)))) | length')"
+
+  duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
+  summary_json verb=do mode=propose site="${site}" \
+    proposals="${emit_count}" skipped_known="${skipped_known}" \
+    threshold="${arg_threshold}" url_count="${#urls[@]}" \
+    duration_ms="${duration_ms}" status=ok
   exit 0
 fi
 
