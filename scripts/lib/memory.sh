@@ -129,6 +129,11 @@ memory_record() {
             .selector = $sel
             | .last_used = $now
             | .success_count = (.success_count + 1)
+            # Self-heal (Phase 11 1-iii D2): a successful re-record clears
+            # any prior failure state. This is what "agent re-resolved →
+            # cache heals" means at the storage layer.
+            | .fail_count = 0
+            | .disabled = false
           else . end
         ))
       else

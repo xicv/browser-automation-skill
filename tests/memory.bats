@@ -173,3 +173,30 @@ _arch_json() {
   arch="$(memory_resolve_archetype prod-app 'https://prod.example.com/users/profile')"
   [ -z "${arch}" ] || fail "expected empty on miss; got '${arch}'"
 }
+
+# --- self-heal: memory_record on existing disabled intent resets fail_count + disabled ---
+
+@test "memory_record (self-heal): re-record on disabled intent resets fail_count:0 + disabled:false; bumps success_count" {
+  memory_save_archetype prod-app devices-detail "$(_arch_json devices-detail '/devices/:id')"
+  memory_record prod-app devices-detail "click save" "old.selector"
+  # Drive into disabled state via 4 consecutive failures.
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+
+  arch_path="${BROWSER_SKILL_HOME}/memory/prod-app/archetypes/devices-detail.json"
+  jq -e '.interactions[0].disabled == true and .interactions[0].fail_count == 4' \
+    "${arch_path}" >/dev/null || fail "precondition: expected disabled:true + fail_count:4"
+
+  # Agent re-resolves; record overwrites the disabled entry with a fresh selector.
+  memory_record prod-app devices-detail "click save" "new.selector"
+
+  jq -e '
+    .interactions | length == 1 and
+    .[0].selector == "new.selector" and
+    .[0].fail_count == 0 and
+    .[0].disabled == false and
+    .[0].success_count == 2
+  ' "${arch_path}" >/dev/null || fail "expected reset shape; got $(jq -c '.interactions' "${arch_path}")"
+}

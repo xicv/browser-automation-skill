@@ -230,7 +230,12 @@ fi
 # Cache hit — dispatch via existing verb script. --selector prepended; extra
 # args forwarded verbatim. Forward stdin/stdout/stderr; the dispatched verb
 # emits its own summary; ours follows.
-verb_script="${SCRIPT_DIR}/browser-${arg_verb}.sh"
+#
+# BROWSER_DO_DISPATCH_OVERRIDE (test-only env hook): if set, the value is
+# treated as the dispatch script path instead of scripts/browser-${verb}.sh.
+# Production callers never set this; it lets bats mock the dispatched verb's
+# exit code so we can test the self-heal failure-counting trigger end-to-end.
+verb_script="${BROWSER_DO_DISPATCH_OVERRIDE:-${SCRIPT_DIR}/browser-${arg_verb}.sh}"
 [ -x "${verb_script}" ] || [ -f "${verb_script}" ] \
   || die "${EXIT_TOOL_MISSING}" "browser-do: dispatch target not found: ${verb_script}"
 
@@ -243,6 +248,8 @@ printf '%s\n' "$(jq -nc --arg int "${arg_intent}" --arg sel "${selector}" \
 dispatch_rc=0
 bash "${verb_script}" --selector "${selector}" "${extra_args[@]+"${extra_args[@]}"}" || dispatch_rc=$?
 
+self_heal_triggered=false
+
 if [ "${dispatch_rc}" -eq 0 ]; then
   if ! memory_record "${site}" "${archetype_id}" "${arg_intent}" "${selector}" 2>/dev/null; then
     warn "browser-do: cache success_count update failed (best-effort; action exit unchanged)"
@@ -252,11 +259,22 @@ if [ "${dispatch_rc}" -eq 0 ]; then
        "${archetype_id}" 2>/dev/null; then
     warn "browser-do: pattern hit_count update failed (best-effort)"
   fi
+elif [ "${dispatch_rc}" -eq "${EXIT_EMPTY_RESULT}" ] || [ "${dispatch_rc}" -eq "${EXIT_ASSERTION_FAILED}" ]; then
+  # Self-heal trigger (Phase 11 1-iii D1): only canonical "selector miss" /
+  # "expected element absent" exit codes drive the failure counter. Network
+  # errors (30), tool crashes (42), timeouts (43) are environmental — they
+  # would poison the cache if we counted them.
+  if ! memory_record_failure "${site}" "${archetype_id}" "${arg_intent}" 2>/dev/null; then
+    warn "browser-do: cache fail_count update failed (best-effort; action exit unchanged)"
+  else
+    self_heal_triggered=true
+  fi
 fi
 
 duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
 summary_json verb=do mode=intent cache_hit=true site="${site}" \
   archetype_id="${archetype_id}" duration_ms="${duration_ms}" \
-  dispatched_verb="${arg_verb}" dispatch_rc="${dispatch_rc}" status=ok
+  dispatched_verb="${arg_verb}" dispatch_rc="${dispatch_rc}" \
+  self_heal_triggered="${self_heal_triggered}" status=ok
 
 exit "${dispatch_rc}"

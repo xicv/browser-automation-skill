@@ -13,6 +13,33 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 11 part 1-iii — self-heal loop (CLOSES Phase 11 part 1)
+
+- [feat] `scripts/browser-do.sh --intent` gains **post-dispatch failure trigger.** When the dispatched verb exits with `EXIT_EMPTY_RESULT (11)` or `EXIT_ASSERTION_FAILED (13)`, `memory_record_failure` is invoked → `fail_count++` → `disabled:true` once `fail_count > 3` (H1 threshold from design doc). On the next invocation with the same intent, `memory_lookup` transparently skips the disabled entry → `cache_miss reason:intent_not_cached` → agent re-resolves + calls `record` → entry heals (selector overwritten + `fail_count:0` + `disabled:false`).
+- [feat] **D1 — exit-code trigger whitelist:** only `EXIT_EMPTY_RESULT (11)` + `EXIT_ASSERTION_FAILED (13)` drive the failure counter. Network errors (30), tool crashes (42), timeouts (43) are **environmental** — they shouldn't poison the cache when the selector itself is fine. Likewise codes 0 (success), 2 (usage), 22 (session expired) are out of scope.
+- [feat] `scripts/lib/memory.sh` `memory_record` gains **D2 — re-record heals disabled.** Existing-intent upsert path now resets `fail_count:0` + `disabled:false` (in addition to bumping `success_count` + `last_used`). Closes the self-heal loop at the storage layer; without this, a successfully re-resolved selector couldn't overwrite the prior disabled state.
+- [feat] **D5 — best-effort failure recording.** Mirrors 1-ii's best-effort write-back. If `memory_record_failure` itself fails (disk full, perms), `warn:` to stderr; dispatched verb's exit code is forwarded unchanged. Cache-state freshness < action correctness.
+- [feat] `summary_json` for `browser-do --intent` cache-hit path gains `self_heal_triggered:true|false` field for agent observability.
+- [internal] `BROWSER_DO_DISPATCH_OVERRIDE` env hook (test-only; documented inline in `browser-do.sh`) — lets bats mock the dispatched verb's exit code by overriding the `scripts/browser-${verb}.sh` path resolution. Production callers never set it; invisible default.
+- [internal] `tests/browser-do.bats` gains 4 cases (total 19): dispatched verb exits 11 → fail_count++; exits 13 → fail_count++; exits 30 (network) → fail_count NOT incremented; **end-to-end:** 4 dispatch failures → disabled → next lookup miss → record heals (selector new + fail_count:0 + disabled:false).
+- [internal] `tests/memory.bats` gains 1 case (total 13): `memory_record` on existing disabled intent resets `fail_count:0` + `disabled:false` + bumps `success_count`. Tests the D2 contract directly at the lib layer.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-11-part-1-iii-self-heal.md` — phase plan with locked decisions D1–D5.
+
+**Sub-scope (11-1-iii):**
+- **No `reason:disabled` distinction in `cache_miss` event.** D3 — disabled is indistinguishable from "never cached" at the verb layer; agent response is identical (snapshot+pick+record).
+- **No `--no-self-heal` opt-out flag.** Self-heal is the design intent.
+- **No backoff between retries.** Each invocation independent.
+- **No `self_heal_history[]` population.** Schema field exists; future audit-trail use case.
+- **No automated re-resolution.** Skill stays model-agnostic — agent does the snapshot+pick+record cycle (same as 1-ii Q1).
+- **No effect on cache-miss paths.** `memory_record_failure` only fires after a confirmed cache-hit-then-dispatch-failed sequence (D4).
+
+**Phase 11 part 1 ✅ CLOSED.** All 3 sub-parts shipped:
+1. `lib/memory.sh` foundation (1-i)
+2. `browser-do` verb (1-ii)
+3. Self-heal loop (this PR — 1-iii)
+
+User-facing verb count unchanged (lib + verb tweaks; no new shell entry point). Phase 11 part 2 unblocked.
+
 ### Phase 11 part 1-ii — `browser-do` verb (cache lookup + dispatch + explicit write-back)
 
 - [feat] new `scripts/browser-do.sh` — first user-visible memory feature. Two sub-modes:
