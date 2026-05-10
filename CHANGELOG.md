@@ -13,6 +13,30 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 10 design doc — schema migration tooling
+
+Pure-design PR; no code yet. Locks decisions before implementation. Mirrors PR #57 (Phase 11 design) shape — design doc lands separately so implementation PRs can reference locked decisions instead of re-deriving them.
+
+- [docs] new `docs/superpowers/specs/2026-05-11-phase-10-schema-migration-design.md` — Phase 10 design doc with locked decisions:
+  - **MIG1:** Per-schema versions (not global) — each schema (sites/sessions/credentials/captures/baselines/memory/config) carries its own `schema_version`; migrating one doesn't touch the others. New `~/.browser-skill/versions.json` replaces single-integer `version` marker; old marker kept for compat.
+  - **MIG2:** Migrators registered per schema — `lib/migrators/<schema>/v1_to_v2.sh` pattern (mirrors `lib/tool/` adapter registry precedent). Reviewer-friendly per-schema-per-version isolation; PR boundaries match plan-doc boundaries.
+  - **MIG3:** Atomic write + automatic backup; manual rollback. `${file}.bak.v${prior_version}` retained for last 5 versions per file (default; configurable). Validation via `jq -e .` before atomic-swap. All-or-nothing per file.
+  - **MIG4:** Verb shape `browser-migrate {check,run,rollback,status,clean-backups}`. `check` is read-only safe (callable on session start); `run` requires `--yes` flag OR typed-phrase confirmation. **Doctor never auto-migrates** — read-only invariant preserved.
+  - **MIG5:** Pure bash + jq migrators; no Node dependency. No network calls; no env modifications; no cross-file state. Each migrator unit-testable with fixture file + expected output.
+- [docs] **3-sub-part split:** 10-1-i `lib/migrate.sh` foundation + 10-1-ii `browser-migrate` verb + 10-1-iii first real migrator (no-op v1_to_v2 for memory archetype JSONs to validate registry+dispatch end-to-end).
+- [docs] Storage shape evolution: new `~/.browser-skill/versions.json` (mode 0600) + `~/.browser-skill/backups/<schema>/<file>.bak.v<N>` (mode 0700 dir, 0600 files). Mirrors capture pipeline path-security pattern.
+- [docs] Recipe applicability: `path-security.md` + `privacy-canary.md` + `cache-write-security.md` all apply to migrators. `body-bytes-not-body.md` + `model-routing.md` n/a.
+- [docs] **Sequencing locked:** Phase 11 (✅) → Phase 10 (this design + impl) → future per-schema migrators ship case-by-case as schema bumps land.
+
+**Sub-scope (this PR):**
+- **No implementation** — design only. PRs 10-1-i/ii/iii implement.
+- **No `versions.json` schema bump** — frozen at v1 by this design.
+- **No migration of existing schemas** — first real migrator (10-1-iii) is no-op identity.
+- **No auto-migrate** — opt-in via `browser-migrate run` (MIG4).
+- **No cross-version chained downgrade** — each rollback is single-step.
+
+**Phase 10 sequencing:** implementation PRs (10-1-i/ii/iii) ship as ~3 separate PRs after this design doc lands. Estimated ~5 PRs total to close Phase 10 (3 substantive + 2 HANDOFF refresh PRs).
+
 ### v1-polish — Stage 1 bundle (README + SKILL.md refresh + macOS flake fix + press deferral codification + adapter install guidance)
 
 Cohesive "v1.0 polish" pass. Five small related changes shipped in one PR — none alone justifies its own ship; together they unblock adoption + close one open deferral.
