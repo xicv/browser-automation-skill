@@ -1,12 +1,12 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-10 — Phase 11 part 1 ✅ CLOSED)
+## Where the project stands (as of 2026-05-10 — Phase 11 part 2-i SHIPPED; cache-write-security recipe SHIPPED)
 
-main is at tag `v0.49.0-phase-11-part-1-iii-self-heal` (HEAD `4ea23df`). **Phases 1-9 SHIPPED + Phase 11 part 1 ✅ CLOSED (3/3 sub-parts: lib foundation + browser-do verb + self-heal loop).** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (full capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (full flow runner); **Phase 11 part 1 closed at 3/3 sub-parts (memory cache + verb + self-heal); Phase 11 part 2 unblocked.**
+main is at tag `v0.50.0-phase-11-part-2-i-pattern-flag` (HEAD `bec8e7d`). **Phases 1-9 SHIPPED + Phase 11 part 1 ✅ CLOSED (3/3) + Phase 11 part 2 IN FLIGHT (1/2 sub-parts: manual `--pattern`/`--archetype` flags shipped; auto-cluster queued) + `cache-write-security.md` recipe SHIPPED (PR #94).** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner).
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
 
-### Phase 11 progress (PR #57 design, PR #88 part 1-i, PR #90 part 1-ii, PR #92 part 1-iii) — ✅ COMPLETE (Phase 11 part 1 closed)
+### Phase 11 progress (PR #57 design, PR #88 1-i, PR #90 1-ii, PR #92 1-iii, PR #94 recipe, PR #95 2-i) — Part 1 ✅ CLOSED + Part 2 IN FLIGHT (1/2)
 
 | Sub-part | Scope | Status |
 |---|---|---|
@@ -14,6 +14,9 @@ main is at tag `v0.49.0-phase-11-part-1-iii-self-heal` (HEAD `4ea23df`). **Phase
 | 11-1-i | `scripts/lib/memory.sh` foundation — 8-fn API (init_dir, load/save_archetype, lookup, record, record_failure, record_pattern, resolve_archetype). Storage shape v1 frozen (`memory/<site>/{patterns.json, archetypes/<id>.json}` mode 0600 in mode-0700 dirs). H1 mechanic shipped (`fail_count > 3 → disabled:true`). **Deviation from design U1:** URLPattern global only stable in Node 23.8+; CI defaults to Node 20 until June 2026 — swapped to hand-rolled regex matcher (`:name` → `[^/]+`, `*` → `.*`); deterministic across Node versions; native URLPattern can replace when CI baseline lifts. | ✅ |
 | 11-1-ii | `browser-do` verb — two sub-modes: `--verb VERB --intent "..."` (cache lookup; on hit dispatches existing `browser-VERB.sh --selector $cached`; on miss emits `_kind:cache_miss` event + exit 11) and `record --intent --selector --url` (explicit write-back via `memory_record` + `memory_record_pattern`; auto-derives pattern + archetype-id). **Deviation from design E1:** skill stays **model-agnostic** — verb does NOT call LLM; on miss, parent agent picks ref via its own snapshot+reasoning then explicitly calls `record`. v1 `--verb` whitelist = `[click]` only (other selector-target verbs take only `--ref eN` today; expand when adapter ABI gains selector-mode plumbing). Privacy canary refuses cache writes containing `PASSWORD-CANARY` → exit 28. Best-effort write-back: cache failure is `warn:`-only; doesn't taint dispatched verb's exit code. | ✅ |
 | 11-1-iii | Self-heal loop — wires `memory_record_failure` into `browser-do --intent`'s post-dispatch failure path. **D1 exit-code whitelist** = `EMPTY_RESULT(11)` + `ASSERTION_FAILED(13)` only (network/tool/timeout codes are environmental; don't poison cache). **D2 re-record-heals-disabled:** `memory_record` upsert path resets `fail_count:0` + `disabled:false`. **D3 disabled is indistinguishable from "never cached"** at verb layer (agent response identical → no behavior gain from distinguishing). **D4 trigger only on confirmed cache-hit-then-dispatch-failed.** **D5 best-effort failure recording.** `BROWSER_DO_DISPATCH_OVERRIDE` env hook ships as test-only seam. **Phase 11 part 1 CLOSED.** | ✅ |
+| recipe `cache-write-security.md` | Codifies Phase 11 part 1 cache-write contract: 5 rules (whitelist surface · canary refusal · best-effort writes · self-heal exit-code whitelist · schema-locked storage shape). WRONG/RIGHT snippets per rule. 8-case test template. "Don't" anti-patterns. Cross-references `privacy-canary.md`, `path-security.md`, `anti-patterns-tool-extension.md` (AP-7), Phase 11 design doc §6/§12/§3. Pure-docs PR; no tag bump. | ✅ |
+| 11-2-i | `browser-do --intent` gains `--pattern '/devices/:id'` + `--archetype devices-id` flags (symmetric with `record` sub-mode shipped 1-ii). **R1 — Resolution priority (most-explicit-wins):** `--archetype NAME` > `--pattern PAT` > `--url URL` > none → `cache_miss reason:no_pattern_for_url` (backwards-compat preserved). **R2 — `--archetype` honors `assert_safe_name`.** **R3 — `--pattern` is read-side only** (does NOT call `memory_record_pattern`; `record` remains sole pattern-writing path). **R4 — No new `cache_miss` reason variants** (matches 1-iii D3 disabled-vs-never-cached precedent). | ✅ |
+| 11-2-ii | Auto-cluster URL patterns — observe N visits to a site; cluster paths diverging only at numeric/UUID/slug segments; propose pattern; user/agent confirms via `record`. 11-2-i's `--pattern` flag is the manual-override path. | 🔲 next |
 
 ### Phase 9 progress (PRs #77 design, #78, #80, #82, #84, #86) — ✅ COMPLETE
 
@@ -47,12 +50,13 @@ main is at tag `v0.49.0-phase-11-part-1-iii-self-heal` (HEAD `4ea23df`). **Phase
 
 ### Counters
 
-- **41 user-facing verbs** (Phase 11 1-ii added `browser-do`; 1-iii extends it with self-heal — no new verb).
+- **41 user-facing verbs** (browser-do shipped 1-ii; 1-iii self-heal + 2-i pattern-flag extend it — no new verbs).
 - **5 lib helpers shipped post-Phase-7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`, `scripts/lib/flow.sh` (gained `flow_diff_steps` in 9-1-iv), `scripts/lib/flow_record.sh`, `scripts/lib/memory.sh` (Phase 11 1-i; gained D2 re-record-heals-disabled tweak in 1-iii).
+- **6 recipes shipped**: `add-a-tool-adapter.md`, `anti-patterns-tool-extension.md`, `body-bytes-not-body.md`, `model-routing.md`, `path-security.md`, `privacy-canary.md`, **`cache-write-security.md`** (Phase 11 part 1 follow-up; PR #94).
 - **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **870 tests pass / 0 fail / lint exit 0** locally (865 baseline + 4 browser-do.bats + 1 memory.bats from 11-1-iii).
-- **89 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 12 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 part 1-i (PR #88) + Phase 11 part 1-ii (PR #90) + **Phase 11 part 1-iii (PR #92)**; not counting this HANDOFF refresh).
+- **875 tests pass / 0 fail / lint exit 0** locally (870 baseline + 5 browser-do.bats from 11-2-i).
+- **91 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 13 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + **Phase 11 part 2-i (PR #95)**; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -85,31 +89,31 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at Phase 11 part 2 OR Phase 10 OR `cache-write-security.md` recipe
+## Next session: pick up at Phase 11 part 2-ii (auto-cluster URL patterns) OR Phase 10 OR adapter selector-mode plumbing
 
-Phase 11 part 1 ✅ CLOSED (PR #92 shipped self-heal). Memory cache + browser-do verb + self-heal loop all in place. Three roughly equal-priority next picks:
+Phase 11 part 2-i ✅ shipped (PR #95): manual `--pattern` / `--archetype` flags in `browser-do --intent` mode. Phase 11 part 2 in flight at 1/2 sub-parts; 11-2-ii (auto-cluster) closes part 2.
 
-**Pick A — Phase 11 part 2 (URL pattern handling — extends memory):**
-- **11-2-i: manual `--pattern` flag on `browser-do`.** First-pass; lets agent override auto-derived pattern via explicit user-defined URLPattern syntax. Already partially supported (`record --pattern` ships in 1-ii). 11-2-i extends to `--intent` mode. Estimated small PR (~50 LOC + ~3 bats).
-- **11-2-ii: auto-cluster URL patterns.** Observe N visits to a site; if URL paths diverge only at numeric/UUID/slug segments, propose pattern; user/agent confirms. Builds on 1-i's pattern derivation. Estimated medium PR; design complexity in clustering heuristic.
+**Recommended next sub-part:**
+- **Phase 11 part 2-ii: auto-cluster URL patterns.** Observe N visits to a site; cluster paths that diverge only at numeric/UUID/slug segments; propose URLPattern; user/agent confirms via `record`. Builds on 1-i's pattern-derivation primitive + 2-i's manual `--pattern` flag (which becomes the override path). **Design surface:** clustering heuristic — how many similar URLs justify proposing a pattern? what counts as "similar enough" (numeric-only? alpha+numeric? UUID-shaped?)? Likely a `browser-do propose` sub-mode that scans patterns.json + recently-recorded URLs + emits a proposal event the agent can act on. Estimated medium PR (~150 LOC + ~8 bats). Closes Phase 11 part 2.
 
-**Pick B — Phase 10 (schema migration tooling — orthogonal):**
-- Per parent spec §13.6. Required eventually (when ANY v1 schema bumps to v2 — patterns.json, archetypes/*.json, baselines.json, _index.json all v1-frozen). Smaller PR; no urgent demand. Could ship anytime.
+**Open shape questions for 11-2-ii (decide during plan-doc):**
+- **Threshold for proposing a pattern:** N=3 similar URLs? N=5? Configurable via `--threshold N`?
+- **Heuristic scope:** numeric-only segments (`/users/123`), UUID segments (`/items/<uuid>`), slug segments (`/posts/my-blog-post`)? Lean toward numeric+UUID for v1; slugs are too noisy.
+- **Proposal surface:** new sub-mode `browser-do propose` (active scan) OR passive emission during `record` calls when threshold crossed? Lean active — explicit invocation is reviewable.
+- **Auto-confirm vs always-prompt:** v1 should always emit proposal as event; never auto-record. Agent decides. Avoids surprise pattern landings.
 
-**Pick C — `references/recipes/cache-write-security.md` recipe-doc (closes Phase 11 part 1 follow-up):**
-- Codifies whitelist + canary + best-effort + self-heal-on-{11,13} semantics into a recipe doc. Per Phase 11 design doc §6 + this PR's plan-doc Notes-for-follow-ups. Tiny pure-docs PR; bridges 1-iii closure note to a permanent reference. **Recommended first** — cleanest small win, codifies the part-1 contract while context is fresh.
-
-**Pick D — selector-mode plumbing for fill/hover/press/select adapter ABI (expands browser-do):**
-- `browser-do --verb` whitelist is `[click]` v1 because only click takes `--selector`. Adding `--selector` paths to fill/hover/press/select unlocks broader cache utility. Adapter ABI work; medium PR (per-verb + adapter); independent prerequisite. Could ship before or after Phase 11 part 2.
+**Alternative picks:**
+- **Pick B — Phase 10 (schema migration tooling)** — necessary eventually when ANY v1 schema bumps; currently no urgent demand. Smaller PR.
+- **Pick D — Selector-mode plumbing for fill/hover/press/select adapter ABI** — expands `browser-do --verb` whitelist beyond `[click]`. Medium PR; touches 4 verbs + adapter ABI. Most user-visible value gain.
 
 **Phase ordering recap:**
 - Phase 8 ✅ COMPLETE (4/4 obscura + router promotion)
 - Phase 9 ✅ COMPLETE (5/5 flow runner)
 - **Phase 11 part 1 ✅ CLOSED (3/3 memory cache + verb + self-heal)**
+- **Phase 11 part 2 IN FLIGHT — 1/2 shipped (manual `--pattern`/`--archetype`); 2-ii auto-cluster closes part 2**
+- Recipe `cache-write-security.md` ✅ SHIPPED (PR #94)
 - Phase 10 🔲 — schema migration tooling
-- Phase 11 part 2 🔲 — URL pattern handling (11-2-i + 11-2-ii)
-- Recipe `cache-write-security.md` 🔲 — codify part 1 contract
-- Adapter selector-mode plumbing 🔲 — expand `browser-do --verb` whitelist beyond `[click]`
+- Adapter selector-mode plumbing 🔲 — expand `--verb` whitelist beyond `[click]`
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
 
