@@ -142,7 +142,10 @@ teardown() { teardown_temp_home; }
     run bash "${SCRIPTS_DIR}/browser-flow.sh" record --url https://example.com --out "${out_file}" --name recorded
   assert_status 0
   [ -f "${out_file}" ] || fail "recorded flow file missing"
-  mode="$(stat -f '%Lp' "${out_file}" 2>/dev/null || stat -c '%a' "${out_file}" 2>/dev/null)"
+  # GNU-first stat ordering — GNU's `stat -f` dumps filesystem info (does NOT
+  # fail), so BSD-first would yield garbage on Linux. Mirrors common.sh's
+  # file_mode helper (GREP REPO FIRST per HANDOFF).
+  mode="$(stat -c '%a' "${out_file}" 2>/dev/null || stat -f '%Lp' "${out_file}" 2>/dev/null)"
   [ "${mode}" = "600" ] || fail "expected mode 600, got ${mode}"
   # Summary line carries flow_name + step_count + password_redactions.
   last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
