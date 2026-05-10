@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# scripts/browser-hover.sh — pointer hover an element by --ref eN.
+# scripts/browser-hover.sh — pointer hover an element by --ref eN or --selector CSS.
 # Usage: bash scripts/browser-hover.sh [--site NAME] [--tool NAME] [--dry-run]
-#                                       [--raw] --ref eN
+#                                       [--raw] (--ref eN | --selector CSS)
 #
 # Routes to chrome-devtools-mcp by default (Phase 6 part 3). Stateful —
 # requires running daemon (refMap precondition; mirrors click/select).
-# `--selector` path is a follow-up sub-part if user demand surfaces.
+# --selector path enables Phase 11 cache dispatch (cache stores selectors,
+# not snapshot-relative refs). Mirrors browser-click.sh + browser-fill.sh
+# precedent.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -32,7 +34,7 @@ parse_verb_globals "$@"
 
 resolve_session_storage_state
 
-ref=""
+ref="" selector=""
 verb_argv=()
 i=0
 while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
@@ -43,6 +45,12 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       verb_argv+=(--ref "${ref}")
       i=$((i + 2))
       ;;
+    --selector)
+      selector="${REMAINING_ARGV[i+1]:-}"
+      [ -n "${selector}" ] || die "${EXIT_USAGE_ERROR}" "--selector requires a value"
+      verb_argv+=(--selector "${selector}")
+      i=$((i + 2))
+      ;;
     *)
       verb_argv+=("${REMAINING_ARGV[i]}")
       i=$((i + 1))
@@ -50,11 +58,16 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
   esac
 done
 
-[ -n "${ref}" ] || die "${EXIT_USAGE_ERROR}" "hover requires --ref eN"
+if [ -n "${ref}" ] && [ -n "${selector}" ]; then
+  die "${EXIT_USAGE_ERROR}" "--ref and --selector are mutually exclusive"
+fi
+if [ -z "${ref}" ] && [ -z "${selector}" ]; then
+  die "${EXIT_USAGE_ERROR}" "hover requires --ref eN or --selector CSS"
+fi
 
 if [ "${ARG_DRY_RUN:-0}" = "1" ]; then
-  ok "dry-run: would hover ${ref}"
-  emit_summary verb=hover tool=none why=dry-run status=ok ref="${ref}" dry_run=true
+  ok "dry-run: would hover ${ref:-${selector}}"
+  emit_summary verb=hover tool=none why=dry-run status=ok ref="${ref}" selector="${selector}" dry_run=true
   exit 0
 fi
 
@@ -72,8 +85,8 @@ set -e
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 
 if [ "${adapter_rc}" -eq 0 ]; then
-  emit_summary verb=hover tool="${tool_name}" why="${why}" status=ok ref="${ref}"
+  emit_summary verb=hover tool="${tool_name}" why="${why}" status=ok ref="${ref}" selector="${selector}"
   exit 0
 fi
-emit_summary verb=hover tool="${tool_name}" why="${why}" status=error ref="${ref}"
+emit_summary verb=hover tool="${tool_name}" why="${why}" status=error ref="${ref}" selector="${selector}"
 exit "${adapter_rc}"

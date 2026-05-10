@@ -31,9 +31,8 @@ SUMMARY_T0="$(now_ms)"
 
 # --- Whitelist: verbs that accept --selector as primary target ---
 # Whitelist grows as adapter ABI gains selector-mode plumbing per verb.
-# Phase 11 part 2-iii (PR #99 onward) extended fill; hover/press/select
-# join when their selector-mode plumbing lands.
-readonly DO_VERB_WHITELIST=(click fill)
+# fill: PR #99. hover: PR #101. press/select: queued.
+readonly DO_VERB_WHITELIST=(click fill hover)
 
 _verb_in_whitelist() {
   local needle="$1" v
