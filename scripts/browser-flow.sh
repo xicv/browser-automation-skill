@@ -90,6 +90,7 @@ done
 
 # Reset flow state in this shell.
 declare -gA FLOW_VARS=()
+declare -gA FLOW_REFS=()
 FLOW_NAME=""
 FLOW_SESSION=""
 
@@ -116,29 +117,25 @@ for ov in "${cli_var_overrides[@]}"; do
   esac
 done
 
-# Extract step lines, substitute ${var}, accumulate.
+# Extract step lines.
 steps_jsonl="$(printf '%s\n' "${parsed}" | jq -c 'select(._kind=="step")')"
-substituted=""
-while IFS= read -r step_line; do
-  [ -z "${step_line}" ] && continue
-  if [ -z "${substituted}" ]; then
-    substituted="$(flow_apply_vars "${step_line}")"
-  else
-    substituted="${substituted}
-$(flow_apply_vars "${step_line}")"
-  fi
-done <<< "${steps_jsonl}"
-
-step_count=$(printf '%s\n' "${substituted}" | grep -c '^.' || printf '0')
+step_count=$(printf '%s\n' "${steps_jsonl}" | grep -c '^.' || printf '0')
 
 if [ "${dry_run}" = "1" ]; then
-  printf '%s\n' "${substituted}"
+  # Dry-run pre-pass: substitute vars (with refs-mode=skip since no snapshot
+  # has actually run); print the planned step list. Per Phase 9 part 1-ii:
+  # ${refs.NAME} stays literal in dry-run output (FLOW_REFS would be empty
+  # anyway).
+  while IFS= read -r step_line; do
+    [ -z "${step_line}" ] && continue
+    flow_apply_vars "${step_line}" skip
+  done <<< "${steps_jsonl}"
   emit_summary verb=flow tool=none why=dry-run status=ok mode=run \
     flow_name="${FLOW_NAME}" step_count="${step_count}" dry_run=true
   exit 0
 fi
 
-# Real run: capture pipeline + per-step dispatch.
+# Real run: capture pipeline + per-step dispatch with mid-flow ref resolution.
 capture_start "flow"
 # Append flow_name into meta.json (additive; no schema bump per design F4).
 meta="${CAPTURE_DIR}/meta.json"
@@ -156,7 +153,30 @@ failed_steps=0
 last_exit=0
 while IFS= read -r step_line; do
   [ -z "${step_line}" ] && continue
-  evt="$(flow_dispatch "${step_line}")"
+  # Per-step substitution AT EXECUTION TIME — FLOW_REFS may have just been
+  # populated by the prior snapshot step. flow_apply_vars defaults to
+  # refs-mode=strict (fail loud on missing ref).
+  set +e
+  substituted_step="$(flow_apply_vars "${step_line}")"
+  apply_rc=$?
+  set -e
+  if [ "${apply_rc}" -ne 0 ]; then
+    # flow_apply_vars already emitted the error message via die. Surface
+    # the failure as a step-event + abort the flow.
+    evt="$(jq -nc \
+      --argjson step_index "$(printf '%s' "${step_line}" | jq '.step_index')" \
+      --arg     verb       "$(printf '%s' "${step_line}" | jq -r '.verb')" \
+      --argjson exit_code  "${apply_rc}" \
+      --arg     status     "error" \
+      --arg     error      "var/ref substitution failed" \
+      '{step_index: $step_index, verb: $verb, status: $status, exit_code: $exit_code, error: $error}')"
+    printf '%s\n' "${evt}" >> "${steps_log}"
+    failed_steps=$((failed_steps + 1))
+    last_exit="${apply_rc}"
+    break
+  fi
+
+  evt="$(flow_dispatch "${substituted_step}")"
   printf '%s\n' "${evt}" >> "${steps_log}"
   status="$(printf '%s' "${evt}" | jq -r '.status')"
   if [ "${status}" = "ok" ]; then
@@ -165,7 +185,18 @@ while IFS= read -r step_line; do
     failed_steps=$((failed_steps + 1))
     last_exit="$(printf '%s' "${evt}" | jq -r '.exit_code')"
   fi
-done <<< "${substituted}"
+
+  # Phase 9 part 1-ii: harvest step.refs into FLOW_REFS (latest-wins).
+  refs_for_step="$(printf '%s' "${evt}" | jq -c '.refs // null')"
+  if [ "${refs_for_step}" != "null" ]; then
+    # Reset FLOW_REFS wholesale (latest-snapshot-wins).
+    FLOW_REFS=()
+    while IFS=$'\t' read -r ref_text ref_id; do
+      [ -z "${ref_text}" ] && continue
+      FLOW_REFS["${ref_text}"]="${ref_id}"
+    done <<< "$(printf '%s' "${refs_for_step}" | jq -r '.[] | "\(.text)\t\(.ref)"')"
+  fi
+done <<< "${steps_jsonl}"
 
 # Determine overall flow status.
 if [ "${failed_steps}" = "0" ]; then

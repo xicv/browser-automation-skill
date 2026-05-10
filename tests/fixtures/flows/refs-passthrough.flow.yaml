@@ -1,3 +1,0 @@
-name: refs-passthrough
-steps:
-  - fill: { ref: ${refs.Name}, text: literal-value }

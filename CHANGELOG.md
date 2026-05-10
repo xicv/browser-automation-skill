@@ -13,6 +13,32 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 9 part 1-ii — `${refs.NAME}` resolution + `assert` step
+
+- [feat] `scripts/lib/flow.sh::flow_apply_vars` — `${refs.NAME}` no longer literal-pass-through (was the deferred behavior in 9-1-i). Resolves via global `FLOW_REFS` assoc array (text → ref). Missing ref → `EXIT_USAGE_ERROR` with helpful message ("no snapshot has surfaced \"X\" — add a snapshot step first OR check the accessible name"). Per design doc §3 F3 fail-loud contract.
+- [feat] `flow_apply_vars` gains second arg `refs-mode` (default `strict`; alternative `skip`). `--dry-run` mode passes `skip` since no snapshot has actually run; `${refs.X}` stays literal in dry-run output. Real-run uses `strict`.
+- [feat] `scripts/lib/flow.sh::flow_dispatch` — for `verb: snapshot` steps, scans captured stdout for `event:snapshot` line carrying `refs[]` array; attaches as `refs` field on the step-event JSON. Other verbs: `refs: null`. Per locked decision R1 (parse the snapshot verb's stdout; rejected R2 read-from-capture-file).
+- [feat] `scripts/browser-flow.sh` main loop — restructured to substitute per-step at execution time (was upfront accumulation in 9-1-i). After each step-event, harvests `step.refs` into global `FLOW_REFS` (latest-snapshot-wins per locked decision R3 — replaces FLOW_REFS wholesale; rejected accumulate-mode). Substitution failures abort the flow; surface as a step-event with `var/ref substitution failed` error.
+- [feat] new `scripts/browser-assert.sh` — verify-style assertion verb. Usage: `bash scripts/browser-assert.sh --selector CSS --text-contains TEXT [--site NAME] [--tool NAME] [--dry-run]`. Thin wrapper over `bash scripts/browser-extract.sh --selector CSS` (subprocess; routes through router). Bash-side compares the extracted text against `--text-contains` predicate. Returns 0 (ok) / 13 `EXIT_ASSERTION_FAILED` (predicate failed; emits `expected` + `got` fields) / 2 (`EXIT_USAGE_ERROR`) / 1 (extract subprocess failed). **NO new tool_assert function on adapters** per locked decision A1 — composition over ABI extension.
+- [internal] `tests/flow-runner.bats` (+5 cases, total 17) — `flow_apply_vars` resolves ref via FLOW_REFS; missing ref errors loudly; `flow_dispatch` extracts refs[] from snapshot event line into step.refs; end-to-end with-refs flow resolves `${refs.Sign in}` to `e2` via the stub fixture; two-snapshots flow demonstrates latest-wins semantics; missing-ref flow exits non-zero with helpful message.
+- [internal] new `tests/browser-assert.bats` (5 cases) — missing `--selector` USAGE_ERROR; missing `--text-contains` USAGE_ERROR; `--dry-run` plan + exit 0; predicate matches stub fixture (`Welcome` / `Hello`) → status:ok exit 0; predicate fails → status:error exit 13 + `expected:`/`got:` fields.
+- [internal] new fixtures: `tests/fixtures/flows/with-refs.flow.yaml` (snapshot + fill ${refs.Sign in}); `tests/fixtures/flows/two-snapshots.flow.yaml` (latest-wins exercise); `tests/fixtures/flows/missing-ref.flow.yaml` (fail-loud exercise).
+- [internal] removed `tests/fixtures/flows/refs-passthrough.flow.yaml` — tested the now-obsolete literal-pass-through behavior from 9-1-i.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-09-part-1-ii-refs-and-assert.md` — phase plan with locked decisions R1+R2+R3+R4+A1.
+
+**Behavior change from 9-1-i:** flows that previously relied on `${refs.NAME}` passing through as literal strings will now either resolve via FLOW_REFS or fail-loud. No backward-compat shim — the literal-pass-through was explicitly documented as 9-1-i deferred behavior.
+
+**Sub-scope (9-1-ii):**
+- **No `--text-regex` or `--text-equals` predicate** — only `--text-contains` in v1. Future iteration if user demand surfaces.
+- **No `--selector-count-eq N` predicate.**
+- **No multi-snapshot accumulate mode** — latest-snapshot-wins per R3.
+- **No name-match-with-fuzzy-toleration** — exact match per R2.
+- **No `flow record`** (9-1-iii).
+- **No `replay <id>`** (9-1-iv).
+- **No `history` / `baseline` operations** (9-1-v).
+
+**Phase 9 progress: 2 of 5 sub-parts shipped.** Remaining: 9-1-iii (flow record), 9-1-iv (replay + diff), 9-1-v (history + baseline → CLOSES Phase 9).
+
 ### Phase 9 part 1-i — `flow run <file>` foundation (declarative YAML composition; first runnable end-to-end)
 
 - [feat] new `scripts/browser-flow.sh` — entry point with `run` sub-mode. Usage: `bash scripts/browser-flow.sh run <flow-file> [--var key=val ...] [--dry-run]`. Path security: realpath canonicalization + sensitive-pattern reject (mirrors `references/recipes/path-security.md` shape from Phase 6 part 6 upload). `<flow-file>` resolves relative to CWD first, then `${BROWSER_SKILL_HOME}/flows/`.
