@@ -13,6 +13,19 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Recipe — `cache-write-security.md` (codifies Phase 11 part 1 cache-write contract)
+
+- [docs] new `references/recipes/cache-write-security.md` — codifies the five cache-write rules established across Phase 11 part 1's three substantive PRs (1-i lib + 1-ii verb + 1-iii self-heal):
+  1. **Whitelist the cache-write surface** — never accept caller-supplied verb names without an explicit constant whitelist; defends against typo-dispatch + accidental dispatch of credential-handling verbs.
+  2. **Refuse cache writes containing credential sentinels** — fast-fail with `EXIT_BLOCKLIST_REJECTED (28)` when intent/selector contains `PASSWORD-CANARY`; not a real secret detector but enforces a refusal codepath + gives bats a regression-safety net.
+  3. **Cache writes are best-effort** — never let cache-write failure taint the action's exit code; `warn:` to stderr only. Cache freshness < action correctness.
+  4. **Self-heal failure-counting needs an exit-code whitelist** — only `EXIT_EMPTY_RESULT (11)` + `EXIT_ASSERTION_FAILED (13)` increment fail_count. Network/tool/timeout codes are environmental; counting them poisons the cache.
+  5. **Lock the cache schema; don't store action-type** — keep `(intent, selector)` as the storage shape; caller passes `--verb` per call. Storing `verb` couples cache to verb-set evolution.
+- Documents what to test (8-case template citing already-shipped bats placements at `tests/browser-do.bats::4,12,13,29,30,31,32` + `tests/memory.bats::2,13`), why a per-recipe contract beats per-PR vigilance, and "Don't" anti-patterns (no verbatim user values; no widening self-heal whitelist without rationale; no cross-site memory; no silent sentinel-strip).
+- Cross-references `privacy-canary.md`, `path-security.md`, `anti-patterns-tool-extension.md` (AP-7), Phase 11 design doc §6/§12/§3, Phase 11 part 1 plan-docs.
+
+**No code changes.** Pure-docs PR; bridges 1-iii closure to a permanent reference. Per Phase 11 design doc §6 ("ships AFTER Phase 11 part 1, not with it") — now unblocked since part 1 closed at PR #92.
+
 ### Phase 11 part 1-iii — self-heal loop (CLOSES Phase 11 part 1)
 
 - [feat] `scripts/browser-do.sh --intent` gains **post-dispatch failure trigger.** When the dispatched verb exits with `EXIT_EMPTY_RESULT (11)` or `EXIT_ASSERTION_FAILED (13)`, `memory_record_failure` is invoked → `fail_count++` → `disabled:true` once `fail_count > 3` (H1 threshold from design doc). On the next invocation with the same intent, `memory_lookup` transparently skips the disabled entry → `cache_miss reason:intent_not_cached` → agent re-resolves + calls `record` → entry heals (selector overwritten + `fail_count:0` + `disabled:false`).
