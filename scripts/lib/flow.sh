@@ -391,3 +391,58 @@ flow_dispatch() {
 
   return 0
 }
+
+# flow_diff_steps <old-step-event-json> <new-step-event-json> — compares two
+# step events (from steps.jsonl); emits one `event:replay_diff` JSON line on
+# stdout. Returns 0 if both .status AND .summary match; 1 if either diverges.
+#
+# Used by browser-replay.sh's per-step diff loop. Per design doc §3 F5 + plan
+# 2026-05-10-phase-09-part-1-iv-replay locked decisions D1 + D4.
+flow_diff_steps() {
+  local old="$1"
+  local new="$2"
+
+  local step_index verb old_status new_status old_summary new_summary
+  step_index="$(printf '%s' "${new}" | jq -r '.step_index')"
+  verb="$(printf '%s' "${new}" | jq -r '.verb')"
+  old_status="$(printf '%s' "${old}" | jq -r '.status')"
+  new_status="$(printf '%s' "${new}" | jq -r '.status')"
+  # Strip timing-sensitive fields before output comparison — duration_ms
+  # always varies between runs and isn't a semantic difference. Per plan
+  # locked decision D4 (jq-equal on summary line; future iteration could
+  # add more granular per-field policies).
+  old_summary="$(printf '%s' "${old}" | jq -c '.summary | del(.duration_ms)')"
+  new_summary="$(printf '%s' "${new}" | jq -c '.summary | del(.duration_ms)')"
+
+  local status_match=true
+  [ "${old_status}" = "${new_status}" ] || status_match=false
+
+  local output_match=true
+  [ "${old_summary}" = "${new_summary}" ] || output_match=false
+
+  local output_diff_json='null'
+  if [ "${output_match}" = "false" ]; then
+    output_diff_json="$(jq -nc \
+      --argjson old "${old_summary}" \
+      --argjson new "${new_summary}" \
+      '{old: $old, new: $new}')"
+  fi
+
+  jq -nc \
+    --arg     event         "replay_diff" \
+    --argjson step_index    "${step_index}" \
+    --arg     verb          "${verb}" \
+    --argjson status_match  "${status_match}" \
+    --arg     old_status    "${old_status}" \
+    --arg     new_status    "${new_status}" \
+    --argjson output_match  "${output_match}" \
+    --argjson output_diff   "${output_diff_json}" \
+    '{event: $event, step_index: $step_index, verb: $verb,
+      status_match: $status_match, old_status: $old_status, new_status: $new_status,
+      output_match: $output_match, output_diff: $output_diff}'
+
+  if [ "${status_match}" = "true" ] && [ "${output_match}" = "true" ]; then
+    return 0
+  fi
+  return 1
+}
