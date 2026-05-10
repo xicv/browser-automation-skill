@@ -1,8 +1,8 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-11 — Selector-mode plumbing 3/4 (fill+hover+select) SHIPPED; press deferred; cache dispatches `[click fill hover select]`)
+## Where the project stands (as of 2026-05-11 — Selector-mode plumbing fully adapter-complete for fill+click; whitelist `[click fill hover select]`)
 
-main is at tag `v0.54.0-selector-mode-select` (HEAD `fb997c9`). **Phases 1-9 SHIPPED + Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5) + selector-mode plumbing IN FLIGHT — 3/4 verbs shipped (`fill` + `hover` + `select` joined `click` in `browser-do --verb` whitelist; press formally deferred per SS5).** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); Phase 11 closed at 5/5 sub-parts; cache-write-security.md recipe SHIPPED (PR #94).
+main is at tag `v0.55.0-playwright-lib-selector` (HEAD `6ab59df`). **Phases 1-9 SHIPPED + Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5) + selector-mode plumbing IN FLIGHT — 3/4 verbs shipped (fill + hover + select joined click; press deferred per SS5) + playwright-lib `--selector` driver plumbing SHIPPED (PR #105 — fill + click adapter-complete across all three routed adapters).** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); Phase 11 closed at 5/5 sub-parts; cache-write-security.md recipe SHIPPED (PR #94).
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
 
@@ -26,7 +26,7 @@ main is at tag `v0.54.0-selector-mode-select` (HEAD `fb997c9`). **Phases 1-9 SHI
 | selector-mode-hover | `scripts/browser-hover.sh` accepts `--selector CSS`. `chrome-devtools-mcp` adapter `tool_hover` accepts `--ref\|--selector` alias. **H2 — Adapter coverage = chrome-devtools-mcp only** (other adapters don't define `tool_hover`; router routes hover exclusively there). **H3 — Bridge unchanged.** **`browser-do --verb` whitelist grows: `[click fill]` → `[click fill hover]`.** | ✅ (PR #101) |
 | selector-mode-select | `scripts/browser-select.sh` accepts `--selector CSS`. `chrome-devtools-mcp` adapter `tool_select` accepts `--ref\|--selector` alias. **SS2 — Adapter coverage = chrome-devtools-mcp only.** **SS3 — Bridge unchanged.** **SS4 — Mode flags (`--value`/`--label`/`--index`) unchanged**, exactly one required. **`browser-do --verb` whitelist grows: `[click fill hover]` → `[click fill hover select]`.** | ✅ (PR #103) |
 | selector-mode-press (DEFERRED per SS5) | **Survey discovered `tool_press` accepts only `--key`; bridge `case 'press':` (chrome-devtools-bridge.mjs:488) takes only `key`, no target by design** (line 1098: "Stateless w.r.t. refMap — acts on the focused element or page"). Adding selector-targeting requires bridge schema bump for new "focus + press" semantic — bigger surface than per-verb mechanical pattern. Deferred to separate decision: (a) new `--focus-selector` flag on press, (b) skip from cache scope entirely, or (c) compose with click+press (no cache for press; relies on existing focus state). **Option (c) recommended — no-op-for-cache.** | 🔲 separate decision |
-| playwright-lib `--selector` driver plumbing | `runFill` + `runClick` flag handling + `case 'fill'`/`case 'click'` IPC handler updates (use `page.locator(selector)` instead of refMap lookup). Coordinate fill + click together to keep IPC schema bumps coherent. Independent of per-verb plumbing above. | 🔲 |
+| playwright-lib `--selector` driver plumbing | `runFill` + `runClick` flag handling + `case 'fill'`/`case 'click'` IPC handler updates use `page.locator(selector).first()` when `msg.selector` present. **PL1 — Backwards-compatible IPC schema** (no version bump; additive). **PL2 — fill + click coordinated** in same PR (matched semantics). **PL3 — Selector path skips refMap precondition** (locators don't need snapshot). **PL4 — Hover NOT in scope** (no playwright-lib path; cdt-mcp-only per router). **PL5 — Adapter unchanged** (already passes argv verbatim). Secret-scrub semantics preserved on selector path. | ✅ (PR #105) |
 
 ### Phase 9 progress (PRs #77 design, #78, #80, #82, #84, #86) — ✅ COMPLETE
 
@@ -67,8 +67,8 @@ main is at tag `v0.54.0-selector-mode-select` (HEAD `fb997c9`). **Phases 1-9 SHI
 - **7 recipes shipped**: `add-a-tool-adapter.md`, `anti-patterns-tool-extension.md`, `body-bytes-not-body.md`, `model-routing.md`, `path-security.md`, `privacy-canary.md`, **`cache-write-security.md`** (Phase 11 part 1 follow-up; PR #94).
 - **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **895 tests pass / 0 fail / lint exit 0** locally (891 baseline + 3 browser-select.bats + 1 browser-do.bats from selector-mode-select).
-- **99 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 17 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + Phase 11 part 2-ii (PR #97) + selector-mode-fill (PR #99) + selector-mode-hover (PR #101) + **selector-mode-select (PR #103)**; not counting this HANDOFF refresh).
+- **899 tests pass / 0 fail / lint exit 0** locally (895 baseline + 4 playwright-lib_adapter.bats from playwright-lib-selector).
+- **101 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 18 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + Phase 11 part 2-ii (PR #97) + selector-mode-fill (PR #99) + selector-mode-hover (PR #101) + selector-mode-select (PR #103) + **playwright-lib-selector (PR #105)**; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -101,31 +101,41 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at playwright-lib --selector OR Phase 10 OR press-cache-decision OR Phase 11 v2 hardening
+## Next session: pick up at press-cache-decision OR Phase 10 OR Phase 11 v2 hardening OR daemon-e2e for selector path
 
-Selector-mode plumbing 3/4 ✅ shipped (PRs #99 fill, #101 hover, #103 select). `browser-do --verb` whitelist now `[click fill hover select]`. **Press formally deferred per SS5** — bridge designed target-less; needs separate decision (recommend option (c) compose-with-click+press, no-op for cache).
+playwright-lib `--selector` ✅ shipped (PR #105). Selector-mode plumbing now adapter-complete for fill+click across all three routed adapters (playwright-cli + chrome-devtools-mcp + playwright-lib). 3/4 verbs shipped (fill+hover+select); press deferred per SS5.
 
-**Recommended next sub-part:**
-- **playwright-lib `--selector` driver plumbing** — most user-value gain remaining. Currently `browser-do --verb fill` (and click) only routes through playwright-cli + chrome-devtools-mcp; playwright-lib path falls back to "--ref required" because the node driver doesn't parse `--selector`. **Coordinate fill + click together** in one PR (IPC schema bump should be coherent across verbs that use the locator path). Surface: `runFill` + `runClick` flag handling (accept `--selector`), IPC `case 'fill':` + `case 'click':` updates (use `page.locator(selector)` instead of refMap lookup when `selector` field present, fall back to refMap on `ref`). Estimated medium PR (~120 LOC + ~6 bats per verb). Unlocks playwright-lib for cache dispatch — currently the most-routed-to adapter for stateful flows (storage-state restoration).
+**Three roughly equal-priority next picks (each independent):**
 
-**Open shape questions for playwright-lib --selector (decide during plan-doc):**
-- IPC schema: extend `{verb, ref}` → `{verb, ref?, selector?}` with mutual-exclusion + at-least-one validation. Schema-bump (v2) or backwards-compatible (v1 still accepts ref-only)? Lean backwards-compatible; cleaner deprecation path.
-- Locator semantics: `page.locator(selector)` returns first match; same as refMap lookup behavior. No precedence change.
-- Symmetry: ship fill + click together to keep IPC handler updates coherent. Hover (handled differently — no current playwright-lib driver path) stays out of scope.
+**Pick A — Press cache-scope decision (tiny pure-docs PR if option b/c):**
+- Pick option (a) new `--focus-selector` flag on press, (b) skip from cache scope entirely, or (c) compose: agent calls `browser-do --verb click --intent "focus input"` followed by `browser-press --key Enter` (no cache for press; relies on existing focus state).
+- **Recommended (c) — no-op-for-cache.** Tiny pure-docs PR adds explicit "press not cacheable" note to `cache-write-security.md` recipe + closes SS5 deferral.
 
-**Alternative picks:**
-- **Pick A — Phase 10 (schema migration tooling)** — necessary infra; no urgent demand.
-- **Pick B — press cache-scope decision** — pick option (a) `--focus-selector` flag / (b) skip / (c) compose. Recommend (c) — no-op-for-cache, leverages existing focus state. Tiny pure-docs PR if (b) or (c).
-- **Pick D — Phase 11 v2 hardening** (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / active observation `recent_urls.jsonl`).
+**Pick B — Phase 10 (schema migration tooling):**
+- Per parent spec §13.6. Necessary infra when ANY v1 schema bumps to v2. Currently no urgent demand — no schema needs bumping today.
+
+**Pick C — Phase 11 v2 hardening (any single item):**
+- Slug heuristic in `url-pattern-cluster.mjs` (entropy-based; medium design surface).
+- `--auto-record` flag on `browser-do propose` (small).
+- Pattern-equivalence canonicalization (`/devices/:id` ≡ `/devices/:itemId`; small-medium).
+- Active observation log (`recent_urls.jsonl`; small-medium; coordinates with Phase 10).
+
+**Pick D — Daemon e2e for playwright-lib selector path:**
+- Write `tests/playwright-lib_stateful_e2e.bats` cases that spin up the daemon, open a page, fill/click via `--selector`. Independent from PR #105's parse-layer tests; covers the IPC handler selector branches end-to-end. Estimated small-medium PR.
+
+**Recommended:** **Pick A — close press cache-scope decision** with option (c) recommendation. Smallest reviewable PR; codifies the SS5 deferral as a permanent decision in `cache-write-security.md`; closes one open question while context is fresh. Then go for **Pick C** items in subsequent sessions.
 
 **Phase ordering recap:**
 - Phase 8 ✅ COMPLETE (4/4 obscura + router promotion)
 - Phase 9 ✅ COMPLETE (5/5 flow runner)
 - Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5: memory cache + verb + self-heal + manual `--pattern` + auto-cluster `propose`)
 - Recipe `cache-write-security.md` ✅ SHIPPED (PR #94)
-- **Selector-mode plumbing IN FLIGHT — 3/4 verbs shipped** (`fill` + `hover` + `select` joined `[click]`; press deferred per SS5; playwright-lib driver `--selector` plumbing independent)
+- **Selector-mode plumbing — 3/4 verbs shipped** (fill+hover+select joined click; press deferred per SS5)
+- **playwright-lib `--selector` ✅ SHIPPED** (PR #105 — fill+click adapter-complete)
+- Press cache-scope decision 🔲 — pick (a)/(b)/(c); recommend (c)
 - Phase 10 🔲 — schema migration tooling
 - Phase 11 v2 hardening 🔲 — slug heuristic / `--auto-record` / canonicalization / active observation
+- Daemon e2e for playwright-lib selector path 🔲 — independent quality follow-up
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
 
