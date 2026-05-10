@@ -40,6 +40,8 @@ A [Claude Code](https://claude.com/claude-code) skill for driving real browsers 
 
 ## Install
 
+### Personal (one machine, all your projects)
+
 ```bash
 git clone https://github.com/xicv/browser-automation-skill ~/Projects/browser-automation-skill
 cd ~/Projects/browser-automation-skill
