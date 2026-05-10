@@ -12,7 +12,7 @@
 ## Locked decisions (carry-through from design doc 2026-05-08)
 
 - **M1** Cache key = `(site, url_pattern, intent_phrase)`.
-- **U1** URL pattern resolution via web-standard `URLPattern` API (Node 20+).
+- **U1** URL pattern resolution via hand-rolled regex matcher (`:name` segment + `*` wildcard subset). **Deviation from design doc §3 U1's "URLPattern web standard" decision:** the global `URLPattern` is only stable in Node 23.8+, and CI runners (and many user systems) still default to Node 20. A hand-rolled matcher keeps behavior deterministic across all supported Node versions and avoids the npm-polyfill cost. Native `URLPattern` can replace this when CI baseline lifts to Node 24+ (target: mid-2026 per https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/). v1 subset is sufficient for the patterns Phase 11 needs (`:id`, `:userId`, `*`).
 - **E1** Engagement via future `browser-do` verb (NOT in 11-1-i).
 - **H1** Self-healing = mark fail → invalidate after `fail_count > 3`. **Storage mechanic lands here; orchestration loop lands in 11-1-iii.**
 
@@ -67,9 +67,12 @@ All functions:
 Reads JSON from stdin: `{patterns: [{url_pattern, archetype_id}], url}`.
 Writes JSON to stdout: `{matched_pattern, archetype_id}` on hit, `null` on miss.
 
-Uses Node 20+'s built-in `URLPattern`. Each `url_pattern` is matched as a `pathname` pattern against the URL's pathname (URL parsed via `new URL(url, "https://placeholder.local")` to handle relative paths).
+Hand-rolled regex matcher (no npm deps; no Node-version dependency; stable globals only). Each `url_pattern` is compiled into a `RegExp`:
+- `:name` (any identifier-shaped name) → `[^/]+` (one path segment)
+- `*` → `.*` (anything including slashes)
+- Other regex metacharacters are escaped verbatim
 
-First-match-wins (deliberate; design doc §4: patterns iterate in insert order). If callers want priority, they reorder the list.
+Matched against the URL's pathname (URL parsed via `new URL(url, "https://placeholder.local")` to handle relative paths). First-match-wins (deliberate; design doc §4: patterns iterate in insert order). If callers want priority, they reorder the list.
 
 ## Test cases (RED → GREEN)
 
@@ -108,7 +111,7 @@ First-match-wins (deliberate; design doc §4: patterns iterate in insert order).
 
 - `tests/memory.bats` 10 cases all green.
 - `bash tests/lint.sh` exit 0 (all three tiers) — covers shellcheck on `lib/memory.sh` + node-syntax check on `lib/node/url-pattern-resolver.mjs` if lint walks .mjs.
-- `node --version` ≥ 20 (URLPattern requirement; CI matrix already meets this — Node 20+ pinned in `.github/workflows/`).
+- No Node-version requirement beyond the existing skill baseline (Node 20+); the matcher uses only stable globals (`URL`, `RegExp`, `JSON`, `process`).
 - CHANGELOG `[Unreleased]` `[feat]` tag describing the lib foundation; explicit "no verb integration yet" note so HANDOFF reader knows the user-visible piece is 11-1-ii.
 - No edits to `common.sh` (memory-specific paths live inside `memory.sh` as `_memory_dir`, `_memory_site_dir`, `_memory_patterns_path`, `_memory_archetype_path` helpers — keeps the diff scoped + avoids forcing every other lib to recompile its idea of paths).
 

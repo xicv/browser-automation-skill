@@ -23,8 +23,8 @@ Every entry has a tag in `[brackets]`:
   - `memory_record <site> <archetype_id> <intent> <selector>` — upsert: new intent → first_used+last_used+success_count:1; existing intent → success_count++ + last_used advances + first_used preserved.
   - `memory_record_failure <site> <archetype_id> <intent>` — increments fail_count; `fail_count > 3` sets `disabled:true` (H1 self-heal threshold; orchestration loop deferred to 11-1-iii).
   - `memory_record_pattern <site> <url_pattern> <archetype_id>` — upserts into `<site>/patterns.json`; idempotent on same `(pattern, archetype)` pair.
-  - `memory_resolve_archetype <site> <url>` — first-match-wins archetype lookup via `URLPattern` web standard (Node 20+); empty on miss.
-- [feat] new `scripts/lib/node/url-pattern-resolver.mjs` — Node 20+ `URLPattern` wrapper. Reads `{patterns, url}` JSON on stdin; writes `{matched_pattern, archetype_id}` or `null` on stdout. Pure; no npm deps.
+  - `memory_resolve_archetype <site> <url>` — first-match-wins archetype lookup via hand-rolled regex matcher; empty on miss.
+- [feat] new `scripts/lib/node/url-pattern-resolver.mjs` — pathname-pattern → RegExp compiler (`:name` → `[^/]+`, `*` → `.*`). Reads `{patterns, url}` JSON on stdin; writes `{matched_pattern, archetype_id}` or `null` on stdout. **Deviation from design doc §3 U1 (URLPattern web standard):** the global `URLPattern` is only stable in Node 23.8+, and CI runners default to Node 20 until June 2026. The hand-rolled matcher keeps behavior deterministic across all Node versions and avoids the npm-polyfill cost; native `URLPattern` can replace it when CI baseline lifts.
 - [feat] **Storage shape (frozen at v1, per design doc §4):**
   - `${BROWSER_SKILL_HOME}/memory/` mode 0700 (lazy-created)
   - `<site>/patterns.json` mode 0600 — `{schema_version:1, patterns:[{url_pattern, archetype_id, first_seen, last_seen, hit_count}]}`
