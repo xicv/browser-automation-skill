@@ -8,43 +8,86 @@ model: sonnet
 effort: low
 ---
 
-# browser-automation-skill (Phase 2 — site & session core)
+# browser-automation-skill
 
-Phase 2 ships site CRUD + the session schema + a stub-adapter `login`.
-Real browser launches arrive in Phase 3.
+Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura). 41 verbs covering site/session/credential management, navigation, snapshot+ref-based interaction, capture pipelines (console/network/screenshot/Lighthouse), declarative flow runner with replay+diff, and a per-archetype memory cache (`browser-do`) that lets agents skip LLM ref-resolution on repeat actions.
 
 ## Verbs
 
+### Site + session + credential management
+
 | Verb | What it does | Example |
 |---|---|---|
-| `doctor`        | Health check: deps, state dir mode, disk encryption, no network | `bash "${CLAUDE_SKILL_DIR}/scripts/browser-doctor.sh"` |
+| `doctor`        | Health check: deps, state dir mode, disk encryption, adapters | `bash "${CLAUDE_SKILL_DIR}/scripts/browser-doctor.sh"` |
 | `add-site`      | Register a site profile | `… add-site --name prod --url https://app.example.com` |
 | `list-sites`    | List registered sites | `… list-sites` |
 | `show-site`     | Show one site's profile JSON | `… show-site --name prod` |
 | `remove-site`   | Typed-name confirmed delete | `… remove-site --name prod --yes-i-know` |
 | `use`           | Get / set / clear current site | `… use --set prod` |
 | `login`         | Capture a Playwright storageState into a session | `… login --site prod --as prod--admin --interactive` |
-| `login` (file)  | Same — but consume a hand-edited storageState file | `… login --site prod --as prod--admin --storage-state-file PATH` |
-| `login` (auto)  | Programmatic headless login using stored credential (AP-7 stdin-only) | `… login --site prod --as prod--admin --auto` |
 | `list-sessions` | List captured sessions (optionally filter by site) | `… list-sessions --site prod` |
 | `show-session`  | Show session metadata (NEVER cookie/token values) | `… show-session --as prod--admin` |
 | `remove-session`| Typed-name confirmed delete of a captured session | `… remove-session --as prod--admin --yes-i-know` |
-| `creds add`     | Register credential (smart per-OS backend; AP-7 stdin-only; first plaintext use needs `--yes-i-know-plaintext`; `--auth-flow STR` declares form shape — single-step / multi-step / username-only / custom) | `printf 'pw' \| … creds-add --site prod --as prod--admin --password-stdin --auth-flow single-step-username-password` |
-| `creds list`    | List credentials (optional `--site` filter; metadata only) | `… creds-list --site prod` |
-| `creds show`    | Show credential metadata (NEVER secret value) | `… creds-show --as prod--admin` |
-| `creds show` (reveal) | After typed-phrase confirmation, include secret + masked preview | `printf 'prod--admin\n' \| … creds-show --as prod--admin --reveal` |
-| `creds remove`  | Typed-name confirmed delete of a credential | `… creds-remove --as prod--admin --yes-i-know` |
-| `creds migrate` | Move credential to a different backend (fail-safe ordering) | `… creds-migrate --as prod--admin --to keychain --yes-i-know` |
-| `creds totp`    | Generate current 6-digit TOTP code from stored shared secret (RFC 6238) | `… creds-totp --as prod--admin` |
-| `creds rotate-totp` | Re-enroll TOTP shared secret (service forced new QR) | `printf '%s' NEW_BASE32 \| … creds-rotate-totp --as prod--admin --totp-secret-stdin --yes-i-know` |
+| `creds-add`     | Register credential (smart per-OS backend; AP-7 stdin-only; declares `--auth-flow`) | `printf 'pw' \| … creds-add --site prod --as prod--admin --password-stdin --auth-flow single-step-username-password` |
+| `creds-list`    | List credentials (optional `--site` filter; metadata only) | `… creds-list --site prod` |
+| `creds-show`    | Show credential metadata (NEVER secret unless `--reveal` typed-phrase confirmed) | `… creds-show --as prod--admin` |
+| `creds-remove`  | Typed-name confirmed delete | `… creds-remove --as prod--admin --yes-i-know` |
+| `creds-migrate` | Move credential between backends (fail-safe ordering) | `… creds-migrate --as prod--admin --to keychain --yes-i-know` |
+| `creds-totp`    | Generate current 6-digit TOTP code (RFC 6238) | `… creds-totp --as prod--admin` |
+| `creds-rotate-totp` | Re-enroll TOTP shared secret (typed-phrase confirmed) | `printf '%s' NEW_BASE32 \| … creds-rotate-totp --as prod--admin --totp-secret-stdin --yes-i-know` |
+
+### Navigation + interaction
+
+| Verb | What it does | Example |
+|---|---|---|
 | `open`          | Open a URL in the picked browser adapter | `… open --url https://app.example.com` |
-| `open` w/ session | Apply a stored storageState before navigating | `… open --site prod --as prod--admin --url …` |
 | `snapshot`      | Capture an `eN`-indexed accessibility snapshot | `… snapshot` |
-| `click`         | Click an element by `--ref eN` or `--selector CSS` | `… click --ref e3` |
-| `fill`          | Fill an input — `--text VALUE` or `--secret-stdin` | `… fill --ref e3 --text "search query"` |
-| `inspect`       | Page inspection — `--capture-console`, `--capture-network`, `--screenshot`, or `--selector CSS` (multi-flag aggregation; cdt-mcp real-mode end-to-end) | `… inspect --capture-console --capture-network` |
-| `audit`         | Lighthouse / perf-trace audit (cdt-mcp real-mode end-to-end) | `… audit --lighthouse` |
-| `extract`       | Selector or JS extraction — `--selector CSS` or `--eval JS` (cdt-mcp real-mode end-to-end) | `… extract --selector ".title"` |
+| `click`         | Click element by `--ref eN` or `--selector CSS` | `… click --ref e3` |
+| `fill`          | Fill input — `--text VALUE` or `--secret-stdin`; `--ref eN` or `--selector CSS` | `… fill --ref e3 --text "search query"` |
+| `hover`         | Pointer hover — `--ref eN` or `--selector CSS` | `… hover --ref e5` |
+| `press`         | Keyboard key (Enter, Tab, Cmd+S, etc.) — focused element | `… press --key Enter` |
+| `select`        | Pick option from `<select>` — `--ref eN`/`--selector CSS` + `--value`/`--label`/`--index` | `… select --ref e7 --value US` |
+| `drag`          | Drag from `--src-ref` to `--dst-ref` | `… drag --src-ref e3 --dst-ref e9` |
+| `wait`          | Wait for selector / state | `… wait --selector .toast --state visible --timeout 5000` |
+| `upload`        | Upload file to `<input type=file>` ref | `… upload --ref e2 --file path.png` |
+| `route`         | Network mock / fulfill pattern | `… route --pattern '*/api/users' --status 200 --body '{}'` |
+| `tab-list`      | List open tabs | `… tab-list` |
+| `tab-switch`    | Switch active tab | `… tab-switch --to tab2` |
+| `tab-close`     | Close a tab | `… tab-close --to tab2` |
+
+### Capture + extract + audit
+
+| Verb | What it does | Example |
+|---|---|---|
+| `inspect`       | Page inspection — `--capture-console`, `--capture-network`, `--screenshot`, `--selector` (multi-flag aggregation; sanitized HAR + console; cdt-mcp real-mode) | `… inspect --capture-console --capture-network --capture` |
+| `audit`         | Lighthouse / perf-trace audit (cdt-mcp real-mode) | `… audit --lighthouse` |
+| `extract`       | Selector or JS extraction — `--selector CSS` / `--eval JS` (cdt-mcp); `--scrape u1 u2 ...` / `--stealth URL --eval EXPR` (obscura) | `… extract --selector .title` · `… extract --scrape https://a https://b --format json` |
+| `assert`        | Assertion — `--selector` + `--text-contains` predicate | `… assert --selector .toast-success --text-contains "Saved"` |
+
+### Flow runner
+
+| Verb | What it does | Example |
+|---|---|---|
+| `flow run`      | Execute a `.flow.yaml` file (declarative steps; `${var}` + `${refs.NAME}` templating; whole-flow capture) | `… flow run task.flow.yaml --var url_path=/users` |
+| `flow record`   | Wrap `playwright codegen`; emit `.flow.yaml`; password-canary write-side | `… flow record --site prod --out task.flow.yaml` |
+| `replay`        | Re-execute a capture's steps; structured per-step diff | `… replay 042 --strict` |
+| `history list`  | Enumerate captures (newest first) | `… history list --limit 10` |
+| `history show`  | Show one capture's meta + steps | `… history show 042` |
+| `history diff`  | Diff two captures' step events | `… history diff 041 042` |
+| `history clear` | Manual prune (`--keep N` / `--days D` / `--not-baseline`); honors `is_baseline:true` skip-rule | `… history clear --keep 100` |
+| `baseline save` | Mark capture as baseline (`meta.is_baseline:true` + `baselines.json` entry) | `… baseline save 042 --as after-redesign` |
+| `baseline list` | List named baselines | `… baseline list` |
+| `baseline remove` | Remove baseline marker (capture dir untouched) | `… baseline remove after-redesign --yes-i-know` |
+
+### Memory cache (`browser-do`)
+
+| Verb | What it does | Example |
+|---|---|---|
+| `do --intent`   | Look up cached selector for `(site, archetype, intent)`; on hit dispatch existing verb (zero LLM tokens); on miss emit `cache_miss` event | `… do --site prod --verb click --intent "click delete" --pattern '/devices/:id'` |
+| `do record`     | Explicit cache write-back; auto-derives pattern + archetype-id; refuses `PASSWORD-CANARY` | `… do record --site prod --intent "click delete" --selector "button.delete" --url 'https://prod/devices/123'` |
+| `do propose`    | Auto-cluster URLs into URL patterns (`:id`, `:uuid`); emits proposals for clusters >= threshold; suppresses already-known | `… do propose --site prod --threshold 3 --url 'https://x/devices/1' --url '...'` |
+
+`${CLAUDE_SKILL_DIR}` is the absolute path Claude Code injects when invoking the skill — symlink under `~/.claude/skills/`.
 
 `${CLAUDE_SKILL_DIR}` is the absolute path that Claude Code injects when it
 invokes the skill — it points at the symlink under `~/.claude/skills/`. Use it
@@ -87,11 +130,16 @@ $ bash scripts/browser-doctor.sh | tail -1 | jq .
 ```
 ~/.browser-skill/                       # mode 0700
 ├── version                              # schema marker
+├── config.json                          # mode 0600; retention thresholds
 ├── current                              # current site name (mode 0600, [personal])
+├── baselines.json                       # mode 0600; named baseline registry (Phase 9)
 ├── sites/    <name>.json + .meta.json   # mode 0600 ([shareable])
 ├── sessions/ <name>.json + .meta.json   # mode 0600 ([PERSONAL — gitignored])
-├── credentials/                         # Phase 5
-└── captures/                            # Phase 7
+├── credentials/                         # Phase 5 (keychain / libsecret / plaintext)
+├── captures/  <NNN>/                    # Phase 7 (snapshot.json, console.json, network.har, steps.jsonl, meta.json)
+└── memory/    <site>/                   # Phase 11 ([PERSONAL — gitignored])
+    ├── patterns.json                    # mode 0600; URL pattern → archetype-id
+    └── archetypes/<id>.json             # mode 0600; cached interactions per archetype
 ```
 
 ## Roadmap

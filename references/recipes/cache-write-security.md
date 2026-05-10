@@ -192,6 +192,14 @@ Concretely: if a PR adds `browser-do --verb fill` after `fill` gains `--selector
 - **Don't** widen the self-heal exit-code whitelist without explicit rationale. Adding code 22 ("session expired") looks reasonable but couples the cache to a different subsystem's failure mode; the cached selector is fine — the *session* needs renewing.
 - **Don't** cache across sites. Per-site memory is the boundary (design doc §12). A selector that works on `prod-app` may have a homonym on `staging` that means something different.
 - **Don't** auto-sanitize / strip sentinel bytes silently. Refuse with `EXIT_BLOCKLIST_REJECTED`. The agent's call site needs to know the cache write didn't happen so it doesn't assume a future hit; silent strip would create a "successful write that wrote nothing" failure mode that's worse than refusal.
+- **Don't** add `press` to the cache-dispatch whitelist via `--focus-selector` or similar target-flag retrofit. **`press` is structurally outside cache scope** — chrome-devtools-mcp's bridge `case 'press':` is target-less by design ("Stateless w.r.t. refMap — acts on the focused element or page"; `lib/node/chrome-devtools-bridge.mjs:1098`). The cache-friendly composition is: agent calls `browser-do --verb click --intent "focus input"` to land focus on the right element, then invokes `browser-press --key Enter` directly (no cache; relies on focus state from prior click). This composition uses the cache where it adds value (target resolution) and leaves press as a no-op-for-cache stateless keyboard event. Documented in selector-mode-select plan-doc as decision SS5 + selector-mode plumbing HANDOFF row.
+
+## Codified deferrals
+
+| Verb / surface | Status | Why |
+|---|---|---|
+| `press` cache dispatch | **deferred (option c — compose-with-click+press)** | Bridge designed target-less. Cache-friendly composition: cache `click "focus input"` then invoke `press` directly. Recommended over `--focus-selector` retrofit; no IPC schema bump needed. |
+| `hover`/`select` on playwright-lib | deferred (no demand) | Hover + select route exclusively to chrome-devtools-mcp per `lib/router.sh::rule_{hover,select}_default`. If routing ever expands, mirror PR #105's pattern (`runHover`/`runSelect` + IPC `case 'hover':`/`case 'select':` selector branch). |
 
 ## See also
 

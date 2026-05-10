@@ -115,11 +115,29 @@ fi
 
 ok "running doctor..."
 doctor_rc=0
-bash "${REPO_ROOT}/scripts/browser-doctor.sh" || doctor_rc=$?
+doctor_out="$(bash "${REPO_ROOT}/scripts/browser-doctor.sh" 2>&1)" || doctor_rc=$?
+printf '%s\n' "${doctor_out}"
+
+# Count adapters_ok from the doctor JSON summary line (last line).
+adapters_ok="$(printf '%s\n' "${doctor_out}" | tail -1 | jq -r '.adapters_ok // 0' 2>/dev/null || printf '0')"
 
 ok "install complete; next steps:"
 ok "  1. /browser doctor       (verify in Claude Code)"
-ok "  2. /browser add-site     (register your first site, lands in phase 2)"
+ok "  2. /browser add-site --name NAME --url URL    (register your first site)"
+ok "  3. /browser use --set NAME    (set as current)"
+
 if [ "${doctor_rc}" -ne 0 ]; then
   warn "doctor reported issues (exit ${doctor_rc}); run 'bash scripts/browser-doctor.sh' to review"
+fi
+
+# v1-polish: when no adapters installed, surface the install-adapter guidance
+# explicitly so first-time users don't have to decode the doctor JSON.
+if [ "${adapters_ok}" = "0" ] || [ -z "${adapters_ok}" ]; then
+  warn ""
+  warn "no browser adapters installed. install at least one to drive a real browser:"
+  warn "  - chrome-devtools-mcp  (recommended; most-complete):  npx -y chrome-devtools-mcp@latest"
+  warn "  - playwright-cli       (npm; supports headless+headed): npm i -g playwright @playwright/test @playwright/cli && playwright install chromium"
+  warn "  - obscura              (single-binary; scrape+stealth-only): https://github.com/h4ckf0r0day/obscura/releases"
+  warn ""
+  warn "without an adapter: site/session/credential management + cache record + propose work; navigation/interaction/capture verbs return EXIT_TOOL_MISSING (21)."
 fi
