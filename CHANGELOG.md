@@ -13,6 +13,24 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### v1-polish — Stage 1 bundle (README + SKILL.md refresh + macOS flake fix + press deferral codification + adapter install guidance)
+
+Cohesive "v1.0 polish" pass. Five small related changes shipped in one PR — none alone justifies its own ship; together they unblock adoption + close one open deferral.
+
+- [docs] `README.md` rewritten — was stale ("Status: Phase 1, the verb that ships in this phase is `doctor`"); reality is 41 verbs across 11 shipped phases. New README accurately lists status (Phase 1-9 SHIPPED + Phase 11 ✅ FEATURE-COMPLETE for v1 + selector-mode plumbing 3/4); per-category verb summaries (site/session/credential, navigation/interaction, capture/extract/audit, flow runner, memory cache); install requirements split into "always required" vs "for real browser flows (install at least one)"; quickstart with cache record + dispatch example; output contract; layout; remaining v1.0 work pointer.
+- [docs] `SKILL.md` refreshed — header status flipped from "Phase 2 — site & session core" to feature-complete description (41 verbs, 4 routed adapters, memory cache); verb table reorganized into 5 sections (site/session/cred · navigation/interaction · capture/extract/audit · flow runner · memory cache `browser-do`); previously-missing verbs added (hover · press · select · drag · wait · upload · route · tab-list/switch/close · assert · flow run/record · replay · history · baseline · do --intent/record/propose). Storage layout updated (memory/ + baselines.json + config.json + captures/ tree).
+- [fix] `tests/helpers.bash::assert_output_contains` + `assert_output_not_contains` — replaced `printf | grep -qF` with bash native substring matching (`case "${output}" in *"${needle}"*)`). Eliminates the macOS pipe-race SIGPIPE flake (printf trips on broken pipe under bats' `set -euo pipefail` when `grep -q` exits early). Faster too — no subprocess. Pre-existing flake hit PR #89's macOS CI.
+- [docs] `references/recipes/cache-write-security.md` — codifies SS5 press deferral as a permanent decision. New "Don't add `press` to cache-dispatch whitelist" rule explaining the bridge target-less design + recommending compose-with-click+press composition. New "Codified deferrals" table tracking press (option c) + hover/select on playwright-lib (no demand). Closes one open question while context is fresh.
+- [feat] `install.sh` — added explicit adapter install guidance when no adapters installed. Previously: install completed silently; first-time users had to decode doctor JSON. Now: when `adapters_ok == 0`, prints a `warn:` block listing the three install options (chrome-devtools-mcp / playwright-cli / obscura) + clarifies which verb categories work without an adapter (site/session/cred + cache record + propose all work standalone). Also bumped step (2) to show the actual flag form (`--name NAME --url URL`) and added step (3) for `use --set`.
+
+**Sub-scope (this PR):**
+- **No code beyond install.sh + tests/helpers.bash** — README + SKILL.md + recipe are pure docs.
+- **No tag bump beyond v0.56.0** — bundle is a polish patch, not a feature ship. Future v1.0 tag waits for Phase 10 + remaining hardening.
+- **No CI matrix expansion** (deferred; Stage 4 work).
+- **No cross-platform packaging** (deferred; Windows requires bash 5+ via WSL2 + `stat`/`sed` cross-platform fixes).
+
+**Why bundled:** each item is small, related, and shipping together signals "v1.0 polish pass" cohesively. Splitting would have produced 5 micro-PRs with 5 HANDOFF refresh PRs (10 total). Following user preference for bundled small-related changes (memory `feedback_design_time_oss_survey.md` precedent: "yeah the single bundled PR was the right call here, splitting this one would've just been churn").
+
 ### playwright-lib `--selector` driver plumbing (closes selector-mode-fill S2 deferral)
 
 - [feat] `scripts/lib/node/playwright-driver.mjs::runFill` + `runClick` accept `--selector CSS` (mutually exclusive with `--ref eN`; one required). Closes the gap noted in selector-mode-fill (PR #99 S2): "playwright-lib `--selector` deferred — driver IPC schema bump; coordinate with click in its own PR."

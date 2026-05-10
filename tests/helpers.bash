@@ -28,20 +28,32 @@ teardown_temp_home() {
 }
 
 # Assert that a string is present in $output (bats sets $output on `run`).
+#
+# Implementation note (v1-polish): use bash native substring matching instead
+# of `printf | grep -qF`. The pipe form has an intermittent SIGPIPE race on
+# macOS — `grep -q` exits on first match, closes the pipe, and `printf`
+# trips on the broken pipe under bats' `set -euo pipefail`. The `case`
+# construct avoids the subprocess + pipe entirely. Faster too.
 assert_output_contains() {
   local needle="$1"
-  if ! printf '%s' "${output}" | grep -qF -- "${needle}"; then
-    printf 'expected output to contain:\n  %s\n--- actual output ---\n%s\n' "${needle}" "${output}" >&2
-    return 1
-  fi
+  case "${output}" in
+    *"${needle}"*) return 0 ;;
+    *)
+      printf 'expected output to contain:\n  %s\n--- actual output ---\n%s\n' "${needle}" "${output}" >&2
+      return 1
+      ;;
+  esac
 }
 
 assert_output_not_contains() {
   local needle="$1"
-  if printf '%s' "${output}" | grep -qF -- "${needle}"; then
-    printf 'expected output NOT to contain:\n  %s\n--- actual output ---\n%s\n' "${needle}" "${output}" >&2
-    return 1
-  fi
+  case "${output}" in
+    *"${needle}"*)
+      printf 'expected output NOT to contain:\n  %s\n--- actual output ---\n%s\n' "${needle}" "${output}" >&2
+      return 1
+      ;;
+    *) return 0 ;;
+  esac
 }
 
 # Assert exit status (mirrors bats-assert's assert_failure but no extra dep).
