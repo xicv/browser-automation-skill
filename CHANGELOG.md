@@ -13,6 +13,52 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 9 part 1-v — `history` + `baseline` (CLOSES Phase 9)
+
+- [feat] new `scripts/browser-history.sh` — single verb with sub-modes (per locked decision H1):
+  - `history list [--limit N]` — enumerate captures (newest-first by capture-id); emit one `history_row` event per capture + summary line with `total:N`.
+  - `history show <capture-id>` — emit meta.json content (compacted via `jq -c`) + steps.jsonl per-step events. Nonexistent capture-id → `EXIT_USAGE_ERROR` with helpful message.
+  - `history diff <id1> <id2>` — pair-wise per-step replay_diff events. **Reuses `flow_diff_steps` from 9-1-iv** (composition-over-ABI-extension pattern).
+  - `history clear [--keep N] [--days D] [--not-baseline]` — manual prune. Folds in HANDOFF's "browser-clean.sh" follow-up (Phase 7 carry-over). **Always honors `meta.is_baseline:true` skip-rule** (per Phase 7 prune contract). `--keep N` keeps newest N; `--days D` keeps captures younger than D days; `--not-baseline` enables purging-only-non-baselines mode.
+- [feat] new `scripts/browser-baseline.sh` — single verb with sub-modes (per locked decision H1):
+  - `baseline save <capture-id> --as NAME` — sets `meta.is_baseline:true` on the capture (Phase 7's prune skip-rule already honors this; landed in 7-1-v as forward-compat for Phase 9; no new prune logic). Appends entry to `${BROWSER_SKILL_HOME}/baselines.json`.
+  - `baseline list` — emit one `baseline_row` event per entry + summary line with `total:N`.
+  - `baseline remove <NAME>` — clears `meta.is_baseline:false` AND splices the entry from baselines.json. **Does NOT delete the capture dir** (use `history clear` for that).
+- [feat] **`baselines.json` schema (frozen at v1, per locked decision B1):**
+  ```json
+  {
+    "schema_version": 1,
+    "baselines": [
+      {"name": "after-redesign", "capture_id": "042", "saved_at": "2026-05-10T12:34:56Z",
+       "summary": {"verb": "flow", "flow_name": "create-user", "step_count": 5}}
+    ]
+  }
+  ```
+  Mode 0600; lazy-creation on first `baseline save` (mirrors Phase 7's `_index.json` + Phase 11's planned `memory/_index.json`). `[PERSONAL]` per parent spec §3.4.
+- [internal] new `tests/history.bats` (8 cases) — `list` empty + 3-captures + --limit 2; `show` happy + nonexistent; `diff` two-identical-captures (all status_match:true); `clear` --keep 1 + --not-baseline (verifies Phase 7's prune skip-rule honors flag).
+- [internal] new `tests/baseline.bats` (6 cases) — `save` writes mode 0600 + sets is_baseline:true; `save` missing --as → USAGE_ERROR; `save` nonexistent → USAGE_ERROR; `list` empty + 2-baselines; `remove` clears is_baseline + splices baselines.json + capture dir UNTOUCHED.
+- [docs] `docs/superpowers/plans/2026-05-10-phase-09-part-1-v-history-and-baseline.md` — phase plan with locked decisions H1+H2+H3+B1+O1.
+
+**Sub-scope (9-1-v):**
+- **No `report --since "yesterday" --format markdown`** (parent spec verb 35) — defer to Phase 10+.
+- **No `history diff` for non-flow captures** (only flow/replay captures have steps.jsonl).
+- **No baseline-rename** — `baseline remove` + `baseline save` round-trip is the workaround.
+- **No baseline-with-tags / baseline-with-notes** — v1 schema is name + capture_id + saved_at + summary only.
+- **No history pagination beyond `--limit N`** — `--since DATE` flag accepted but not yet implemented (placeholder for Phase 10+).
+
+**Phase 9 ✅ COMPLETE.** All 5 sub-parts shipped:
+1. Declarative composition (9-1-i `flow run`)
+2. Templating + assertion (9-1-ii `${refs.NAME}` + `assert`)
+3. Recording (9-1-iii `flow record` + password canary)
+4. Replay + structured diff (9-1-iv)
+5. History + baseline management (this PR — 9-1-v)
+
+User-facing verb count: 38 → 40 (`history` + `baseline` are new parent rows). Phase 9 closure note: `references/recipes/flow-record-secrets.md` recipe-doc remains as a tiny pure-docs follow-up.
+
+Next phases per sequencing:
+- Phase 10 — schema migration tooling
+- Phase 11 — memory (per-archetype selector/action cache; design doc shipped, implementation queued AFTER Phase 9 — now unblocked)
+
 ### Phase 9 part 1-iv — `replay <id>` (re-execute capture's steps + structured diff)
 
 - [feat] new `scripts/browser-replay.sh` — verb `replay <capture-id> [--strict] [--session NAME] [--dry-run]`. Loads `${CAPTURES_DIR}/<id>/meta.json` + `steps.jsonl`; re-dispatches each step via `flow_dispatch` (composes 9-1-i); writes a NEW capture with `replay_of` + `replay_match` fields. Per design doc §3 F5.
