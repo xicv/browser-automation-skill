@@ -175,16 +175,18 @@ if [ "${sub_mode}" = "record" ]; then
 fi
 
 # ---------- intent sub-mode ----------
-arg_site="" arg_verb="" arg_intent="" arg_url=""
+arg_site="" arg_verb="" arg_intent="" arg_url="" arg_pattern="" arg_archetype=""
 extra_args=()
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --site)   arg_site="$2";   shift 2 ;;
-    --verb)   arg_verb="$2";   shift 2 ;;
-    --intent) arg_intent="$2"; shift 2 ;;
-    --url)    arg_url="$2";    shift 2 ;;
-    --)       shift; extra_args=("$@"); break ;;
-    -h|--help) usage; exit 0 ;;
+    --site)      arg_site="$2";      shift 2 ;;
+    --verb)      arg_verb="$2";      shift 2 ;;
+    --intent)    arg_intent="$2";    shift 2 ;;
+    --url)       arg_url="$2";       shift 2 ;;
+    --pattern)   arg_pattern="$2";   shift 2 ;;
+    --archetype) arg_archetype="$2"; shift 2 ;;
+    --)          shift; extra_args=("$@"); break ;;
+    -h|--help)   usage; exit 0 ;;
     *) die "${EXIT_USAGE_ERROR}" "browser-do --intent: unknown flag '$1'" ;;
   esac
 done
@@ -195,9 +197,18 @@ _verb_in_whitelist "${arg_verb}" \
 
 site="$(_resolve_site "${arg_site}")"
 
-# Resolve archetype. Without --url we can't run URLPattern; emit miss reason.
+# Resolve archetype with most-explicit-wins priority (Phase 11 part 2-i R1):
+#   1. --archetype NAME — direct; skip URL lookup + pattern derivation.
+#   2. --pattern PAT    — derive archetype-id via _derive_archetype_id.
+#   3. --url URL        — memory_resolve_archetype (Phase 11 part 1-ii path).
+# Empty archetype after this block → cache_miss reason:no_pattern_for_url.
 archetype_id=""
-if [ -n "${arg_url}" ]; then
+if [ -n "${arg_archetype}" ]; then
+  assert_safe_name "${arg_archetype}" "archetype-id"
+  archetype_id="${arg_archetype}"
+elif [ -n "${arg_pattern}" ]; then
+  archetype_id="$(_derive_archetype_id "${arg_pattern}")"
+elif [ -n "${arg_url}" ]; then
   archetype_id="$(memory_resolve_archetype "${site}" "${arg_url}" 2>/dev/null || true)"
 fi
 
