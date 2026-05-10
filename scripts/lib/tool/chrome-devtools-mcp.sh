@@ -152,10 +152,10 @@ tool_fill() {
   local rest=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --ref)           target="$2"; shift 2 ;;
-      --text)          text="$2";   shift 2 ;;
-      --secret-stdin)  use_stdin=1; shift ;;
-      *)               rest+=("$1"); shift ;;
+      --ref|--selector) target="$2"; shift 2 ;;
+      --text)           text="$2";   shift 2 ;;
+      --secret-stdin)   use_stdin=1; shift ;;
+      *)                rest+=("$1"); shift ;;
     esac
   done
   [ -n "${target}" ] || return 41

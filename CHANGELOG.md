@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Selector-mode plumbing for `fill` (1/4 of "expand `browser-do --verb` whitelist beyond `[click]`")
+
+- [feat] `scripts/browser-fill.sh` gains `--selector CSS` flag — mutually exclusive with `--ref eN`. Mirrors `browser-click.sh`'s precedent. Required for Phase 11 cache to dispatch fill (cache stores selectors, not snapshot-relative refs).
+- [feat] `scripts/lib/tool/playwright-cli.sh::tool_fill` accepts `--ref|--selector` as target alias (mirrors `tool_click`'s already-shipped pattern).
+- [feat] `scripts/lib/tool/chrome-devtools-mcp.sh::tool_fill` same — `--ref|--selector` alias.
+- [feat] `scripts/browser-do.sh` whitelist grows: `[click]` → `[click fill]`. End-to-end Phase 11 cache dispatch now works for `--verb fill --intent "..."` against playwright-cli + chrome-devtools-mcp adapters.
+- [feat] `--text` and `--secret-stdin` semantics unchanged. Privacy invariants from AP-7 (secret-not-on-argv via `--secret-stdin`) preserved.
+- [internal] `tests/browser-fill.bats` gains 3 cases (total 9): `--selector` passes selector to adapter as target · `--selector` + `--ref` mutually exclusive → exit 2 · neither `--selector` nor `--ref` → exit 2 with "selector" in message.
+- [internal] `tests/browser-do.bats` gains 1 case (total 33): `--verb fill --intent` cache hit dispatches stub-fill with `--selector $cached --text VALUE`.
+- [internal] new `tests/fixtures/playwright-cli/3b7305b0…json` — argv-hash fixture for `["fill","input.email","alice@example.com"]`.
+- [docs] `docs/superpowers/plans/2026-05-10-selector-mode-fill.md` — phase plan with locked decisions S1–S5.
+
+**Sub-scope (this PR):**
+- **No playwright-lib `--selector` plumbing** (S2). The driver's `runFill` + IPC `case 'fill':` handler currently do refMap lookups only; adding `--selector` requires IPC schema changes + parallel updates to click for symmetry. Independent PR; coordinate fill + click together to keep IPC schema bumps coherent. **playwright-lib doesn't currently support `--selector` for click either** — this PR doesn't make it worse.
+- **No hover/press/select selector-mode plumbing** — separate sub-PRs of the same parent task. This PR is just `fill`.
+- **No new privacy canary** — fill's existing AP-7 canary covers `--secret-stdin`; `--selector` is structural (CSS string), not a credential channel.
+- **No route-rule changes** — routing picks adapter same as before; flag parsing happens after pick. If routing picks playwright-lib (e.g. with `BROWSER_SKILL_STORAGE_STATE` set), `--selector` falls through to the driver and exits 2 ("--ref required"). Workaround: `--tool=playwright-cli` explicitly.
+
+User-facing verb count unchanged. `browser-do --verb` whitelist now `[click fill]`; expands further as hover/press/select gain selector-mode plumbing in follow-up PRs.
+
 ### Phase 11 part 2-ii — `browser-do propose` (CLOSES Phase 11 part 2)
 
 - [feat] new `browser-do propose [--site NAME] [--threshold N] [--url URL ...]` sub-mode — auto-cluster URL pattern detection. Reads URLs from `--url` args + stdin (one per line; `^#` comments + blanks ignored); clusters by templated pathname; emits `_kind:proposal` events for clusters meeting threshold AND not already in `patterns.json`.
