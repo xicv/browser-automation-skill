@@ -218,7 +218,7 @@ tool_select() {
   local rest=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --ref)               ref="$2"; shift 2 ;;
+      --ref|--selector)    ref="$2"; shift 2 ;;
       --value|--label|--index)
         mode_flag="$1"; mode_val="$2"; shift 2 ;;
       *)                   rest+=("$1"); shift ;;

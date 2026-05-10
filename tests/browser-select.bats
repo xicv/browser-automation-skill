@@ -59,3 +59,25 @@ teardown() { teardown_temp_home; }
   assert_output_contains "chrome-devtools-mcp"
   assert_output_contains "select default"
 }
+
+# --- selector-mode plumbing (Phase 11 cache enabler — mirrors fill/hover precedent) ---
+
+@test "browser-select --selector: --dry-run accepts selector + summary carries it" {
+  run bash "${SCRIPTS_DIR}/browser-select.sh" --dry-run --selector 'select.country' --value US
+  assert_status 0
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.verb == "select" and .selector == "select.country" and .dry_run == true' >/dev/null \
+    || fail "expected selector in summary; got ${last_line}"
+}
+
+@test "browser-select: --selector AND --ref fails EXIT_USAGE_ERROR (mutually exclusive)" {
+  run bash "${SCRIPTS_DIR}/browser-select.sh" --selector 'select.x' --ref e1 --value y
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "mutually exclusive"
+}
+
+@test "browser-select: neither --selector nor --ref → error message mentions 'selector'" {
+  run bash "${SCRIPTS_DIR}/browser-select.sh" --value foo
+  assert_status "$EXIT_USAGE_ERROR"
+  assert_output_contains "selector"
+}

@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# scripts/browser-select.sh — pick an option from a <select> element by ref.
+# scripts/browser-select.sh — pick an option from a <select> element by ref or selector.
 # Usage: bash scripts/browser-select.sh [--site NAME] [--tool NAME]
-#                                        [--dry-run] [--raw] --ref eN
+#                                        [--dry-run] [--raw]
+#                                        (--ref eN | --selector CSS)
 #                                        (--value V | --label L | --index N)
 #
 # Routes to chrome-devtools-mcp by default (Phase 6 part 2). Stateful —
 # requires a running daemon (refMap precondition; same shape as click/fill).
+# --selector path enables Phase 11 cache dispatch (cache stores selectors,
+# not snapshot-relative refs). Mirrors browser-click/fill/hover precedent.
 
 set -euo pipefail
 IFS=$'\n\t'
@@ -32,7 +35,7 @@ parse_verb_globals "$@"
 
 resolve_session_storage_state
 
-ref="" value="" label="" index=""
+ref="" selector="" value="" label="" index=""
 mode_count=0
 verb_argv=()
 i=0
@@ -42,6 +45,12 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
       ref="${REMAINING_ARGV[i+1]:-}"
       [ -n "${ref}" ] || die "${EXIT_USAGE_ERROR}" "--ref requires a value"
       verb_argv+=(--ref "${ref}")
+      i=$((i + 2))
+      ;;
+    --selector)
+      selector="${REMAINING_ARGV[i+1]:-}"
+      [ -n "${selector}" ] || die "${EXIT_USAGE_ERROR}" "--selector requires a value"
+      verb_argv+=(--selector "${selector}")
       i=$((i + 2))
       ;;
     --value)
@@ -72,7 +81,12 @@ while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
   esac
 done
 
-[ -n "${ref}" ] || die "${EXIT_USAGE_ERROR}" "select requires --ref eN"
+if [ -n "${ref}" ] && [ -n "${selector}" ]; then
+  die "${EXIT_USAGE_ERROR}" "--ref and --selector are mutually exclusive"
+fi
+if [ -z "${ref}" ] && [ -z "${selector}" ]; then
+  die "${EXIT_USAGE_ERROR}" "select requires --ref eN or --selector CSS"
+fi
 if [ "${mode_count}" -eq 0 ]; then
   die "${EXIT_USAGE_ERROR}" "select requires one of --value, --label, or --index"
 fi
@@ -81,8 +95,8 @@ if [ "${mode_count}" -gt 1 ]; then
 fi
 
 if [ "${ARG_DRY_RUN:-0}" = "1" ]; then
-  ok "dry-run: would select ${ref} (value=${value}, label=${label}, index=${index})"
-  emit_summary verb=select tool=none why=dry-run status=ok ref="${ref}" \
+  ok "dry-run: would select ${ref:-${selector}} (value=${value}, label=${label}, index=${index})"
+  emit_summary verb=select tool=none why=dry-run status=ok ref="${ref}" selector="${selector}" \
                value="${value}" label="${label}" index="${index}" dry_run=true
   exit 0
 fi
@@ -101,8 +115,8 @@ set -e
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 
 if [ "${adapter_rc}" -eq 0 ]; then
-  emit_summary verb=select tool="${tool_name}" why="${why}" status=ok ref="${ref}"
+  emit_summary verb=select tool="${tool_name}" why="${why}" status=ok ref="${ref}" selector="${selector}"
   exit 0
 fi
-emit_summary verb=select tool="${tool_name}" why="${why}" status=error ref="${ref}"
+emit_summary verb=select tool="${tool_name}" why="${why}" status=error ref="${ref}" selector="${selector}"
 exit "${adapter_rc}"
