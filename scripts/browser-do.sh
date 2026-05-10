@@ -31,8 +31,10 @@ SUMMARY_T0="$(now_ms)"
 
 # --- Whitelist: verbs that accept --selector as primary target ---
 # Whitelist grows as adapter ABI gains selector-mode plumbing per verb.
-# fill: PR #99. hover: PR #101. press/select: queued.
-readonly DO_VERB_WHITELIST=(click fill hover)
+# fill: PR #99. hover: PR #101. select: PR #103. press: deferred (bridge
+# `case 'press':` is target-less by design — would need new "focus + press"
+# semantics; tracked in HANDOFF as separate decision).
+readonly DO_VERB_WHITELIST=(click fill hover select)
 
 _verb_in_whitelist() {
   local needle="$1" v

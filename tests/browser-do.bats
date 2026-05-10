@@ -515,6 +515,23 @@ EOF
     || fail "stdin path failed; got ${prop}"
 }
 
+@test "browser-do --verb select: whitelist accepts select; cache hit dispatches" {
+  _register_site app
+  # Archetype-id MUST match _derive_archetype_id('/checkout') → 'checkout'.
+  _seed_cache app checkout '/checkout' "pick country" "select.country"
+  override="$(_make_mock_dispatcher 0)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb select \
+      --intent "pick country" \
+      --pattern '/checkout' \
+      -- --value US
+  assert_status 0
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.verb == "do" and .dispatched_verb == "select" and .cache_hit == true' >/dev/null \
+    || fail "expected select dispatch + cache_hit:true; got ${last}"
+}
+
 @test "browser-do --verb hover: whitelist accepts hover; cache hit dispatches" {
   _register_site app
   # Archetype-id MUST match _derive_archetype_id('/page') → 'page'.

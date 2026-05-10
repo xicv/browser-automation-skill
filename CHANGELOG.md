@@ -13,6 +13,28 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Selector-mode plumbing for `select` (3/4 of "expand `browser-do --verb` whitelist beyond `[click]`"; press deferred)
+
+- [feat] `scripts/browser-select.sh` gains `--selector CSS` flag — mutually exclusive with `--ref eN`. Mirrors `browser-click.sh` + `browser-fill.sh` (PR #99) + `browser-hover.sh` (PR #101) precedent. Required for Phase 11 cache to dispatch select.
+- [feat] `scripts/lib/tool/chrome-devtools-mcp.sh::tool_select` accepts `--ref|--selector` as target alias.
+- [feat] `scripts/browser-do.sh` whitelist grows: `[click fill hover]` → `[click fill hover select]`. End-to-end Phase 11 cache dispatch now works for `--verb select --intent "..."` against chrome-devtools-mcp.
+- [feat] **SS2 — Adapter coverage = chrome-devtools-mcp only.** Other adapters don't define `tool_select`; router routes select exclusively to chrome-devtools-mcp.
+- [feat] **SS3 — Bridge unchanged.** Same target-string handling as click/fill/hover.
+- [feat] **SS4 — Mode flags (`--value`/`--label`/`--index`) unchanged.** Selector-mode select still requires exactly one of the three (mutual-exclusion + at-least-one preserved). Only the target axis gains a new flag.
+- **SS5 — PIVOT FROM PRESS (deferred).** Survey discovered `tool_press` accepts only `--key`; chrome-devtools-bridge.mjs `case 'press':` (line 488) takes only `key`, no target ("Stateless w.r.t. refMap — acts on the focused element or page" — line 1098). Adding selector-targeting requires new "focus then press" semantic at the bridge level — bigger surface than the per-verb mechanical pattern. Deferred to a separate decision: (a) new `--focus-selector` flag on press, (b) keep press out of cache scope entirely, or (c) compose: agent calls `browser-do --verb click --intent "focus input"` followed by `browser-press --key Enter` (no cache for press; relies on existing focus state). Option (c) recommended as no-op-for-cache.
+- [internal] `tests/browser-select.bats` gains 3 cases (total 10): `--dry-run --selector` accepts selector + summary carries it · `--selector` + `--ref` mutually exclusive → exit 2 · neither `--selector` nor `--ref` → exit 2 with "selector" in message.
+- [internal] `tests/browser-do.bats` gains 1 case (total 35): `--verb select` whitelist accepted; cache hit dispatches via `BROWSER_DO_DISPATCH_OVERRIDE` mock with `-- --value US` forwarded.
+- [docs] `docs/superpowers/plans/2026-05-11-selector-mode-select.md` — phase plan with locked decisions SS1–SS5 (including SS5 press deferral rationale).
+
+**Sub-scope (this PR):**
+- **No additional adapter coverage** (SS2; only chrome-devtools-mcp defines `tool_select`).
+- **No press selector-mode plumbing** (SS5; deferred — needs bridge schema bump or design decision).
+- **No mode-flag changes** (SS4; `--value`/`--label`/`--index` semantics unchanged).
+- **No new privacy canary** — select doesn't ingest secrets; no AP-7 surface.
+- **No route-rule changes**.
+
+`browser-do --verb` whitelist now `[click fill hover select]`. **3 of 4 selector-mode-plumbing per-verb sub-PRs done** (fill #99, hover #101, select this PR). Press = formally deferred per SS5; tracked as separate decision.
+
 ### Selector-mode plumbing for `hover` (2/4 of "expand `browser-do --verb` whitelist beyond `[click]`")
 
 - [feat] `scripts/browser-hover.sh` gains `--selector CSS` flag — mutually exclusive with `--ref eN`. Mirrors `browser-click.sh` + `browser-fill.sh` (PR #99) precedent. Required for Phase 11 cache to dispatch hover (cache stores selectors, not snapshot-relative refs).
