@@ -135,3 +135,34 @@ teardown() {
   grep -q '^/tmp/test-storage.json$' "${STUB_LOG_FILE}"
   rm -f "${STUB_LOG_FILE}"
 }
+
+# --- selector-mode plumbing for runFill + runClick (real-mode parse layer) ---
+#
+# Tests run in real mode (no BROWSER_SKILL_LIB_STUB) because parse-validation
+# happens BEFORE the chromium import + ipcCall. Validation failures exit 2
+# without touching playwright. Daemon IPC selector-path is e2e territory;
+# code review covers correctness for this PR.
+
+@test "playwright-lib driver runFill: --selector AND --ref → exit 2 (mutually exclusive)" {
+  run node scripts/lib/node/playwright-driver.mjs fill --selector 'input.x' --ref e1 --text hi
+  assert_status 2
+  assert_output_contains "mutually exclusive"
+}
+
+@test "playwright-lib driver runFill: neither --selector nor --ref → exit 2" {
+  run node scripts/lib/node/playwright-driver.mjs fill --text hi
+  assert_status 2
+  assert_output_contains "selector"
+}
+
+@test "playwright-lib driver runClick: --selector AND --ref → exit 2 (mutually exclusive)" {
+  run node scripts/lib/node/playwright-driver.mjs click --selector 'button.x' --ref e1
+  assert_status 2
+  assert_output_contains "mutually exclusive"
+}
+
+@test "playwright-lib driver runClick: neither --selector nor --ref → exit 2" {
+  run node scripts/lib/node/playwright-driver.mjs click
+  assert_status 2
+  assert_output_contains "selector"
+}

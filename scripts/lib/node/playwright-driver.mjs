@@ -107,18 +107,29 @@ async function runSnapshot(flags) {
 }
 
 async function runClick(flags) {
-  if (!flags.ref) {
-    process.stderr.write('playwright-driver.mjs::click: --ref eN is required\n');
+  if (flags.ref && flags.selector) {
+    process.stderr.write('playwright-driver.mjs::click: --ref and --selector are mutually exclusive\n');
     process.exit(2);
   }
-  const reply = await ipcCall({ verb: 'click', ref: flags.ref });
+  if (!flags.ref && !flags.selector) {
+    process.stderr.write('playwright-driver.mjs::click: --ref eN or --selector CSS is required\n');
+    process.exit(2);
+  }
+  const ipcMsg = { verb: 'click' };
+  if (flags.ref) ipcMsg.ref = flags.ref;
+  else ipcMsg.selector = flags.selector;
+  const reply = await ipcCall(ipcMsg);
   emitDaemonReply(reply);
   process.exit(reply.event === 'error' ? 30 : 0);
 }
 
 async function runFill(flags) {
-  if (!flags.ref) {
-    process.stderr.write('playwright-driver.mjs::fill: --ref eN is required\n');
+  if (flags.ref && flags.selector) {
+    process.stderr.write('playwright-driver.mjs::fill: --ref and --selector are mutually exclusive\n');
+    process.exit(2);
+  }
+  if (!flags.ref && !flags.selector) {
+    process.stderr.write('playwright-driver.mjs::fill: --ref eN or --selector CSS is required\n');
     process.exit(2);
   }
   let text = flags.text;
@@ -133,7 +144,10 @@ async function runFill(flags) {
     process.stderr.write('playwright-driver.mjs::fill: --text VALUE or --secret-stdin required\n');
     process.exit(2);
   }
-  const reply = await ipcCall({ verb: 'fill', ref: flags.ref, text });
+  const ipcMsg = { verb: 'fill', text };
+  if (flags.ref) ipcMsg.ref = flags.ref;
+  else ipcMsg.selector = flags.selector;
+  const reply = await ipcCall(ipcMsg);
   // Replace the text field in the reply (defensive; daemon should not echo it).
   delete reply.text;
   emitDaemonReply(reply);
@@ -703,6 +717,17 @@ async function daemonChildMain(flags) {
       }
       case 'click': {
         if (!page) return { event: 'error', message: 'no open page' };
+        // Selector path (PL3): use page.locator(selector).first().click().
+        // Skips refMap precondition — locators don't require snapshot.
+        if (msg.selector) {
+          try {
+            await page.locator(msg.selector).first().click();
+          } catch (err) {
+            return { event: 'error', message: `click failed: ${err && err.message ? err.message : String(err)}` };
+          }
+          return { event: 'click', selector: msg.selector, status: 'ok' };
+        }
+        // Existing ref path (unchanged):
         if (!refMap) return { event: 'error', message: 'no refs (run snapshot first)' };
         const entry = refMap.find((r) => r.id === msg.ref);
         if (!entry) {
@@ -716,12 +741,32 @@ async function daemonChildMain(flags) {
       }
       case 'fill': {
         if (!page) return { event: 'error', message: 'no open page' };
+        const text = typeof msg.text === 'string' ? msg.text : '';
+        // Selector path (PL3): use page.locator(selector).first().fill().
+        // Skips refMap precondition. Same secret-scrub semantics as ref path.
+        if (msg.selector) {
+          try {
+            await page.locator(msg.selector).first().fill(text);
+          } catch (err) {
+            let safeMessage = err && err.message ? err.message : String(err);
+            if (text && safeMessage.includes(text)) {
+              safeMessage = safeMessage.split(text).join('<redacted>');
+            }
+            return { event: 'error', message: `fill failed: ${safeMessage}` };
+          }
+          return {
+            event: 'fill',
+            selector: msg.selector,
+            text_length: text.length,
+            status: 'ok',
+          };
+        }
+        // Existing ref path (unchanged):
         if (!refMap) return { event: 'error', message: 'no refs (run snapshot first)' };
         const entry = refMap.find((r) => r.id === msg.ref);
         if (!entry) {
           return { event: 'error', message: `ref '${msg.ref}' not found in last snapshot` };
         }
-        const text = typeof msg.text === 'string' ? msg.text : '';
         // Playwright echoes the fill arg in error logs (e.g. "fill(\"<text>\")"
         // — would leak the secret). Wrap + scrub before returning so the
         // client never sees the secret in any path.

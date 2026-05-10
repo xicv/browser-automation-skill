@@ -13,6 +13,27 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### playwright-lib `--selector` driver plumbing (closes selector-mode-fill S2 deferral)
+
+- [feat] `scripts/lib/node/playwright-driver.mjs::runFill` + `runClick` accept `--selector CSS` (mutually exclusive with `--ref eN`; one required). Closes the gap noted in selector-mode-fill (PR #99 S2): "playwright-lib `--selector` deferred — driver IPC schema bump; coordinate with click in its own PR."
+- [feat] **PL1 — Backwards-compatible IPC schema (no version bump).** Extends `{verb, ref}` → `{verb, ref?, selector?}` with mutual-exclusion + at-least-one validation. Existing `--ref` path unchanged; new IPC messages with `selector` use locator-based resolution. Old senders (sending only `ref`) work as before; new senders (sending `selector`) work too. Cleaner deprecation path; no parallel-message-shape window.
+- [feat] **PL2 — Coordinated fill + click in one PR.** Driver IPC schema changes for fill ship alongside click since both use the same locator path; shipping separately would create a brief window where IPC accepts `selector` for one but not the other (more confusing to debug).
+- [feat] **PL3 — `page.locator(selector).first()` for selector path.** Mirrors `locatorFor()`'s `.first()` semantics for refMap entries. First match wins; same precedence rule as ref path. **Selector path skips refMap precondition** — locators don't require snapshot.
+- [feat] **PL4 — Hover NOT in scope.** Hover doesn't have a playwright-lib driver path today (routes only to chrome-devtools-mcp). If hover routing ever expands to playwright-lib, that's a separate sub-PR.
+- [feat] **PL5 — Adapter unchanged.** `scripts/lib/tool/playwright-lib.sh::tool_fill` and `tool_click` are already `_drive fill "$@"` / `_drive click "$@"` — they pass argv verbatim; driver flag-parser already accepts arbitrary `--key value` pairs.
+- [feat] **Secret-scrub semantics preserved on selector path.** IPC `case 'fill':` selector branch wraps `page.locator(selector).first().fill(text)` in the same try/catch + secret-scrub pattern as the ref path; never leaks the fill value through error messages.
+- [internal] `tests/playwright-lib_adapter.bats` gains 4 cases (total 21): `runFill` rejects mutex (`--selector` + `--ref`) → exit 2 + "mutually exclusive" · `runFill` rejects neither → exit 2 + "selector" · same 2 for `runClick`. Tests run in **real mode** (no `BROWSER_SKILL_LIB_STUB`) because parse-validation happens BEFORE chromium import + ipcCall — validation failures exit 2 without touching playwright.
+- [docs] `docs/superpowers/plans/2026-05-11-playwright-lib-selector.md` — phase plan with locked decisions PL1–PL5.
+
+**Sub-scope (this PR):**
+- **No hover plumbing** (PL4).
+- **No IPC schema version bump** (PL1; backwards-compatible additive).
+- **No daemon e2e tests** for selector path — covered by parse-layer + code review; e2e is its own session-scoped surface.
+- **No adapter changes** (PL5).
+- **No `browser-do` whitelist changes** — fill + click already in whitelist; this PR widens the dispatch surface for them, doesn't change which verbs are dispatchable.
+
+**End-to-end Phase 11 cache dispatch now works through playwright-lib too** — previously, `browser-do --verb fill` (with `BROWSER_SKILL_STORAGE_STATE` set) would route to playwright-lib and die at the driver's "--ref required" validation. Now it accepts `--selector $cached`, dispatches via `page.locator(...)`, and returns the click/fill result. Selector-mode plumbing for fill + click is now adapter-complete (playwright-cli + chrome-devtools-mcp + playwright-lib).
+
 ### Selector-mode plumbing for `select` (3/4 of "expand `browser-do --verb` whitelist beyond `[click]`"; press deferred)
 
 - [feat] `scripts/browser-select.sh` gains `--selector CSS` flag — mutually exclusive with `--ref eN`. Mirrors `browser-click.sh` + `browser-fill.sh` (PR #99) + `browser-hover.sh` (PR #101) precedent. Required for Phase 11 cache to dispatch select.
