@@ -1,12 +1,23 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-10 — Phase 8 ✅ COMPLETE; Phase 9 design doc shipped)
+## Where the project stands (as of 2026-05-10 — Phase 9 part 1-i shipped)
 
-main is at tag `v0.41.0-phase-08-part-2-i-router-promotion` (HEAD `60d2009`). **Phases 1-8 SHIPPED.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 sub-parts (full capture pipeline); **Phase 8 closed at 4/4 sub-parts** — obscura adapter (shell + `--scrape` + `--stealth` + router promotion). Adapter roster locked at 4 of 4 (chrome-devtools-mcp + playwright-cli + playwright-lib + obscura); routing precedence locked across all default verbs; `--scrape` / `--stealth` auto-route to obscura without `--tool` flag.
+main is at tag `v0.42.0-phase-09-part-1-i-flow-run-foundation` (HEAD `6f5cfe6`). **Phases 1-8 SHIPPED.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 sub-parts (full capture pipeline); Phase 8 closed at 4/4 sub-parts (obscura adapter). **Phase 9 1-i shipped** — `flow run <file>` foundation. Per-step bash verb dispatch + `${var}` templating + whole-flow capture (meta.json + steps.jsonl). First runnable `.flow.yaml` files end-to-end.
 
-**Phase 9 design doc shipped.** `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` locks decisions for the flow runner: YAML format, single-key-map step shape, `${var}` + `${refs.NAME}` templating, one-capture-per-flow with `steps.jsonl`, structured replay diff, codegen-wrapped recorder, baseline as thin wrapper over Phase 7's `meta.is_baseline`. Five-sub-part split (9-1-i through 9-1-v). Storage shape frozen.
+**Phase 9 design doc shipped earlier this session.** `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` locks decisions F1-F8. Five-sub-part split (9-1-i through 9-1-v); storage shape frozen.
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
+
+### Phase 9 progress (PRs #77 design, #78 9-1-i) — 1 of 5 sub-parts shipped
+
+| Sub-part | Scope | Status |
+|---|---|---|
+| 9 design | Phase 9 design doc (`2026-05-10-phase-09-flow-runner-design.md`). Locks F1-F8 (YAML; single-key-map step; `${var}` + `${refs.NAME}`; one capture per flow; structured replay diff; codegen-wrapped recorder; pure-read history; baseline as `meta.is_baseline` wrapper). | ✅ |
+| 9-1-i | `flow run <file>` foundation. New `scripts/browser-flow.sh` + `scripts/lib/flow.sh` (3-fn API: flow_parse / flow_apply_vars / flow_dispatch). Bash-side YAML parser (no node-helper, no js-yaml dep) handles v1 subset. `_kind`-tagged JSON output (subshell-survivable). `${var}` substitution; `${refs.NAME}` literal pass-through (deferred to 9-1-ii). Whole-flow capture composition. `--var key=val` CLI override. `--dry-run` plan path. | ✅ |
+| 9-1-ii | `${refs.NAME}` resolution + `assert` step. Snapshot-step populates per-flow refMap; subsequent steps resolve refs. New `assert` verb. | 🔲 next |
+| 9-1-iii | `flow record` — wrap `playwright codegen`; transformer JS → YAML; password canary on recorder write side. | 🔲 |
+| 9-1-iv | `replay <id>` — re-execute capture's steps; structured diff (status / output / per-aspect file). New `--strict` flag. | 🔲 |
+| 9-1-v | `history list/show/diff/clear` + `baseline save/list/remove`. **Closes Phase 9.** Folds in HANDOFF's "browser-clean.sh" follow-up as `history clear`. | 🔲 |
 
 ### Phase 8 progress (PRs #68, #70, #72, #75) — ✅ COMPLETE
 
@@ -29,12 +40,12 @@ main is at tag `v0.41.0-phase-08-part-2-i-router-promotion` (HEAD `60d2009`). **
 
 ### Counters
 
-- **34 user-facing verbs** (extract gained `--scrape` + `--stealth` modes in 8-1-ii / 8-1-iii — same verb count). Phase 6 11/11 closed.
-- **2 lib helpers shipped in Phase 7**: `scripts/lib/capture.sh` (gained `capture_prune` + `sanitized` arg + cross-platform age parser), `scripts/lib/sanitize.sh` (gained `sanitize_inspect_reply` helper).
-- **4 of 4 adapter shells exist**; **all 4 routed to as defaults** for at least one verb. obscura partial — `tool_extract` real-mode for two modes (`--scrape` + `--stealth`) + auto-routed by `rule_scrape_flag` / `rule_stealth_flag`; remaining 7 verb-dispatch fns are 41-stubs by design. doctor enumerates `adapters_ok:4`.
+- **35 user-facing verbs** (Phase 9 1-i adds `flow run` — first new parent row since Phase 6).
+- **3 lib helpers shipped post-Phase-7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`, **`scripts/lib/flow.sh` (NEW in 9-1-i)**.
+- **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **780 tests pass / 0 fail / lint exit 0** locally.
-- **72 PRs merged total** (24 in Phase 5, 13 in Phase 6 + 4 ancillary docs/CI + recipes catchup + Phase 7 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 design + skill model-routing + 5 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix; not counting this HANDOFF refresh).
+- **792 tests pass / 0 fail / lint exit 0** locally.
+- **75 PRs merged total** (Phase 7 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 design + skill model-routing + 6 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 part 1-i; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -67,27 +78,27 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at Phase 9 part 1-i (`flow run` foundation)
+## Next session: pick up at Phase 9 part 1-ii (`${refs.NAME}` resolution + `assert` step)
 
-Phase 8 ✅ COMPLETE. Phase 9 design doc shipped (this session, pure-docs PR). Implementation starts at 9-1-i.
+Phase 9 1-i shipped. **9-1-ii is the next natural step** — adds the missing capability that 9-1-i deferred.
 
-| Sub-part | Scope | Size |
-|---|---|---|
-| **9-1-i** | `flow run <file>` foundation. Node-helper YAML parser + per-step bash verb dispatch + `${var}` templating + whole-flow capture (meta.json + steps.jsonl). NO `${refs.NAME}` resolution yet. NO `assert` step. | medium |
-| 9-1-ii | `${refs.NAME}` resolution + `assert` step. Snapshot-step populates per-flow refMap; subsequent steps resolve refs via accessibility-tree name match. | medium |
-| 9-1-iii | `flow record` — wrap `playwright codegen`; transformer JS → YAML. Privacy canary on recorder write side (passwords → `${secrets.password}` placeholder). | medium-large |
-| 9-1-iv | `replay <id>` — re-run capture's steps; structured diff (status / output / per-aspect file). New `--strict` flag. | medium |
-| 9-1-v | `history list/show/diff/clear` + `baseline save/list/remove`. **Closes Phase 9.** Folds in HANDOFF's "browser-clean.sh" follow-up as `history clear`. | medium-large |
+**Recommended next sub-part:**
+- **9-1-ii: `${refs.NAME}` resolution + `assert` step** — when a step is `snapshot:`, capture its accessible-name → ref map (e.g. `{"Email": "e3", "Submit": "e7"}`) into a flow-runner-internal state; subsequent steps' `${refs.Email}` get resolved to `e3` before dispatch. Plus a new `assert` verb (selector + text-contains predicate) so flows can verify post-condition without inspecting the network HAR. Estimated medium PR (~120 LOC + ~6 bats).
 
-**Smallest reviewable PR with user-visible value:** 9-1-i. Ships the runner foundation; first hand-authored `.flow.yaml` files become executable.
+**Open shape questions for 9-1-ii (decide during plan-doc):**
+- Snapshot step's ref-map source: parse the snapshot verb's stdout summary OR inspect the snapshot's stored capture file? Lean toward stdout summary (already structured + sanitized).
+- `${refs.NAME}` accessible-name match policy: exact-match? case-insensitive? trim-whitespace? Prior precedent: `playwright`'s `getByRole({ name: ... })` is exact + trimmed.
+- `assert` verb dispatch shape: new verb script (`scripts/browser-assert.sh`) OR sub-mode of `inspect` (`inspect --assert ...`)? Lean toward new verb script (cleaner mental model; matches design doc §6).
+- Multiple snapshots in one flow: each replaces the prior refMap (latest-snapshot wins) OR accumulates? Lean toward latest-wins (matches single-page mental model).
 
 **Alternative picks:**
-- Skip ahead to 9-1-iii (flow record) if recording-from-headed-session is the user's higher-value need (then 9-1-i runs as a follow-up to validate recorded outputs).
-- Defer all of Phase 9 and begin Phase 11 (memory) — sequencing-locked design says wait for Phase 9 first; this would break the locked order.
+- Skip to 9-1-iii (`flow record`) if recording is higher-value than ref resolution. Then 9-1-ii as follow-up (recorded flows can use literal `eN` refs from codegen output without ${refs.NAME}).
+- Skip to 9-1-iv (`replay <id>`) — possible since replay re-executes captured steps verbatim (no ref resolution needed for replays of already-resolved-ref steps).
+- Skip to 9-1-v (`history` + `baseline`) — these are read-side ops; don't depend on 9-1-ii / 9-1-iii / 9-1-iv. Could ship in parallel.
 
 **Phase ordering recap:**
 - Phase 8 ✅ COMPLETE (4/4 sub-parts shipped — obscura adapter + router promotion)
-- Phase 9 🔲 design doc shipped; implementation queued at 9-1-i. 5 sub-parts (9-1-i through 9-1-v).
+- Phase 9 🔲 design doc + 1-i shipped (1 of 5 sub-parts). 9-1-ii / 9-1-iii / 9-1-iv / 9-1-v remain.
 - Phase 10 🔲 — schema migration tooling
 - Phase 11 🔲 — memory (per-archetype selector/action cache; design doc shipped, implementation queued AFTER Phase 9)
 
@@ -123,7 +134,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 
 **Cost compounding.** Memory hits = zero LLM tokens. Combined with model-routing default (`model: sonnet` + `effort: low` per skill turn) + `/model opusplan` parent session, fully realized memory is the **largest cost lever in the roadmap**. Target: ≥ 70% cache hit rate after 20+ similar actions per archetype (Agent-E-validated threshold).
 
-## Workflow expectations (proven across 72 PRs)
+## Workflow expectations (proven across 75 PRs)
 
 - **TDD muscle-memory**: branch + bats RED → GREEN → lint → tag → push → PR → CI → squash-merge → reset main. ~95%+ CI-green-first-try across the project.
 - **Phase 6 sub-part shape** (mechanical): bridge daemon dispatch case + capability declaration + tool dispatcher + router rule + verb script + bats + stub handler + drift sync (`scripts/regenerate-docs.sh all`) + plan-doc + CHANGELOG.
@@ -143,7 +154,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Padded-NNN-id-as-string pattern** (codified in 7-1-i): zero-padded identifiers (`001`, `042`, `999`) are **strings**, not integers — `summary_json`'s numeric regex now rejects leading-zero ints. Future padded-id fields (capture_id today; possibly baseline_id in flow runner) preserve padding through the summary serializer.
 - **Failure-path-finalize pattern** (codified in 7-1-i): when a verb opens a side-effect resource (capture dir, lock file, temp dir), the failure branch must run the same finalization as success — never leave `in_progress` orphans on disk. Test the failure-finalize directly; agents discovering an `in_progress` capture dir is a regression.
 - **Defense-in-depth validation pattern** (codified in 7-ii): same validation at three layers (bash verb → bridge → daemon-child). Each layer is cheap (<10 lines). Daemon-child layer is the only required test surface for non-CLI IPC paths.
-- **HANDOFF-refresh-as-separate-PR pattern** (proven 9 times now: PR #47, #50, #52, #54, #67, #69, #71, #74, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh). **Combined-refresh exception** (PR #74): when two substantive PRs land back-to-back without HANDOFF-impacting differences (e.g. 8-1-iii + a focused jq-fix), one combined refresh works.
+- **HANDOFF-refresh-as-separate-PR pattern** (proven 10 times now: PR #47, #50, #52, #54, #67, #69, #71, #74, #76, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh). **Combined-refresh exception** (PR #74): when two substantive PRs land back-to-back without HANDOFF-impacting differences (e.g. 8-1-iii + a focused jq-fix), one combined refresh works.
 - **New-adapter-CI-trap pattern** (codified in 8-1-i CI fixup): adding a 4th adapter without a stub binary breaks the **two existing tests** that assert `"all checks passed"` (doctor.bats:12 + install.bats:103). Reason: doctor's exit-status matrix returns `partial` (still exit 0) when ≥1 adapter is OK but ≥1 fails — the **output assertion** fails (warn line replaces "all checks passed") even though `assert_status 0` passes. Fix shape: ship `tests/stubs/<adapter>` mirroring `tests/stubs/playwright-cli`'s shape + wire `<ADAPTER>_BIN=${STUBS_DIR}/<adapter>` into both tests. **Future adapter PRs MUST include the stub + test wiring in the same PR** — CI failure on first push otherwise. Two precedents now (playwright-cli stub + obscura stub).
 - **Streaming-events-via-direct-jq pattern** (codified in 8-1-ii): when an adapter's per-result events carry **arbitrary JSON values** (e.g. `eval` field is `serde_json::Value` upstream — can be string/number/array/null/object), `emit_event` falls short — its `key=value` autodetect only handles scalar types. Bypass `emit_event` for those streaming events and emit via direct `jq -c '...'` over the upstream payload (with `+ {event:"name"}` add and field projection). `emit_summary` stays the path for **summary** lines (fixed scalar fields, validation guards). Lint tier 3 only requires the adapter sources `output.sh`; not every line must go through emit helpers.
 - **Stub-version-short-circuit-before-log pattern** (codified in 8-1-ii): when a fixture-based stub's binary doubles as a `--version` health-check responder (cf. tests/stubs/obscura), the `--version` branch MUST short-circuit and return BEFORE the STUB_LOG_FILE write. Otherwise, doctor probes during unrelated tests pollute argv-shape assertion logs and cause spurious matches in subsequent grep-based tests. Pattern is enforced by a dedicated bats case (`stub --version short-circuits before fixture lookup`).
@@ -152,6 +163,8 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Path A → Path B adapter rollout pattern** (Phase 8 closure proof): Phase 8 split the obscura adapter rollout into Path A (`--tool obscura` only; zero `router.sh` edits) for 8-1-i / 8-1-ii / 8-1-iii, then Path B (router promotion adds default-routing) in 8-2-i. Each PR carried single-concern risk: Path A PRs reviewed adapter / verb backend / fixture-stub design without routing entanglement; Path B PR reviewed two precedence rules with full capability-filter test coverage. The pattern lives in `docs/superpowers/specs/2026-04-30-tool-adapter-extension-model-design.md` §4.4 and proved its value end-to-end across 4 PRs and 4 sub-parts of Phase 8. **Adopt for any future adapter (Phase 9+ if applicable).**
 - **Capability-filter-as-safety-net pattern** (highlighted by 8-2-i): when a precedence rule fires for a verb the named tool doesn't support (e.g. `open --scrape` triggers `rule_scrape_flag` → obscura, but obscura doesn't declare `open`), the capability filter rejects + emits `warn: rule X picked TOOL but it doesn't support verb=Y; falling through` and the router walks to the next rule. **Routing-rule typos are caught at runtime, not in production traffic** — the cost is one extra `_tool_supports` jq call per fall-through. Codified in `tests/router.bats` (`open --scrape falls through to playwright-cli`). Future precedence rules should NOT defensively add their own verb checks; trust the capability filter.
 - **Design-doc-first-at-phase-boundary pattern** (proven 3 times now: parent spec authorship pre-Phase-1, Phase 11 design PR #58 pre-Phase-11, Phase 9 design pre-Phase-9): when opening a multi-sub-part phase, ship the design doc as its own PR (or fold inline if pure-docs) BEFORE coding starts. Locks decisions; surfaces open questions; gives reviewers something to push back on without diff-context. The design doc is never code; it's the contract that subsequent sub-part plan-docs reference. **Skip only if the phase is one sub-part with obvious shape.**
+- **Subshell-survivable bash function output pattern** (codified in 9-1-i `flow_parse`): when a bash function needs to "return" structured data through `$(...)` capture, **emit JSON lines, not set globals**. Bash globals don't cross subshell boundaries; `parsed="$(my_fn)"` strips them. Tag each line with a discriminator (`{_kind: "meta", ...}` vs `{_kind: "step", ...}`) so callers can sort/filter the output. Generic for any "parse a config file → emit per-record events" use case in this project (memory archetypes in Phase 11, replay step iteration in 9-1-iv).
+- **Spec-vs-implementation calibration pattern** (highlighted in 9-1-i): the design doc said "node-helper with js-yaml"; implementation discovered the npm-dep cost outweighed the parse-robustness gain at the v1-subset scope. **Spec is a guide, not a contract — when implementation surfaces a better trade-off, document the deviation in the CHANGELOG entry rather than silently changing course or rigidly following the spec.** The CHANGELOG becomes the authoritative record of what shipped vs what was specced; future agents read both.
 
 ## Daemon state slots (shipped through 7-1-i — unchanged)
 
@@ -193,15 +206,16 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 ## When you start (next session)
 
 1. `git checkout main && git pull --ff-only origin main`
-2. Confirm latest commit includes the Phase 9 design-doc-fold PR (this PR's merge commit). Tag remains `v0.41.0-phase-08-part-2-i-router-promotion` (design-doc PRs don't get version tags per recipe-doc precedent in PR #55, #58).
-3. **Recommended:** Phase 9 part 1-i — `flow run <file>` foundation. Per design doc §4 (sub-part split). Node-helper YAML parser + per-step bash verb dispatch + `${var}` templating + whole-flow capture (meta.json + steps.jsonl). NO `${refs.NAME}` resolution yet (deferred to 9-1-ii). NO `assert` step (deferred to 9-1-ii).
-4. **Alternative (small):** ship `browser-clean.sh` force-prune verb as a Phase 7 follow-up — but Phase 9 design doc folds this into `history clear` (9-1-v). Skipping the standalone verb saves duplicate work. Lean toward proceeding with 9-1-i.
+2. Confirm tag is `v0.42.0-phase-09-part-1-i-flow-run-foundation` and main HEAD matches `6f5cfe6`.
+3. **Recommended:** Phase 9 part 1-ii — `${refs.NAME}` resolution + `assert` step. Per the open-shape questions in the "Next session" block above (snapshot ref-source, name-match policy, assert dispatch shape, multi-snapshot semantics).
+4. **Alternative (skip-ahead):** Phase 9 part 1-iii (`flow record` — codegen wrapper). Higher-value if recording is the user's primary need.
+5. **Alternative (parallelizable):** Phase 9 part 1-v (`history` + `baseline`) — read-side ops; doesn't depend on 9-1-ii / 9-1-iii / 9-1-iv. Could ship in parallel with any of them.
 
-Start with: read CHANGELOG since `v0.41.0-phase-08-part-2-i-router-promotion` to confirm no in-flight work, then propose 9-1-i sub-part split-or-not. User prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG since `v0.42.0-phase-09-part-1-i-flow-run-foundation` to confirm no in-flight work, then propose 9-1-ii sub-part split (or alternative). User prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
 
-**Reading priority for Phase 9-1-i:**
-1. `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` — the design contract this PR ships against. Decisions F1-F8 locked.
-2. `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` §4.3 (multi-step interactive flow YAML example) — the parent-spec example IS the v1 surface contract.
-3. `scripts/lib/node/playwright-driver.mjs` — existing node-helper precedent. `flow-runner.mjs` will live alongside it.
-4. `scripts/lib/capture.sh::capture_start` + `capture_finish` — flow run wraps a single capture; design §3 F4 locks the shape (one capture per flow; `steps.jsonl` for per-step events).
-5. `scripts/browser-snapshot.sh` and `scripts/browser-fill.sh` — existing verb-script shape that flow steps will dispatch into. The runner shells out to these scripts per step.
+**Reading priority for Phase 9-1-ii:**
+1. `scripts/lib/flow.sh::flow_apply_vars` — current `${var}` substitution pattern. `${refs.NAME}` resolution adds a sibling code path: when `refs.NAME` is encountered, look up the per-flow refMap (populated by prior snapshot step) instead of `FLOW_VARS`.
+2. `scripts/browser-snapshot.sh` — what does the snapshot verb's stdout look like in real-mode? Specifically: does it emit a structured ref-name → ref-id table that `flow_dispatch` can capture and feed back to `flow_apply_vars`?
+3. `docs/superpowers/specs/2026-05-10-phase-09-flow-runner-design.md` §3 F3 — the templating contract. `${refs.NAME}` resolved at step-execution time; not-yet-snapshotted ref → fail-loud `EXIT_USAGE_ERROR`.
+4. `tests/fixtures/flows/refs-passthrough.flow.yaml` — fixture that currently expects literal pass-through; will need an updated companion fixture that demonstrates resolution (post-snapshot).
+5. Existing `assert` patterns elsewhere in the codebase: `tests/helpers.bash::assert_*` shows the shape; `assert` verb script will be a new top-level invocation: `bash scripts/browser-assert.sh --selector .toast-success --text-contains "successfully"`.
