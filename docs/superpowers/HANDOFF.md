@@ -1,8 +1,8 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-10 — Phase 11 ✅ FEATURE-COMPLETE for v1)
+## Where the project stands (as of 2026-05-10 — Selector-mode plumbing 1/4 (fill) SHIPPED; cache dispatches `[click fill]`)
 
-main is at tag `v0.51.0-phase-11-part-2-ii-propose` (HEAD `71e4e4f`). **Phases 1-9 SHIPPED + Phase 11 ✅ FEATURE-COMPLETE for v1 (parts 1+2, 5/5 sub-parts) + `cache-write-security.md` recipe SHIPPED (PR #94).** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); **Phase 11 closed at 5/5 sub-parts** — full memory implementation (lib + verb + self-heal + manual `--pattern` + auto-cluster `propose`). Future Phase 11 work is hardening (slug heuristic, auto-record, pattern-equivalence canonicalization, active observation) — all post-v1 backlog.
+main is at tag `v0.52.0-selector-mode-fill` (HEAD `5a7502e`). **Phases 1-9 SHIPPED + Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5) + selector-mode plumbing IN FLIGHT — 1/4 verbs shipped (`fill` joined `click` in `browser-do --verb` whitelist; hover/press/select queued).** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); Phase 11 closed at 5/5 sub-parts; cache-write-security.md recipe SHIPPED (PR #94).
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
 
@@ -17,6 +17,16 @@ main is at tag `v0.51.0-phase-11-part-2-ii-propose` (HEAD `71e4e4f`). **Phases 1
 | recipe `cache-write-security.md` | Codifies Phase 11 part 1 cache-write contract: 5 rules (whitelist surface · canary refusal · best-effort writes · self-heal exit-code whitelist · schema-locked storage shape). WRONG/RIGHT snippets per rule. 8-case test template. "Don't" anti-patterns. Cross-references `privacy-canary.md`, `path-security.md`, `anti-patterns-tool-extension.md` (AP-7), Phase 11 design doc §6/§12/§3. Pure-docs PR; no tag bump. | ✅ |
 | 11-2-i | `browser-do --intent` gains `--pattern '/devices/:id'` + `--archetype devices-id` flags (symmetric with `record` sub-mode shipped 1-ii). **R1 — Resolution priority (most-explicit-wins):** `--archetype NAME` > `--pattern PAT` > `--url URL` > none → `cache_miss reason:no_pattern_for_url` (backwards-compat preserved). **R2 — `--archetype` honors `assert_safe_name`.** **R3 — `--pattern` is read-side only** (does NOT call `memory_record_pattern`; `record` remains sole pattern-writing path). **R4 — No new `cache_miss` reason variants** (matches 1-iii D3 disabled-vs-never-cached precedent). | ✅ |
 | 11-2-ii | `browser-do propose [--site] [--threshold N] [--url ...]` sub-mode — auto-cluster URL pattern detection. Reads URLs from `--url` args + stdin (one per line); clusters by templated pathname (numeric → `:id`, UUID → `:uuid`); emits `_kind:proposal` events for clusters meeting threshold AND not already in `patterns.json`. **C1 — Pure compute, no new persistence** (agent owns URL collection; composable with shell pipes). **C2 — Heuristic = numeric + UUID only for v1** (slug heuristic deferred — too high-entropy). **C3 — Default threshold N=3.** **C4 — Suppress already-known patterns.** **C5 — Always emit; never auto-record.** **C6 — Always exits 0.** New `scripts/lib/node/url-pattern-cluster.mjs` mirrors 1-i `url-pattern-resolver.mjs` precedent. **Phase 11 part 2 CLOSED. Phase 11 ✅ FEATURE-COMPLETE for v1.** | ✅ |
+
+### Selector-mode plumbing for `browser-do --verb` whitelist (PR #99 fill) — IN FLIGHT (1/4 verbs shipped)
+
+| Sub-PR | Scope | Status |
+|---|---|---|
+| selector-mode-fill | `scripts/browser-fill.sh` accepts `--selector CSS` (mutually exclusive with `--ref eN`; mirrors `browser-click.sh` precedent). `playwright-cli` + `chrome-devtools-mcp` adapter `tool_fill` accept `--ref\|--selector` alias. **`browser-do --verb` whitelist grows: `[click]` → `[click fill]`.** **S2 — playwright-lib `--selector` deferred** (driver IPC schema bump; coordinate with click in its own PR; doesn't make existing behavior worse — playwright-lib doesn't support --selector for click either). | ✅ (PR #99) |
+| selector-mode-hover | Same shape: `browser-hover.sh` + adapter `tool_hover` + whitelist append. | 🔲 next |
+| selector-mode-press | Same shape: `browser-press.sh` + adapter `tool_press` + whitelist append. | 🔲 |
+| selector-mode-select | Same shape: `browser-select.sh` + adapter `tool_select` + whitelist append. | 🔲 |
+| playwright-lib `--selector` driver plumbing | `runFill` + `runClick` flag handling + `case 'fill'`/`case 'click'` IPC handler updates (use `page.locator(selector)` instead of refMap lookup). Coordinate fill + click together to keep IPC schema bumps coherent. Independent of per-verb plumbing above. | 🔲 |
 
 ### Phase 9 progress (PRs #77 design, #78, #80, #82, #84, #86) — ✅ COMPLETE
 
@@ -51,13 +61,14 @@ main is at tag `v0.51.0-phase-11-part-2-ii-propose` (HEAD `71e4e4f`). **Phases 1
 ### Counters
 
 - **41 user-facing verbs** (browser-do shipped 1-ii; 1-iii/2-i/2-ii extend it — no new verbs).
+- **`browser-do --verb` whitelist:** `[click fill]` (selector-mode plumbing 1/4 — hover/press/select queued).
 - **5 lib helpers shipped post-Phase-7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`, `scripts/lib/flow.sh` (gained `flow_diff_steps` in 9-1-iv), `scripts/lib/flow_record.sh`, `scripts/lib/memory.sh` (Phase 11 1-i; gained D2 re-record-heals-disabled tweak in 1-iii).
 - **2 node helpers shipped Phase 11**: `scripts/lib/node/url-pattern-resolver.mjs` (1-i: URL→archetype lookup), `scripts/lib/node/url-pattern-cluster.mjs` (2-ii: URL clustering for propose).
 - **7 recipes shipped**: `add-a-tool-adapter.md`, `anti-patterns-tool-extension.md`, `body-bytes-not-body.md`, `model-routing.md`, `path-security.md`, `privacy-canary.md`, **`cache-write-security.md`** (Phase 11 part 1 follow-up; PR #94).
 - **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **883 tests pass / 0 fail / lint exit 0** locally (875 baseline + 8 browser-do.bats from 11-2-ii).
-- **93 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 14 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + **Phase 11 part 2-ii (PR #97)**; not counting this HANDOFF refresh).
+- **887 tests pass / 0 fail / lint exit 0** locally (883 baseline + 3 browser-fill.bats + 1 browser-do.bats from selector-mode-fill).
+- **95 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 15 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + Phase 11 part 2-ii (PR #97) + **selector-mode-fill (PR #99)**; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -90,35 +101,28 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: Phase 11 ✅ feature-complete for v1 — pick from 3 next-phase candidates
+## Next session: pick up at selector-mode-hover OR Phase 10 OR playwright-lib --selector OR Phase 11 v2 hardening
 
-Phase 11 ✅ FEATURE-COMPLETE for v1. PR #97 closes part 2 (auto-cluster `propose` sub-mode). Memory implementation is end-to-end: lib + verb + self-heal + manual `--pattern` + auto-cluster `propose`. **Future Phase 11 work is hardening** (slug heuristic, auto-record, pattern-equivalence canonicalization, active observation `recent_urls.jsonl`) — all post-v1 backlog items.
+Selector-mode plumbing 1/4 ✅ shipped (PR #99 fill). `browser-do --verb` whitelist now `[click fill]`. **Three of four selector-mode sub-PRs queued** (hover, press, select) plus the deeper playwright-lib driver `--selector` plumbing.
 
-**Three picks for next session:**
+**Recommended next sub-part:**
+- **selector-mode-hover** — same shape as PR #99 (smallest reviewable per-verb): `browser-hover.sh` accepts `--selector CSS` + adapter `tool_hover` accepts `--ref|--selector` alias + whitelist appends `hover`. Estimated tiny PR (~50 LOC + ~3 bats). Continues the selector-mode plumbing rollout; hover is highest-traffic action after click+fill.
 
-**Pick A — Phase 10 (schema migration tooling):**
-- Per parent spec §13.6. Necessary infrastructure when ANY v1 schema bumps to v2 (patterns.json, archetypes/*.json, baselines.json, _index.json, meta.json, config.json, sites profile JSONs all v1-frozen). Currently no urgent demand — no schema needs bumping today. Smaller PR; design shape is tooling not user-facing.
+**Open shape questions for selector-mode-hover (decide during plan-doc):**
+- Identical to PR #99 by design — mirror the locked decisions S1–S5. No new surface area beyond the verb name.
 
-**Pick B — Selector-mode plumbing for fill/hover/press/select (expand browser-do whitelist):**
-- `browser-do --verb` whitelist is `[click]` v1 because only click takes `--selector`. Adding `--selector` paths to fill/hover/press/select unlocks broader cache utility. Adapter ABI work; medium-large PR (per-verb + per-adapter); independent prerequisite. **Highest user-value gain** of the three picks — extends Phase 11 cache to 4× more verbs.
-
-**Pick C — Phase 11 v2 hardening (any single item):**
-- Slug heuristic in `url-pattern-cluster.mjs` (entropy-based; medium design surface).
-- `--auto-record` flag on `browser-do propose` (small).
-- Pattern-equivalence canonicalization (`/devices/:id` ≡ `/devices/:itemId`; small-medium).
-- Active observation log (`recent_urls.jsonl`; small-medium; introduces new schema → coordinates with Phase 10).
-
-Each is independent + small enough to ship as a single PR.
-
-**Recommended:** **Pick B (selector-mode plumbing)** for highest user-value gain. Phase 11 cache exists but only dispatches `click`; expanding to `fill` first unlocks form-filling cache hits which are the highest-traffic agent action after click. Sub-split into per-verb PRs (start with `fill`).
+**Alternative picks:**
+- **Pick A — Phase 10 (schema migration tooling)** — necessary infra; no urgent demand.
+- **Pick C — playwright-lib `--selector` driver plumbing** — deeper PR (IPC schema + `runFill` + `runClick` + `case 'fill'`/`case 'click'` IPC handlers). Coordinate fill + click together to keep IPC schema bumps coherent. Independent of per-verb plumbing rollout. Lets `browser-do --verb fill` work through playwright-lib (currently routes to playwright-cli only).
+- **Pick D — Phase 11 v2 hardening** (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / active observation `recent_urls.jsonl`).
 
 **Phase ordering recap:**
 - Phase 8 ✅ COMPLETE (4/4 obscura + router promotion)
 - Phase 9 ✅ COMPLETE (5/5 flow runner)
-- **Phase 11 ✅ FEATURE-COMPLETE for v1** (5/5 sub-parts: memory cache + verb + self-heal + manual `--pattern` + auto-cluster `propose`)
+- Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5: memory cache + verb + self-heal + manual `--pattern` + auto-cluster `propose`)
 - Recipe `cache-write-security.md` ✅ SHIPPED (PR #94)
+- **Selector-mode plumbing IN FLIGHT — 1/4 verbs shipped** (`fill` joined `[click]`; `hover`/`press`/`select` queued; playwright-lib driver `--selector` plumbing independent)
 - Phase 10 🔲 — schema migration tooling
-- Adapter selector-mode plumbing 🔲 — expand `--verb` whitelist beyond `[click]`
 - Phase 11 v2 hardening 🔲 — slug heuristic / `--auto-record` / canonicalization / active observation
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
