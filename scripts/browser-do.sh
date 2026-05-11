@@ -50,6 +50,56 @@ _verb_in_whitelist() {
 # scanning is a future hardening pass.
 readonly CANARY_SENTINEL='PASSWORD-CANARY'
 
+# --- Phase 11 v2 part 1: observation log (events.jsonl) writer ---
+# Tee per-invocation cache-hit/miss observations into a JSONL log under
+# ${BROWSER_SKILL_HOME}/memory/events.jsonl. Doctor's read side (PR #113)
+# consumes the .cache_hit field to report a real hit-rate.
+#
+# Shape: each line is a JSON object with at least .cache_hit (bool) + .ts
+# (ISO 8601). Optional fields: .site, .archetype_id, .reason, .dispatched_verb,
+# .dispatch_rc. Intent strings are NEVER logged — user input could leak.
+# Doctor only needs .cache_hit; everything else is best-effort context.
+#
+# Best-effort writer. Failure must NOT taint the verb's exit code; emits a
+# warn: line and continues. Same contract as memory_record write-back failures
+# in the existing dispatch path.
+#
+# Append-only. File created mode 0600; parent dir mode 0700.
+#
+# Signature: _record_event JSON_STRING
+# Caller builds the per-event JSON (each call site has different fields);
+# this helper adds {ts, verb, mode} envelope and appends.
+_record_event() {
+  local payload="$1"
+  local events_dir events_file ts line
+  events_dir="${BROWSER_SKILL_HOME}/memory"
+  events_file="${events_dir}/events.jsonl"
+  ts="$(now_iso)"
+
+  if ! mkdir -p "${events_dir}" 2>/dev/null; then
+    warn "browser-do: could not create memory dir; observation log skipped"
+    return 0
+  fi
+  chmod 700 "${events_dir}" 2>/dev/null || true
+
+  if ! line="$(printf '%s' "${payload}" | jq -c --arg ts "${ts}" \
+      '. + {ts:$ts, verb:"do", mode:"intent"}' 2>/dev/null)"; then
+    warn "browser-do: events.jsonl encode failed (best-effort; action exit unchanged)"
+    return 0
+  fi
+
+  # O_APPEND on POSIX is atomic for writes under PIPE_BUF (4KB); jsonl lines
+  # are well below that, so concurrent appenders interleave by line, not by
+  # character. Same pattern as standard audit-log writers.
+  if ! printf '%s\n' "${line}" >> "${events_file}" 2>/dev/null; then
+    warn "browser-do: events.jsonl append failed (best-effort; action exit unchanged)"
+    return 0
+  fi
+
+  # First write may have raced umask; chmod is idempotent thereafter.
+  chmod 600 "${events_file}" 2>/dev/null || true
+}
+
 _canary_check() {
   local field="$1" value="$2"
   if printf '%s' "${value}" | grep -qF -- "${CANARY_SENTINEL}"; then
@@ -305,6 +355,8 @@ if [ -z "${archetype_id}" ]; then
       archetype_id:null, reason:"no_pattern_for_url",
       suggestion:"snapshot+pick+record"}')"
   duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
+  _record_event "$(jq -nc --arg site "${site}" \
+    '{cache_hit:false, site:$site, reason:"no_pattern_for_url"}')"
   summary_json verb=do mode=intent cache_hit=false reason=no_pattern_for_url \
     site="${site}" duration_ms="${duration_ms}" status=miss
   exit "${EXIT_EMPTY_RESULT}"
@@ -319,6 +371,8 @@ if [ -z "${selector}" ]; then
       archetype_id:$arch, reason:"intent_not_cached",
       suggestion:"snapshot+pick+record"}')"
   duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
+  _record_event "$(jq -nc --arg site "${site}" --arg arch "${archetype_id}" \
+    '{cache_hit:false, site:$site, archetype_id:$arch, reason:"intent_not_cached"}')"
   summary_json verb=do mode=intent cache_hit=false reason=intent_not_cached \
     site="${site}" archetype_id="${archetype_id}" duration_ms="${duration_ms}" status=miss
   exit "${EXIT_EMPTY_RESULT}"
@@ -369,6 +423,10 @@ elif [ "${dispatch_rc}" -eq "${EXIT_EMPTY_RESULT}" ] || [ "${dispatch_rc}" -eq "
 fi
 
 duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
+_record_event "$(jq -nc --arg site "${site}" --arg arch "${archetype_id}" \
+  --arg dv "${arg_verb}" --argjson rc "${dispatch_rc}" \
+  '{cache_hit:true, site:$site, archetype_id:$arch,
+    dispatched_verb:$dv, dispatch_rc:$rc}')"
 summary_json verb=do mode=intent cache_hit=true site="${site}" \
   archetype_id="${archetype_id}" duration_ms="${duration_ms}" \
   dispatched_verb="${arg_verb}" dispatch_rc="${dispatch_rc}" \

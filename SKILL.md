@@ -118,8 +118,9 @@ If `doctor` reports `~/.browser-skill` missing, run `./install.sh` (or
 
 - **Pending schema migrations** — `warn: N pending migration(s) — run 'browser-migrate check' for details`.
   Doctor never auto-migrates (MIG4 invariant from Phase 10 design); apply via `browser-migrate run`.
-- **Memory cache hit-rate** — `ok: memory cache hit rate: X% (H/T events)` when
-  `${BROWSER_SKILL_HOME}/memory/events.jsonl` is present; `n/a (observation log not enabled — Phase 11 v2 pending)` otherwise.
+- **Memory cache hit-rate** — `ok: memory cache hit rate: X% (H/T events)` once
+  `browser-do --intent` has run at least once (writer landed in Phase 11 v2 part 1;
+  events.jsonl is lazy-created mode 0600 inside the mode-0700 memory dir).
   Cheapest daily ROI signal: high hit-rate = the cache is paying for itself; low/empty = repetition isn't compounding yet.
 
 ## Output contract

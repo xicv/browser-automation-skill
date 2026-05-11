@@ -13,6 +13,27 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 11 v2 part 1 — events.jsonl writer (Pick A1) — lights up doctor's cache-hit-rate read side
+
+Closes the loop with PR #113. Doctor's read side has been waiting for a writer since the previous release; this PR adds it. Same forward-compat dependency landing pattern as Phase 7-1-v `meta.is_baseline:true` → Phase 9-1-v `baseline save`.
+
+- [feat] **`scripts/browser-do.sh` now tees per-invocation observations to `${BROWSER_SKILL_HOME}/memory/events.jsonl`.** Three call sites (cache_hit:true, cache_hit:false reason:no_pattern_for_url, cache_hit:false reason:intent_not_cached) each append one line. After Phase 11 v2 part 1 ships, `browser-doctor.sh` reports a real cache-hit-rate percentage instead of `n/a (observation log not enabled — Phase 11 v2 pending)`.
+- [feat] **New helper `_record_event JSON_STRING`** in `browser-do.sh`. Caller builds the per-event JSON (each call site has different fields); helper adds `{ts, verb:"do", mode:"intent"}` envelope + appends. Best-effort writer — failure emits `warn:` and continues; never taints the dispatched verb's exit code. **Mirrors the existing `memory_record` write-back contract** (best-effort; exit unchanged on cache-write failure).
+- [security] **Intent strings are NEVER logged.** Doctor only reads `.cache_hit` (bool); other fields (`site`, `archetype_id`, `reason`, `dispatched_verb`, `dispatch_rc`) are best-effort context but **user-supplied intent text never reaches the log**. Defense-in-depth: even if a hostile intent somehow bypassed `_canary_check`, it cannot leak through `events.jsonl`.
+- [feat] **File mode 0600 (rest); parent dir mode 0700.** Append-only via POSIX O_APPEND atomicity (jsonl lines well below PIPE_BUF 4KB). `chmod 600` post-write is idempotent.
+- [feat] **Forward-compat shape:** each line is `{ts:ISO8601, verb:"do", mode:"intent", cache_hit:bool, site, archetype_id?, reason?, dispatched_verb?, dispatch_rc?}`. Phase 11 v2 part 2 may add window-filtering in doctor (`--window 7d`) once events.jsonl line counts grow; today's lifetime ratio is good enough.
+- [internal] 6 new bats in `tests/browser-do.bats` (35 → 41 cases): cache_hit:true append + cache_hit:false (both reason variants) appends + mode 0600 + privacy defense-in-depth (intent string never leaks) + append-not-truncate across 3 invocations.
+
+**Sub-scope (this PR):**
+- **No `record` sub-mode logging.** Only `--intent` mode (the cache-lookup path) writes to events.jsonl. `record` is an explicit write-back from the agent; doctor's metric is about cache utilization, not user-driven recording.
+- **No `propose` sub-mode logging.** Pure-compute mode (URL clustering); not a cache decision.
+- **No time-window queries from doctor.** Doctor still reports lifetime ratio. When the log grows, doctor can filter; not yet.
+- **No log rotation.** Append-only forever. Future: `clean-events` sub-mode on `browser-do` (or a new `browser-events` verb) for retention; deferred until events.jsonl growth becomes operational.
+- **No structured access (jq query/stats) on events.jsonl from a verb.** Doctor reads it directly via `jq -s`; cli-side aggregation deferred.
+- **No `_kind:cache_hit`/`_kind:cache_miss` shape divergence.** The same `summary_json verb=do mode=intent` shape doctor already counts is teed verbatim (modulo intent omission); no parallel event format.
+
+User-facing verb count unchanged (42). Doctor's `cache hit rate: n/a` message will switch to a real percentage on first `browser-do --intent` invocation post-upgrade.
+
 ### Phase 10 follow-up + Phase 11 v2 forward-compat — `browser-doctor` migrate-warn + memory cache hit-rate
 
 Single doctor refresh PR bundling two advisory checks. Both are read-only; neither changes doctor's exit code (still 0 on healthy adapters; still `EXIT_PREFLIGHT_FAILED` on real problems).
