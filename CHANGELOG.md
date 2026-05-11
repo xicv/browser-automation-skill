@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Pick D — README/SKILL.md refresh for `browser-migrate` + doctor n/a-message text fix
+
+Tiny doc-only PR (with one source-text tweak). Closes a doc-debt item pending since Phase 10 closure (`browser-migrate` shipped 4 PRs ago but the SKILL.md verb table never gained the row).
+
+- [docs] **SKILL.md gains a `Schema migration (browser-migrate)` verb table** with 5 sub-mode rows (`check`, `status`, `run`, `rollback`, `clean-backups`). Mirrors the existing `flow run` / `baseline save` row style — short sub-mode label, parent verb name in the section heading.
+- [docs] **SKILL.md gains a `Migration & schema evolution` section** covering per-schema versioning invariants: MIG4 (doctor never auto-migrates) · atomic-swap + automatic backup · manual rollback · PID-tracked lock file. Pointers to the Phase 10 design doc for full contract.
+- [docs] **SKILL.md intro:** "41 verbs" → "42 verbs"; intro list adds "per-schema state migration tooling".
+- [docs] **README.md:** "41 verbs" → "42 verbs" (intro + Layout block); Status line refreshed (Phase 10 SHIPPED, Phase 11 v2 part 1 SHIPPED, end-to-end ROI loop closed); Roadmap line refreshed ("v1.0 work ✅ COMPLETE"); test count 899 → 941+; Layout adds `lib/migrators/`.
+- [fix] **`scripts/browser-doctor.sh`:** stale `n/a` reason text fixed. Was "observation log not enabled — Phase 11 v2 pending" (accurate before PR #115); now "no events yet — run 'browser-do --intent' to generate cache observations" (accurate after PR #115 shipped the writer).
+- [internal] new `tests/docs-coverage.bats` (4 cases): SKILL.md has `migrate check`/`migrate run` rows · SKILL.md has the `Migration & schema evolution` section · SKILL.md intro NOT "41 verbs" · README.md intro NOT "41 verbs". Pins hand-curated doc rows against silent drift the same way `regenerate-docs.bats` pins the autogen block. Future verbs that ship without doc-row updates fail this suite in CI.
+- [internal] flipped 1 assertion in `tests/doctor.bats` (no-events case) — now also asserts the new accurate reason text + asserts the stale "Phase 11 v2 pending" string is GONE.
+
+**Sub-scope (this PR):**
+- **No `regenerate-docs.sh` changes.** SKILL.md verb tables are hand-curated, not autogen; the existing AUTOGEN block (tools table) is unchanged.
+- **No README quickstart edits** for `browser-migrate`. Quickstart focuses on the everyday flow (open + snapshot + click); migration is a maintenance verb agents only invoke when doctor reports pending count.
+- **No new recipe.** "Migration & schema evolution" lives in SKILL.md; Phase 10 design doc is the deep reference.
+- **No verb count change.** 42 user-facing verbs total — same count HANDOFF declared after PR #110 (`browser-migrate` landed); just propagated the count into the docs.
+
+User-facing verb count unchanged (42). Doctor's `n/a` message no longer claims Phase 11 v2 is pending.
+
 ### Phase 11 v2 part 1 — events.jsonl writer (Pick A1) — lights up doctor's cache-hit-rate read side
 
 Closes the loop with PR #113. Doctor's read side has been waiting for a writer since the previous release; this PR adds it. Same forward-compat dependency landing pattern as Phase 7-1-v `meta.is_baseline:true` → Phase 9-1-v `baseline save`.

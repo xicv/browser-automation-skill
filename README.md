@@ -1,8 +1,8 @@
 # browser-automation-skill
 
-A [Claude Code](https://claude.com/claude-code) skill for driving real browsers from an LLM. **41 verbs** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a per-archetype memory cache that lets agents skip LLM ref-resolution on repeat actions. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
+A [Claude Code](https://claude.com/claude-code) skill for driving real browsers from an LLM. **42 verbs** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a per-archetype memory cache that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
 
-> **Status:** Phases 1–9 SHIPPED + Phase 11 (memory) ✅ FEATURE-COMPLETE for v1 + selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). Phase 10 (schema migration tooling) and Phase 11 v2 hardening backlog remain. **Production-ready for the core flows.**
+> **Status:** Phases 1–11 ✅ ALL COMPLETE for v1. Phase 10 (schema migration tooling) ✅ shipped. Phase 11 v2 part 1 (events.jsonl writer) ✅ shipped — end-to-end ROI loop is closed (`browser-do --intent` → events.jsonl → `browser-doctor.sh` reports real cache-hit-rate). Selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). **Production-ready v1.0.**
 
 ## What it does
 
@@ -107,8 +107,8 @@ SKILL.md                # Claude Code skill manifest (verb table; updated at eve
 SECURITY.md             # threat model + disclosure
 .gitignore              # blocks credential / session / capture / memory patterns
 .githooks/pre-commit    # credential-leak blocker
-scripts/                # 41 verbs + 5 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers
-tests/                  # 899 bats; runs in <60s
+scripts/                # 42 verbs + 6 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers + lib/migrators/
+tests/                  # 941+ bats; runs in <60s
 references/             # routing-heuristics + recipes (cache-write-security, privacy-canary, path-security, body-bytes-not-body, model-routing, anti-patterns-tool-extension, add-a-tool-adapter)
 docs/superpowers/       # design specs + per-phase plan-docs + HANDOFF.md
 ```
@@ -125,4 +125,4 @@ Removes the `~/.claude/skills/browser-automation-skill` symlink. State at `~/.br
 
 See `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` for the design and `docs/superpowers/plans/` for executable plans. Current "what's next" lives in `docs/superpowers/HANDOFF.md` (refreshed after every shipped PR).
 
-**Remaining v1.0 work:** Phase 10 (schema migration tooling) + Phase 11 v2 hardening backlog (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / active observation `recent_urls.jsonl`) + a few quality follow-ups (daemon e2e for playwright-lib selector path; press cache-scope decision codification).
+**v1.0 work ✅ COMPLETE.** Remaining hardening (all opt-in, none blocking): Phase 11 v2 backlog A2-A6 (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / `self_heal_history[]` audit trail / active observation `recent_urls.jsonl`); daemon e2e for playwright-lib selector path; press cache-scope decision codification.

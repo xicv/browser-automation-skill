@@ -237,7 +237,7 @@ if [ -f "${cache_events_log}" ]; then
     jq -nc '{check:"memory_cache", hits:0, total:0, hit_rate_pct:null}'
   fi
 else
-  ok "memory cache hit rate: n/a (observation log not enabled — Phase 11 v2 pending)"
+  ok "memory cache hit rate: n/a (no events yet — run 'browser-do --intent' to generate cache observations)"
   jq -nc '{check:"memory_cache", hits:0, total:0, hit_rate_pct:null}'
 fi
 
