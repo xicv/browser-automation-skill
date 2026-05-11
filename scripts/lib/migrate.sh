@@ -348,6 +348,11 @@ migrate_status() {
 
 # migrate_clean_backups [N]
 # Discards backups beyond the newest N versions per schema. Default N=5.
+#
+# Implementation note: uses newline-separated find pipeline (rather than
+# space-joined values in an associative array) because callers may run with
+# IFS=$'\n\t' set globally — that breaks word-splitting on space inside
+# `printf '%s\n' ${array_value}`. Newlines are robust under all IFS settings.
 migrate_clean_backups() {
   local keep="${1:-${_MIGRATE_DEFAULT_KEEP}}"
   [[ "${keep}" =~ ^[0-9]+$ ]] || die "${EXIT_USAGE_ERROR}" "migrate_clean_backups: N must be integer (got: ${keep})"
@@ -358,25 +363,24 @@ migrate_clean_backups() {
   local schema_dir
   for schema_dir in "${backups_dir}"/*; do
     [ -d "${schema_dir}" ] || continue
-    # Group by basename-without-version; sort by version desc; keep top N.
-    local file basename_key v
-    declare -A by_key=()
-    while IFS= read -r file; do
-      local base="${file##*/}"
-      basename_key="${base%.bak.v*}"
-      v="${base##*.v}"
-      [[ "${v}" =~ ^[0-9]+$ ]] || continue
-      by_key["${basename_key}"]+="${v} "
-    done < <(find "${schema_dir}" -maxdepth 1 -type f -name '*.bak.v*' 2>/dev/null)
 
-    for basename_key in "${!by_key[@]}"; do
-      # Sort versions descending; drop top N; rm the rest.
-      local sorted
-      sorted="$(printf '%s\n' ${by_key[${basename_key}]} | sort -rn | tail -n +$(( keep + 1 )))"
+    # Discover unique basename-without-version keys via find + sed + sort -u.
+    local basenames
+    basenames="$(find "${schema_dir}" -maxdepth 1 -type f -name '*.bak.v*' -exec basename {} \; 2>/dev/null \
+                  | sed -E 's/\.bak\.v[0-9]+$//' | sort -u)"
+    [ -z "${basenames}" ] && continue
+
+    local basename_key versions v
+    while IFS= read -r basename_key; do
+      [ -z "${basename_key}" ] && continue
+      # Per-basename: list version numbers desc; drop top N; rm the rest.
+      versions="$(find "${schema_dir}" -maxdepth 1 -type f -name "${basename_key}.bak.v*" \
+                    -exec basename {} \; 2>/dev/null \
+                  | sed -E "s/^.*\.bak\.v//" | sort -rn | tail -n +$(( keep + 1 )))"
       while IFS= read -r v; do
         [ -z "${v}" ] && continue
         rm -f "${schema_dir}/${basename_key}.bak.v${v}"
-      done <<<"${sorted}"
-    done
+      done <<<"${versions}"
+    done <<<"${basenames}"
   done
 }
