@@ -230,14 +230,15 @@ fi
 # pathname (numeric → :id, UUID → :uuid); emits _kind:proposal events for
 # clusters meeting threshold AND not already in patterns.json.
 if [ "${sub_mode}" = "propose" ]; then
-  arg_site="" arg_threshold="3"
+  arg_site="" arg_threshold="3" arg_auto_record="false"
   cli_urls=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
-      --site)      arg_site="$2";      shift 2 ;;
-      --threshold) arg_threshold="$2"; shift 2 ;;
-      --url)       cli_urls+=("$2");   shift 2 ;;
-      -h|--help)   usage; exit 0 ;;
+      --site)        arg_site="$2";      shift 2 ;;
+      --threshold)   arg_threshold="$2"; shift 2 ;;
+      --url)         cli_urls+=("$2");   shift 2 ;;
+      --auto-record) arg_auto_record="true"; shift ;;
+      -h|--help)     usage; exit 0 ;;
       *) die "${EXIT_USAGE_ERROR}" "browser-do propose: unknown flag '$1'" ;;
     esac
   done
@@ -274,10 +275,25 @@ if [ "${sub_mode}" = "propose" ]; then
   # Filter clusters: count >= threshold AND templated NOT in known.
   emit_count=0
   skipped_known=0
+  auto_recorded=0
   while IFS= read -r cluster_event; do
     [ -z "${cluster_event}" ] && continue
     printf '%s\n' "${cluster_event}"
     emit_count=$(( emit_count + 1 ))
+    # Pick A3: when --auto-record, persist the (url_pattern, archetype_id)
+    # pair via memory_record_pattern. The proposal stream is already filtered
+    # to "not already in patterns.json", so each emit is a fresh pattern.
+    # memory_record_pattern is idempotent (per its docstring); best-effort
+    # write — failure emits warn: and continues; never taints exit code.
+    if [ "${arg_auto_record}" = "true" ]; then
+      _ar_url_pattern="$(printf '%s' "${cluster_event}" | jq -r '.url_pattern')"
+      _ar_arch_id="$(printf '%s' "${cluster_event}" | jq -r '.archetype_id')"
+      if memory_record_pattern "${site}" "${_ar_url_pattern}" "${_ar_arch_id}" 2>/dev/null; then
+        auto_recorded=$(( auto_recorded + 1 ))
+      else
+        warn "browser-do propose: auto-record failed for pattern '${_ar_url_pattern}' (best-effort)"
+      fi
+    fi
   done < <(printf '%s' "${cluster_output}" | jq -c \
     --argjson threshold "${arg_threshold}" \
     --argjson known "${known_json}" \
@@ -305,6 +321,7 @@ if [ "${sub_mode}" = "propose" ]; then
   duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
   summary_json verb=do mode=propose site="${site}" \
     proposals="${emit_count}" skipped_known="${skipped_known}" \
+    auto_recorded="${auto_recorded}" \
     threshold="${arg_threshold}" url_count="${#urls[@]}" \
     duration_ms="${duration_ms}" status=ok
   exit 0
