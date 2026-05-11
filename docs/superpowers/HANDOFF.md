@@ -1,8 +1,8 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-11 — Phase 10 ✅ COMPLETE for v1; v1.0 production-ready)
+## Where the project stands (as of 2026-05-11 — Phase 10 ✅ COMPLETE for v1; v1.0 production-ready; doctor refresh shipped)
 
-main is at tag `v0.59.0-phase-10-part-1-iii-first-migrator` (HEAD `1f5be98`). **Phases 1-11 ✅ ALL COMPLETE for v1.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); **Phase 10 closed at 3/3 sub-parts (schema migration tooling)**; Phase 11 closed at 5/5 sub-parts (memory cache); v1-polish bundle SHIPPED (PR #107); cache-write-security recipe SHIPPED (PR #94); selector-mode plumbing 3/4 + playwright-lib `--selector` SHIPPED (PRs #99/#101/#103/#105; press deferred per SS5).
+main is at tag `v0.60.0-doctor-migrate-cache-hit` (HEAD `e9c47e6`). **Phases 1-11 ✅ ALL COMPLETE for v1.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); **Phase 10 closed at 3/3 sub-parts (schema migration tooling)**; Phase 11 closed at 5/5 sub-parts (memory cache); v1-polish bundle SHIPPED (PR #107); cache-write-security recipe SHIPPED (PR #94); selector-mode plumbing 3/4 + playwright-lib `--selector` SHIPPED (PRs #99/#101/#103/#105; press deferred per SS5). **Doctor refresh SHIPPED (PR #113)** — surfaces pending migrations (Phase 10 follow-up; Pick C) + memory cache hit-rate (Phase 11 v2 forward-compat read side; Pick E-mini). Both advisory; doctor's exit-code contract unchanged.
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
 
@@ -14,6 +14,7 @@ main is at tag `v0.59.0-phase-10-part-1-iii-first-migrator` (HEAD `1f5be98`). **
 | 10-1-i | `scripts/lib/migrate.sh` foundation — 8-fn API (init, get/set_version, check, run, rollback, status, clean_backups). Per-schema versions in `versions.json` (mode 0600); `backups/<schema>/<basename>.bak.v<N>` (mode 0700/0600). Migrators registered via `lib/migrators/<schema>/v<from>_to_<to>.sh` pattern. `BROWSER_SKILL_MIGRATORS_DIR` test-only seam. Pure bash + jq; no Node. | ✅ |
 | 10-1-ii | `browser-migrate` verb — sub-mode dispatch (check/run/rollback/status/clean-backups). **Q3** typed-phrase confirmation (`migrate now` / `migrate rollback <schema>` / `clean backups`); `--yes` flag bypasses; non-TTY without `--yes` → `EXIT_TTY_REQUIRED (27)`. **Q4** PID-tracked lock at `.migrate.lock` mode 0600 (alive PID refuses; stale PID auto-cleared). `check`/`status` don't acquire the lock. **Bug fix:** `migrate_clean_backups` refactored to use newline-separated find pipelines (verb's `IFS=$'\n\t'` from common.sh broke unquoted-array word-splitting on space). | ✅ |
 | 10-1-iii | First real migrator — `scripts/lib/migrators/memory/v1_to_v2.sh` no-op identity (purely bumps `schema_version` 1→2). Validates registry + dispatch end-to-end against production code. Migration scope: every `*.json` under `${BROWSER_SKILL_HOME}/memory/` (patterns.json + archetype JSONs). **Phase 10 part 1 CLOSED. Phase 10 ✅ COMPLETE for v1.** Future per-schema migrators ship case-by-case (~30 LOC + ~3 bats per new migrator). | ✅ |
+| 10-followup (doctor) | `browser-doctor.sh` surfaces pending migrations as advisory `warn:`/`ok:` line + JSON `{check:"migrations",pending:N}` event. Sources `lib/migrate.sh`; calls `migrate_check` (read-only — no lock; **MIG4 invariant preserved**). Doctor never auto-migrates; user invokes `browser-migrate run`. 53 LOC + 2 bats on `tests/doctor.bats`. | ✅ (PR #113) |
 
 ### Phase 11 progress (PR #57 design, #88 1-i, #90 1-ii, #92 1-iii, #94 recipe, #95 2-i, #97 2-ii) — ✅ FEATURE-COMPLETE for v1 (5/5 sub-parts)
 
@@ -77,8 +78,9 @@ main is at tag `v0.59.0-phase-10-part-1-iii-first-migrator` (HEAD `1f5be98`). **
 - **7 recipes shipped**: `add-a-tool-adapter.md`, `anti-patterns-tool-extension.md`, `body-bytes-not-body.md`, `model-routing.md`, `path-security.md`, `privacy-canary.md`, **`cache-write-security.md`** (Phase 11 part 1 follow-up; PR #94).
 - **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **926 tests pass / 0 fail / lint exit 0** locally (899 baseline + 12 migrate.bats + 12 browser-migrate.bats + 3 migrators-memory.bats from Phase 10 1-i/1-ii/1-iii).
-- **108 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 19 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + Phase 11 part 2-ii (PR #97) + selector-mode-fill (PR #99) + selector-mode-hover (PR #101) + selector-mode-select (PR #103) + playwright-lib-selector (PR #105) + v1-polish bundle (PR #107) + Phase 10 design (PR #108) + Phase 10 parts 1-i/1-ii/1-iii (PRs #109/#110/**#111**); not counting this HANDOFF refresh).
+- **Doctor advisory output (PR #113):** 2 new check lines + 2 new machine JSON events: `{check:"migrations",pending:N}` + `{check:"memory_cache",hits:H,total:T,hit_rate_pct:P}`. Both never fail doctor; both compose forward-compat with future writers.
+- **931 tests pass / 0 fail / lint exit 0** locally (926 baseline + 5 doctor.bats from PR #113 doctor refresh).
+- **110 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 20 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + Phase 11 part 2-ii (PR #97) + selector-mode-fill (PR #99) + selector-mode-hover (PR #101) + selector-mode-select (PR #103) + playwright-lib-selector (PR #105) + v1-polish bundle (PR #107) + Phase 10 design (PR #108) + Phase 10 parts 1-i/1-ii/1-iii (PRs #109/#110/#111) + **doctor refresh (PR #113)**; not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -111,29 +113,27 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at Phase 11 v2 hardening OR daemon-e2e for selector path OR doctor-integration
+## Next session: pick up at Phase 11 v2 events.jsonl writer OR daemon-e2e for selector path OR README/SKILL refresh
 
-Phase 10 ✅ COMPLETE for v1 (PRs #108 design + #109/#110/#111 1-i/1-ii/1-iii). All 11 phases that were planned for v1 are now SHIPPED. **Project is production-ready v1.0.** Remaining work is hardening + quality + adoption — all opt-in, none blocking.
+Phase 10 ✅ COMPLETE for v1 (PRs #108 design + #109/#110/#111 1-i/1-ii/1-iii). Doctor refresh ✅ SHIPPED (PR #113 — Pick C closed: doctor surfaces pending migrations + memory cache hit-rate). All 11 phases planned for v1 are SHIPPED. **Project is production-ready v1.0.** Remaining work is hardening + quality + adoption — all opt-in, none blocking.
 
-**Four roughly equal-priority next picks (each independent):**
+**Three roughly equal-priority next picks (each independent). Pick A1 PROMOTED — doctor's read side is queued; lighting up the writer is the obvious next step.**
 
-**Pick A — Phase 11 v2 hardening (any single item; each independent):**
-- Slug heuristic in `url-pattern-cluster.mjs` (entropy-based; medium design surface).
-- `--auto-record` flag on `browser-do propose` (small).
-- Pattern-equivalence canonicalization (`/devices/:id` ≡ `/devices/:itemId`; small-medium).
-- Active observation log (`recent_urls.jsonl`; small-medium; **now coordinates with Phase 10's migrator pattern** — new schema gets `schema_version: 1` from inception + a registered v0_to_v1 migrator).
-- `self_heal_history[]` audit trail population (small).
+**Pick A — Phase 11 v2 hardening (5 items; each independent):**
+- **A1 (PROMOTED — RECOMMENDED) — events.jsonl writer.** Tee `summary_json verb=do mode=intent` summary lines into `${BROWSER_SKILL_HOME}/memory/events.jsonl` from `browser-do.sh`. Doctor's read side (PR #113) already consumes this shape — lighting up the writer flips doctor's `cache hit rate: n/a` to a real percent with zero doctor changes. Smallest follow-up that unlocks ROI signal end-to-end. Shape contract pinned by `tests/doctor.bats` (lines `cache_hit:true|false` on each event). Estimated ~25 LOC + ~3 bats.
+- A2 — Slug heuristic in `url-pattern-cluster.mjs` (entropy-based; medium design surface).
+- A3 — `--auto-record` flag on `browser-do propose` (small).
+- A4 — Pattern-equivalence canonicalization (`/devices/:id` ≡ `/devices/:itemId`; small-medium).
+- A5 — `self_heal_history[]` audit trail population (small).
+- A6 (deferred — Phase 11 v2-adjacent) — Active observation log (`recent_urls.jsonl`; small-medium; **now coordinates with Phase 10's migrator pattern** — new schema gets `schema_version: 1` from inception + a registered v0_to_v1 migrator).
 
 **Pick B — Daemon e2e for playwright-lib selector path:**
 - Write `tests/playwright-lib_stateful_e2e.bats` cases that spin up the daemon, open a page, fill/click via `--selector`. Independent from PR #105's parse-layer tests; covers the IPC handler selector branches end-to-end. Estimated small-medium PR.
 
-**Pick C — Doctor integration with migrate_check (tiny):**
-- `browser-doctor.sh` could optionally call `migrate_check` (read-only) and surface pending migrations as a doctor warning. **Don't auto-migrate**; just signal. Tiny PR (~30 LOC + ~2 bats); closes one Phase 10 follow-up cleanly.
-
 **Pick D — README/SKILL.md refresh for browser-migrate (tiny):**
-- v1-polish (PR #107) refreshed README+SKILL.md but predates Phase 10 verb addition. Now `browser-migrate` is a verb but doesn't appear in the SKILL.md verb table. Tiny doc-only PR adds the row + a "Migration & schema evolution" section.
+- v1-polish (PR #107) refreshed README+SKILL.md but predates Phase 10 verb addition. Now `browser-migrate` is a verb but doesn't appear in the SKILL.md verb table. Tiny doc-only PR adds the row + a "Migration & schema evolution" section. (PR #113 did touch SKILL.md doctor section, not the verb table — D still pending.)
 
-**Recommended: Pick C (doctor integration)** — smallest reviewable PR with concrete user-visible value (doctor surfaces pending migrations); closes one Phase 10 follow-up while context fresh. Then **Pick D** to keep docs current. Then **Pick A** items at your pace.
+**Recommended: Pick A1 (events.jsonl writer)** — closes the loop from PR #113. Doctor's read side ships value today; lighting up the writer means the next time a user runs `browser-do --intent`, doctor's hit-rate line becomes meaningful. Smallest reviewable PR with concrete user-visible value. Then **Pick D** to keep docs current. Then remaining **Pick A** items at your pace.
 
 **Phase ordering recap:**
 - Phases 1-9 ✅ ALL COMPLETE
@@ -143,11 +143,12 @@ Phase 10 ✅ COMPLETE for v1 (PRs #108 design + #109/#110/#111 1-i/1-ii/1-iii). 
 - v1-polish (README+SKILL.md+macOS-flake+press-deferral+adapter-hints) ✅ SHIPPED (PR #107)
 - Selector-mode plumbing — 3/4 verbs shipped (fill+hover+select joined click; press deferred per SS5)
 - playwright-lib `--selector` ✅ SHIPPED (PR #105 — fill+click adapter-complete)
+- **Doctor refresh ✅ SHIPPED (PR #113)** — migrate-warn + memory cache hit-rate read side
 - **All v1 phases ✅ COMPLETE. Project is production-ready v1.0.**
-- Doctor + migrate_check integration 🔲 — tiny follow-up
-- README/SKILL.md refresh for browser-migrate 🔲 — tiny doc-only follow-up
-- Daemon e2e for playwright-lib selector path 🔲 — quality follow-up
-- Phase 11 v2 hardening backlog 🔲 — 5 independent items
+- Phase 11 v2 events.jsonl writer 🔲 — Pick A1 (PROMOTED to recommended)
+- README/SKILL.md refresh for browser-migrate 🔲 — Pick D, tiny doc-only follow-up
+- Daemon e2e for playwright-lib selector path 🔲 — Pick B, quality follow-up
+- Phase 11 v2 hardening backlog 🔲 — 4 remaining independent items (A2-A6)
 - Adoption / cookbook / video demos 🔲 — Stage 4 work (per the staged "next-step" plan)
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
@@ -202,7 +203,7 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Padded-NNN-id-as-string pattern** (codified in 7-1-i): zero-padded identifiers (`001`, `042`, `999`) are **strings**, not integers — `summary_json`'s numeric regex now rejects leading-zero ints. Future padded-id fields (capture_id today; possibly baseline_id in flow runner) preserve padding through the summary serializer.
 - **Failure-path-finalize pattern** (codified in 7-1-i): when a verb opens a side-effect resource (capture dir, lock file, temp dir), the failure branch must run the same finalization as success — never leave `in_progress` orphans on disk. Test the failure-finalize directly; agents discovering an `in_progress` capture dir is a regression.
 - **Defense-in-depth validation pattern** (codified in 7-ii): same validation at three layers (bash verb → bridge → daemon-child). Each layer is cheap (<10 lines). Daemon-child layer is the only required test surface for non-CLI IPC paths.
-- **HANDOFF-refresh-as-separate-PR pattern** (proven 14 times now: PR #47, #50, #52, #54, #67, #69, #71, #74, #76, #79, #81, #83, #85, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh). **Combined-refresh exception** (PR #74): when two substantive PRs land back-to-back without HANDOFF-impacting differences (e.g. 8-1-iii + a focused jq-fix), one combined refresh works.
+- **HANDOFF-refresh-as-separate-PR pattern** (proven 20+ times now: PR #47, #50, #52, #54, #67, #69, #71, #74, #76, #79, #81, #83, #85, #112, current): tiny docs PR between substantive sub-parts / between phases. Doesn't bloat code-review PRs with state-tracking churn. Especially valuable at phase boundaries. Pure-docs-PR is the one exception (recipe-doc PR #55 folded HANDOFF refresh). **Combined-refresh exception** (PR #74): when two substantive PRs land back-to-back without HANDOFF-impacting differences (e.g. 8-1-iii + a focused jq-fix), one combined refresh works.
 - **New-adapter-CI-trap pattern** (codified in 8-1-i CI fixup): adding a 4th adapter without a stub binary breaks the **two existing tests** that assert `"all checks passed"` (doctor.bats:12 + install.bats:103). Reason: doctor's exit-status matrix returns `partial` (still exit 0) when ≥1 adapter is OK but ≥1 fails — the **output assertion** fails (warn line replaces "all checks passed") even though `assert_status 0` passes. Fix shape: ship `tests/stubs/<adapter>` mirroring `tests/stubs/playwright-cli`'s shape + wire `<ADAPTER>_BIN=${STUBS_DIR}/<adapter>` into both tests. **Future adapter PRs MUST include the stub + test wiring in the same PR** — CI failure on first push otherwise. Two precedents now (playwright-cli stub + obscura stub).
 - **Streaming-events-via-direct-jq pattern** (codified in 8-1-ii): when an adapter's per-result events carry **arbitrary JSON values** (e.g. `eval` field is `serde_json::Value` upstream — can be string/number/array/null/object), `emit_event` falls short — its `key=value` autodetect only handles scalar types. Bypass `emit_event` for those streaming events and emit via direct `jq -c '...'` over the upstream payload (with `+ {event:"name"}` add and field projection). `emit_summary` stays the path for **summary** lines (fixed scalar fields, validation guards). Lint tier 3 only requires the adapter sources `output.sh`; not every line must go through emit helpers.
 - **Stub-version-short-circuit-before-log pattern** (codified in 8-1-ii): when a fixture-based stub's binary doubles as a `--version` health-check responder (cf. tests/stubs/obscura), the `--version` branch MUST short-circuit and return BEFORE the STUB_LOG_FILE write. Otherwise, doctor probes during unrelated tests pollute argv-shape assertion logs and cause spurious matches in subsequent grep-based tests. Pattern is enforced by a dedicated bats case (`stub --version short-circuits before fixture lookup`).
@@ -219,7 +220,8 @@ Design doc: `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md`. Decis
 - **Cross-platform-stat-trap pattern** (re-confirmed by 9-1-iii CI fixup): GNU `stat -f` does NOT fail — it dumps filesystem-status info instead. Always use `stat -c '%a' (GNU first) || stat -f '%Lp' (BSD fallback)` ordering for file-mode checks; reverse order yields garbage on Linux + breaks the test silently. Same precedent as common.sh::file_mode (HANDOFF prior entry). **Every new bats test using `stat` for file-mode MUST follow this ordering.**
 - **gh-pr-checks-watch race-condition pattern** (proven 2× this session — PRs #70 + #82): `until ! grep -q IN_PROGRESS <<< "$(gh pr view ... statusCheckRollup ...)"; do sleep 25; done` exits prematurely when the PR's CI checks haven't materialized yet (empty rollup → grep returns 1 → `! grep` returns 0 → loop exits). Fix: require BOTH `[ -n "${s}" ]` AND `! grep -q IN_PROGRESS <<<"${s}"`. Single-line bash-pattern fix; saves 5+ min on every CI fixup-and-watch cycle.
 - **Strip-timing-from-semantic-comparison pattern** (codified in 9-1-iv `flow_diff_steps`): when comparing two run outputs for "did this match", strip timing-sensitive fields (`duration_ms`, `started_at`, `finished_at`) BEFORE the comparison — they always vary between runs and aren't semantic differences. Without this, EVERY replay would diverge on EVERY step. Generalizes to any "did the output match" check across runs (Phase 11 cache-prediction-vs-actual checks, future flow vs flow comparison, future capture-vs-baseline diff). **Always pre-strip timing fields in any cross-run comparison.**
-- **Forward-compat dependency landing pattern** (codified through Phase 7-1-v → Phase 9-1-v B1 contract; high leverage at phase closure): when Phase N implements a behavior whose contract is needed by Phase N+1, **land the contract dependency in Phase N as forward-compat code** even though Phase N+1 isn't writing yet. Phase 7-1-v added `meta.is_baseline:true` skip-rule to `capture_prune` despite no verb writing the field at the time; Phase 9-1-v's `baseline save` then "lit up" the existing skip-rule with zero migration cost. Decision rubric: **if Phase N's data-write side has a foreseeable consumer in Phase N+1, ship the read/skip side now and let it dormant; saves migrate-schema work + retroactive contract-rewrite risk later.** Same pattern shape as Phase 11 design's pre-shipped `cache-write-security.md` recipe — design contract first, implementation follows.
+- **Forward-compat dependency landing pattern** (codified through Phase 7-1-v → Phase 9-1-v B1 contract; reaffirmed PR #113 doctor's read-side cache-hit-rate; high leverage at phase closure): when Phase N implements a behavior whose contract is needed by Phase N+1, **land the contract dependency in Phase N as forward-compat code** even though Phase N+1 isn't writing yet. Phase 7-1-v added `meta.is_baseline:true` skip-rule to `capture_prune` despite no verb writing the field at the time; Phase 9-1-v's `baseline save` then "lit up" the existing skip-rule with zero migration cost. PR #113 doctor reads `${BROWSER_SKILL_HOME}/memory/events.jsonl` (Pick A1's `cache_hit:true|false` shape) before any writer exists — when the writer lands, doctor's `n/a` line flips to a real percent with zero doctor changes. Decision rubric: **if Phase N's data-write side has a foreseeable consumer in Phase N+1, ship the read/skip side now and let it dormant; saves migrate-schema work + retroactive contract-rewrite risk later.** Reverse rubric (the read side pins the shape): **the read side's bats pin the on-disk shape contract**; the future writer can't deviate without changing the read-side tests too. Same pattern shape as Phase 11 design's pre-shipped `cache-write-security.md` recipe — design contract first, implementation follows.
+- **Post-merge tag-placement pattern** (codified in PR #113): GitHub squash-merges create a brand new commit on main; the pre-squash branch tip is orphaned (still reachable by tag, but not from main). **Tag AFTER the squash-merge, on the new main commit** — not before the merge on the branch tip. Local workflow: `gh pr merge --squash` → `git checkout main && git pull` → `git tag vX.Y.Z $(git rev-parse HEAD)` → `git push origin vX.Y.Z`. If tag was placed pre-squash, fix with: `git tag -d TAG && git push origin :refs/tags/TAG && git tag TAG <squash-merge-sha> && git push origin TAG`. Confirmed by precedent: `v0.59.0-...` points at `1f5be98` (squash-merge SHA of PR #111), not the pre-squash branch tip. **Future PR-shipping checklists must move tag-creation AFTER squash-merge.**
 
 ## Daemon state slots (shipped through 7-1-i — unchanged)
 
@@ -261,17 +263,18 @@ Plus `initialize` + `notifications/initialized` (MCP handshake). 19 tool handler
 ## When you start (next session)
 
 1. `git checkout main && git pull --ff-only origin main`
-2. Confirm tag is `v0.46.0-phase-09-part-1-v-history-and-baseline` and main HEAD matches `ea7442e`.
-3. **Recommended:** Phase 11 part 1-i — `lib/memory.sh` foundation (UNBLOCKED by Phase 9 closure). Per design doc `2026-05-08-phase-11-memory-design.md` §5. Pure read/write API; no verb integration yet (11-1-ii). Open-shape questions in next-session block above (URLPattern resolution mechanism / `_index.json` shape / lazy-creation precedent).
-4. **Alternative (smaller):** Phase 10 — schema migration tooling. Per parent spec §13.6.
-5. **Alternative (tiny):** ship `references/recipes/flow-record-secrets.md` recipe-doc (per 9-1-iii closure note). Pure-docs PR; doesn't block Phase 11.
-6. **Alternative (small follow-up):** per-aspect file diff for `replay`/`history diff` (deferred from 9-1-iv).
+2. Confirm tag is `v0.60.0-doctor-migrate-cache-hit` and main HEAD matches `e9c47e6`.
+3. Read CHANGELOG `[Unreleased]` block — most recent shipped behavior; the doctor refresh (PR #113) is the top entry.
+4. **Recommended:** Pick A1 — Phase 11 v2 events.jsonl writer. Tee `summary_json verb=do mode=intent` summary lines into `${BROWSER_SKILL_HOME}/memory/events.jsonl` from `browser-do.sh`. Doctor's read side already consumes this shape (PR #113); lighting up the writer flips doctor's `cache hit rate: n/a` to a real percent. Shape contract pinned by `tests/doctor.bats` (events have `cache_hit:true|false` field). Estimated ~25 LOC + ~3 bats.
+5. **Alternative (tiny):** Pick D — README/SKILL.md refresh for `browser-migrate` verb (predates Phase 10; verb table missing the row + needs "Migration & schema evolution" section).
+6. **Alternative (small-medium):** Pick B — Daemon e2e for playwright-lib selector path (independent from PR #105 parse-layer tests; covers IPC handler selector branches end-to-end).
+7. **Alternative (any single A2-A6):** Phase 11 v2 hardening (slug heuristic / `--auto-record` / pattern-equivalence / `self_heal_history[]` / `recent_urls.jsonl` observation log).
 
-Start with: read CHANGELOG since `v0.46.0-phase-09-part-1-v-history-and-baseline` to confirm no in-flight work, then propose Phase 11-1-i sub-part split (or alternative). User prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
+Start with: read CHANGELOG `[Unreleased]` block since `v0.60.0-doctor-migrate-cache-hit` to confirm no in-flight work, then propose Pick A1 sub-scope split (or alternative). User prefers "go for your recommendation" once the option-table is presented; default to the smallest reviewable PR delivering user-visible value.
 
-**Reading priority for Phase 11-1-i:**
-1. `docs/superpowers/specs/2026-05-08-phase-11-memory-design.md` — design contract. Decisions M1+U1+E1+H1 locked; storage shape frozen at v1.
-2. `scripts/lib/capture.sh::capture_init_dir` — lazy-creation precedent for `~/.browser-skill/captures/` mode 0700. Memory dir mirrors this shape.
-3. `scripts/lib/node/playwright-driver.mjs::createRequire` — node-helper dep-resolution precedent (try local require, fall back to npm-global). URLPattern resolution may use a tiny node helper.
-4. `scripts/lib/flow.sh::flow_apply_vars` — 9-1-ii lib. Memory's `${refs.X}` resolution semantics could compose against this in 11-1-ii.
-5. `references/recipes/privacy-canary.md` — applies to memory's interaction-record write side (cache must never carry credential bytes). Per design §6.
+**Reading priority for Pick A1 (events.jsonl writer):**
+1. `scripts/browser-do.sh` — three `summary_json verb=do mode=intent` call sites (current emit points: cache_hit=true, cache_hit=false no_pattern, cache_hit=false intent_not_cached). The writer tees these.
+2. `scripts/browser-doctor.sh` — read side already in place. Search for `cache_events_log` to see the on-disk shape it expects.
+3. `tests/doctor.bats` — bats cases pin the shape contract: events.jsonl lines have `.cache_hit` field as bool. Writer must preserve this.
+4. `scripts/lib/memory.sh::memory_init_dir` — lazy-creation precedent for `${BROWSER_SKILL_HOME}/memory/` mode 0700; events.jsonl gets mode 0600 inside it.
+5. `references/recipes/cache-write-security.md` — applies to events.jsonl too (no canary bytes; mode 0600; append-only).
