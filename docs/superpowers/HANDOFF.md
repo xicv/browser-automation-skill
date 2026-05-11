@@ -1,10 +1,19 @@
 Continue work on `browser-automation-skill` at `/Users/xicao/Projects/browser-automation-skill`. Read CLAUDE.md (if any), `SKILL.md`, and the most recent specs/plans under `docs/superpowers/specs/` and `docs/superpowers/plans/` before touching code.
 
-## Where the project stands (as of 2026-05-11 — Selector-mode plumbing fully adapter-complete for fill+click; whitelist `[click fill hover select]`)
+## Where the project stands (as of 2026-05-11 — Phase 10 ✅ COMPLETE for v1; v1.0 production-ready)
 
-main is at tag `v0.55.0-playwright-lib-selector` (HEAD `6ab59df`). **Phases 1-9 SHIPPED + Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5) + selector-mode plumbing IN FLIGHT — 3/4 verbs shipped (fill + hover + select joined click; press deferred per SS5) + playwright-lib `--selector` driver plumbing SHIPPED (PR #105 — fill + click adapter-complete across all three routed adapters).** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); Phase 11 closed at 5/5 sub-parts; cache-write-security.md recipe SHIPPED (PR #94).
+main is at tag `v0.59.0-phase-10-part-1-iii-first-migrator` (HEAD `1f5be98`). **Phases 1-11 ✅ ALL COMPLETE for v1.** Phase 6 closed at 11/11 verbs; Phase 7 closed at 5/5 (capture pipeline); Phase 8 closed at 4/4 (obscura adapter); Phase 9 closed at 5/5 (flow runner); **Phase 10 closed at 3/3 sub-parts (schema migration tooling)**; Phase 11 closed at 5/5 sub-parts (memory cache); v1-polish bundle SHIPPED (PR #107); cache-write-security recipe SHIPPED (PR #94); selector-mode plumbing 3/4 + playwright-lib `--selector` SHIPPED (PRs #99/#101/#103/#105; press deferred per SS5).
 
 **`summary_json` jq-reserved-keyword cleanup also shipped (PR #73).** The pre-existing local-only failure on `tests/browser-select.bats:6` (tracked since Phase 6 as "jq-version-dependent") was traced to `summary_json` building filters where caller-supplied field names doubled as jq variable names — collisions on `label`, `def`, `or`, `and`, `not`, etc. Fix prefixes internal jq variables with `_v_`; output JSON shape unchanged.
+
+### Phase 10 progress (PR #108 design, #109 1-i, #110 1-ii, #111 1-iii) — ✅ COMPLETE for v1 (3/3 sub-parts)
+
+| Sub-part | Scope | Status |
+|---|---|---|
+| 10 design | Phase 10 design doc (`2026-05-11-phase-10-schema-migration-design.md`). Locks MIG1+MIG2+MIG3+MIG4+MIG5. | ✅ |
+| 10-1-i | `scripts/lib/migrate.sh` foundation — 8-fn API (init, get/set_version, check, run, rollback, status, clean_backups). Per-schema versions in `versions.json` (mode 0600); `backups/<schema>/<basename>.bak.v<N>` (mode 0700/0600). Migrators registered via `lib/migrators/<schema>/v<from>_to_<to>.sh` pattern. `BROWSER_SKILL_MIGRATORS_DIR` test-only seam. Pure bash + jq; no Node. | ✅ |
+| 10-1-ii | `browser-migrate` verb — sub-mode dispatch (check/run/rollback/status/clean-backups). **Q3** typed-phrase confirmation (`migrate now` / `migrate rollback <schema>` / `clean backups`); `--yes` flag bypasses; non-TTY without `--yes` → `EXIT_TTY_REQUIRED (27)`. **Q4** PID-tracked lock at `.migrate.lock` mode 0600 (alive PID refuses; stale PID auto-cleared). `check`/`status` don't acquire the lock. **Bug fix:** `migrate_clean_backups` refactored to use newline-separated find pipelines (verb's `IFS=$'\n\t'` from common.sh broke unquoted-array word-splitting on space). | ✅ |
+| 10-1-iii | First real migrator — `scripts/lib/migrators/memory/v1_to_v2.sh` no-op identity (purely bumps `schema_version` 1→2). Validates registry + dispatch end-to-end against production code. Migration scope: every `*.json` under `${BROWSER_SKILL_HOME}/memory/` (patterns.json + archetype JSONs). **Phase 10 part 1 CLOSED. Phase 10 ✅ COMPLETE for v1.** Future per-schema migrators ship case-by-case (~30 LOC + ~3 bats per new migrator). | ✅ |
 
 ### Phase 11 progress (PR #57 design, #88 1-i, #90 1-ii, #92 1-iii, #94 recipe, #95 2-i, #97 2-ii) — ✅ FEATURE-COMPLETE for v1 (5/5 sub-parts)
 
@@ -60,15 +69,16 @@ main is at tag `v0.55.0-playwright-lib-selector` (HEAD `6ab59df`). **Phases 1-9 
 
 ### Counters
 
-- **41 user-facing verbs** (browser-do shipped 1-ii; 1-iii/2-i/2-ii extend it — no new verbs).
+- **42 user-facing verbs** (browser-do 1-ii + browser-migrate 10-1-ii; 1-iii/2-i/2-ii extend browser-do).
 - **`browser-do --verb` whitelist:** `[click fill hover select]` (selector-mode plumbing 3/4 — press deferred per SS5).
-- **5 lib helpers shipped post-Phase-7**: `scripts/lib/capture.sh`, `scripts/lib/sanitize.sh`, `scripts/lib/flow.sh` (gained `flow_diff_steps` in 9-1-iv), `scripts/lib/flow_record.sh`, `scripts/lib/memory.sh` (Phase 11 1-i; gained D2 re-record-heals-disabled tweak in 1-iii).
-- **2 node helpers shipped Phase 11**: `scripts/lib/node/url-pattern-resolver.mjs` (1-i: URL→archetype lookup), `scripts/lib/node/url-pattern-cluster.mjs` (2-ii: URL clustering for propose).
+- **6 lib helpers shipped post-Phase-7**: `capture.sh`, `sanitize.sh`, `flow.sh` (gained `flow_diff_steps` in 9-1-iv), `flow_record.sh`, `memory.sh` (Phase 11 1-i; D2 re-record-heals-disabled tweak in 1-iii), `migrate.sh` (Phase 10 1-i; clean_backups IFS-fix in 1-ii).
+- **2 node helpers shipped Phase 11**: `url-pattern-resolver.mjs` (1-i: URL→archetype lookup), `url-pattern-cluster.mjs` (2-ii: URL clustering for propose).
+- **1 migrators dir + 1 real migrator (Phase 10 1-iii)**: `scripts/lib/migrators/memory/v1_to_v2.sh` (no-op identity; bumps schema_version 1→2). Future per-schema migrators land case-by-case.
 - **7 recipes shipped**: `add-a-tool-adapter.md`, `anti-patterns-tool-extension.md`, `body-bytes-not-body.md`, `model-routing.md`, `path-security.md`, `privacy-canary.md`, **`cache-write-security.md`** (Phase 11 part 1 follow-up; PR #94).
 - **4 of 4 adapter shells exist**; all 4 routed to as defaults for at least one verb. obscura: `tool_extract` real-mode for `--scrape` + `--stealth`; remaining 7 verb-dispatch fns 41-stub by design. doctor enumerates `adapters_ok:4`.
 - **3 of 3 Tier-1 credential backends**.
-- **899 tests pass / 0 fail / lint exit 0** locally (895 baseline + 4 playwright-lib_adapter.bats from playwright-lib-selector).
-- **101 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 18 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + Phase 11 part 2-ii (PR #97) + selector-mode-fill (PR #99) + selector-mode-hover (PR #101) + selector-mode-select (PR #103) + **playwright-lib-selector (PR #105)**; not counting this HANDOFF refresh).
+- **926 tests pass / 0 fail / lint exit 0** locally (899 baseline + 12 migrate.bats + 12 browser-migrate.bats + 3 migrators-memory.bats from Phase 10 1-i/1-ii/1-iii).
+- **108 PRs merged total** (Phase 7 parts 1-i through 1-v + Phase 11 design + skill model-routing + 19 HANDOFF refreshes + Phase 8 parts 1-i/1-ii/1-iii/2-i + summary_json jq-keyword fix + Phase 9 design + Phase 9 parts 1-i/1-ii/1-iii/1-iv/1-v + Phase 11 parts 1-i/1-ii/1-iii + cache-write-security recipe (PR #94) + Phase 11 part 2-i (PR #95) + Phase 11 part 2-ii (PR #97) + selector-mode-fill (PR #99) + selector-mode-hover (PR #101) + selector-mode-select (PR #103) + playwright-lib-selector (PR #105) + v1-polish bundle (PR #107) + Phase 10 design (PR #108) + Phase 10 parts 1-i/1-ii/1-iii (PRs #109/#110/**#111**); not counting this HANDOFF refresh).
 
 ## Capture pipeline shape (shipped through 7-1-v — full)
 
@@ -101,41 +111,44 @@ Per-aspect files (Phase 7 inventory):
 
 **Auto-prune contract:** every `capture_finish` calls `capture_prune` at end. Idempotent. Skip rules: `is_baseline:true` (Phase 8 forward-compat), `status:"in_progress"` (in-flight protection). Cross-platform age parsing via `_capture_iso_to_epoch` (GNU `date -d` → BSD `date -j -f` fallback).
 
-## Next session: pick up at press-cache-decision OR Phase 10 OR Phase 11 v2 hardening OR daemon-e2e for selector path
+## Next session: pick up at Phase 11 v2 hardening OR daemon-e2e for selector path OR doctor-integration
 
-playwright-lib `--selector` ✅ shipped (PR #105). Selector-mode plumbing now adapter-complete for fill+click across all three routed adapters (playwright-cli + chrome-devtools-mcp + playwright-lib). 3/4 verbs shipped (fill+hover+select); press deferred per SS5.
+Phase 10 ✅ COMPLETE for v1 (PRs #108 design + #109/#110/#111 1-i/1-ii/1-iii). All 11 phases that were planned for v1 are now SHIPPED. **Project is production-ready v1.0.** Remaining work is hardening + quality + adoption — all opt-in, none blocking.
 
-**Three roughly equal-priority next picks (each independent):**
+**Four roughly equal-priority next picks (each independent):**
 
-**Pick A — Press cache-scope decision (tiny pure-docs PR if option b/c):**
-- Pick option (a) new `--focus-selector` flag on press, (b) skip from cache scope entirely, or (c) compose: agent calls `browser-do --verb click --intent "focus input"` followed by `browser-press --key Enter` (no cache for press; relies on existing focus state).
-- **Recommended (c) — no-op-for-cache.** Tiny pure-docs PR adds explicit "press not cacheable" note to `cache-write-security.md` recipe + closes SS5 deferral.
-
-**Pick B — Phase 10 (schema migration tooling):**
-- Per parent spec §13.6. Necessary infra when ANY v1 schema bumps to v2. Currently no urgent demand — no schema needs bumping today.
-
-**Pick C — Phase 11 v2 hardening (any single item):**
+**Pick A — Phase 11 v2 hardening (any single item; each independent):**
 - Slug heuristic in `url-pattern-cluster.mjs` (entropy-based; medium design surface).
 - `--auto-record` flag on `browser-do propose` (small).
 - Pattern-equivalence canonicalization (`/devices/:id` ≡ `/devices/:itemId`; small-medium).
-- Active observation log (`recent_urls.jsonl`; small-medium; coordinates with Phase 10).
+- Active observation log (`recent_urls.jsonl`; small-medium; **now coordinates with Phase 10's migrator pattern** — new schema gets `schema_version: 1` from inception + a registered v0_to_v1 migrator).
+- `self_heal_history[]` audit trail population (small).
 
-**Pick D — Daemon e2e for playwright-lib selector path:**
+**Pick B — Daemon e2e for playwright-lib selector path:**
 - Write `tests/playwright-lib_stateful_e2e.bats` cases that spin up the daemon, open a page, fill/click via `--selector`. Independent from PR #105's parse-layer tests; covers the IPC handler selector branches end-to-end. Estimated small-medium PR.
 
-**Recommended:** **Pick A — close press cache-scope decision** with option (c) recommendation. Smallest reviewable PR; codifies the SS5 deferral as a permanent decision in `cache-write-security.md`; closes one open question while context is fresh. Then go for **Pick C** items in subsequent sessions.
+**Pick C — Doctor integration with migrate_check (tiny):**
+- `browser-doctor.sh` could optionally call `migrate_check` (read-only) and surface pending migrations as a doctor warning. **Don't auto-migrate**; just signal. Tiny PR (~30 LOC + ~2 bats); closes one Phase 10 follow-up cleanly.
+
+**Pick D — README/SKILL.md refresh for browser-migrate (tiny):**
+- v1-polish (PR #107) refreshed README+SKILL.md but predates Phase 10 verb addition. Now `browser-migrate` is a verb but doesn't appear in the SKILL.md verb table. Tiny doc-only PR adds the row + a "Migration & schema evolution" section.
+
+**Recommended: Pick C (doctor integration)** — smallest reviewable PR with concrete user-visible value (doctor surfaces pending migrations); closes one Phase 10 follow-up while context fresh. Then **Pick D** to keep docs current. Then **Pick A** items at your pace.
 
 **Phase ordering recap:**
-- Phase 8 ✅ COMPLETE (4/4 obscura + router promotion)
-- Phase 9 ✅ COMPLETE (5/5 flow runner)
-- Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5: memory cache + verb + self-heal + manual `--pattern` + auto-cluster `propose`)
+- Phases 1-9 ✅ ALL COMPLETE
+- Phase 10 ✅ COMPLETE for v1 (3/3 sub-parts: lib + verb + first identity migrator)
+- Phase 11 ✅ FEATURE-COMPLETE for v1 (5/5: cache + verb + self-heal + manual --pattern + auto-cluster propose)
 - Recipe `cache-write-security.md` ✅ SHIPPED (PR #94)
-- **Selector-mode plumbing — 3/4 verbs shipped** (fill+hover+select joined click; press deferred per SS5)
-- **playwright-lib `--selector` ✅ SHIPPED** (PR #105 — fill+click adapter-complete)
-- Press cache-scope decision 🔲 — pick (a)/(b)/(c); recommend (c)
-- Phase 10 🔲 — schema migration tooling
-- Phase 11 v2 hardening 🔲 — slug heuristic / `--auto-record` / canonicalization / active observation
-- Daemon e2e for playwright-lib selector path 🔲 — independent quality follow-up
+- v1-polish (README+SKILL.md+macOS-flake+press-deferral+adapter-hints) ✅ SHIPPED (PR #107)
+- Selector-mode plumbing — 3/4 verbs shipped (fill+hover+select joined click; press deferred per SS5)
+- playwright-lib `--selector` ✅ SHIPPED (PR #105 — fill+click adapter-complete)
+- **All v1 phases ✅ COMPLETE. Project is production-ready v1.0.**
+- Doctor + migrate_check integration 🔲 — tiny follow-up
+- README/SKILL.md refresh for browser-migrate 🔲 — tiny doc-only follow-up
+- Daemon e2e for playwright-lib selector path 🔲 — quality follow-up
+- Phase 11 v2 hardening backlog 🔲 — 5 independent items
+- Adoption / cookbook / video demos 🔲 — Stage 4 work (per the staged "next-step" plan)
 
 ## Phase 11 — memory (design doc shipped; implementation queued AFTER Phase 9)
 
