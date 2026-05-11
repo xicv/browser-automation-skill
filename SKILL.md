@@ -116,6 +116,17 @@ invokes the skill — it points at the symlink under `~/.claude/skills/`. Use it
 in command examples so they work whether the user installed at `--user` or
 `--project` scope.
 
+## Agent-workflow recipes (end-to-end command sequences)
+
+See [`references/recipes/agent-workflows/`](references/recipes/agent-workflows/README.md) for tutorial-shaped walkthroughs:
+
+- [`login-then-scrape.md`](references/recipes/agent-workflows/login-then-scrape.md) — first task: register site, capture session, bulk scrape
+- [`incremental-pattern-discovery.md`](references/recipes/agent-workflows/incremental-pattern-discovery.md) — passive observation → propose → cache-hit loop end-to-end
+- [`flow-record-and-replay.md`](references/recipes/agent-workflows/flow-record-and-replay.md) — capture a manual interaction, replay, diff against baseline
+- [`cache-driven-bulk-operation.md`](references/recipes/agent-workflows/cache-driven-bulk-operation.md) — 50+ actions at zero LLM tokens (ROI proof)
+
+For pattern recipes (codified discipline: privacy-canary, path-security, cache-write-security, etc.) see [`references/recipes/`](references/recipes/).
+
 ## Tools
 
 The skill routes verbs to one of these underlying tools (precedence is decided

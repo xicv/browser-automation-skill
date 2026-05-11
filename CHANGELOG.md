@@ -13,6 +13,29 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Stage 4 part 1 — agent-workflow recipes (4 tutorial-shaped walkthroughs)
+
+All HANDOFF-locked PR picks shipped (PRs #113-#129). Remaining work was Stage 4 adoption: recipes / demo / cookbook. This PR ships **agent-workflow recipes** — distinct from existing pattern recipes (codified discipline). Workflow recipes show sequenced commands + expected output for actual user-facing tasks.
+
+- [docs] **`references/recipes/agent-workflows/`** new subdirectory + README index. 4 tutorial recipes:
+  - **`login-then-scrape.md`** — first end-to-end task: register site → store creds (stdin-only) → interactive login → bulk scrape via obscura adapter. The "hello world" of the skill.
+  - **`incremental-pattern-discovery.md`** — passive observation → propose → cache-hit loop end-to-end. Demonstrates PR #115 (events.jsonl) + PR #125 (recent_urls.jsonl) + PR #121 (--auto-record) + PR #119 (self_heal_history) together.
+  - **`flow-record-and-replay.md`** — `flow record` (wraps `playwright codegen`) → run with `--capture` → `baseline save` → re-run later → `history diff`. Codifies the Phase 9 strip-timing-from-comparison pattern.
+  - **`cache-driven-bulk-operation.md`** — 50+ actions at zero LLM tokens. The ROI-proof workflow: numerical breakdown of cache hit rate, wall-clock, token cost.
+- [docs] **`SKILL.md`** gains an "Agent-workflow recipes" section with links to all 4 + a pointer to the pattern-recipe directory.
+- [internal] 3 new bats in `tests/docs-coverage.bats`: (a) README index exists + links to all 4; (b) all 4 recipes exist + have **Goal:** + **Outcome:** statements; (c) recipes reference real verb names (drift guard — if a verb is renamed, the recipes must update).
+
+**Design decision: clean-state assumption.** Recipes assume a fresh `~/.browser-skill/` (or skip step 0 if already installed). Each walks the reader through the full setup. Open question from HANDOFF resolved in favor of reproducibility over brevity.
+
+**Sub-scope (this PR):**
+- **Pure docs PR + minimal bats.** No production code change.
+- **No demo video / asciinema cast.** Out of PR-mode; deferred to non-code stage-4 work.
+- **No blog post / dev.to article.** Out of PR-mode.
+- **No "agent-workflow" recipes for niche use cases** (e.g. multi-tab orchestration, audit pipelines). 4 representative cases cover the toolchain's main surfaces; more can land case-by-case.
+- **No quickstart-to-recipe linking from README.md.** Keeping README's Quickstart standalone for now; the SKILL.md section is the entry point.
+
+User-facing verb count unchanged (42). Total recipes: 7 pattern + 4 workflow = 11.
+
 ### Pick B — Daemon e2e for `playwright-lib --selector` (closes PR #105's daemon-runtime coverage gap)
 
 PR #105 (Sep 2026) shipped `playwright-lib --selector` driver plumbing — IPC handler branches in `scripts/lib/node/playwright-driver.mjs` that route `msg.selector` through `page.locator(selector).first()` instead of the `refMap` lookup. Parse-layer bats covered argv plumbing thoroughly; the **daemon-runtime selector branches stayed untested** across 22 PRs. Pick B closes that gap with 2 e2e cases against a real Playwright daemon.
