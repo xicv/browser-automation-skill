@@ -38,7 +38,12 @@ _seed_target_file() {
 # --- check ---
 
 @test "browser-migrate check: empty registry → pending:0; exit 0" {
-  run bash "${SCRIPTS_DIR}/browser-migrate.sh" check
+  # Override migrators dir to empty so the production memory v1_to_v2 (10-1-iii)
+  # doesn't fire — preserves the original "empty registry" semantic.
+  empty_dir="${BATS_TEST_TMPDIR}/empty-migrators"
+  mkdir -p "${empty_dir}"
+  BROWSER_SKILL_MIGRATORS_DIR="${empty_dir}" \
+    run bash "${SCRIPTS_DIR}/browser-migrate.sh" check
   assert_status 0
   last="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last}" | jq -e '.verb == "migrate" and .mode == "check" and .pending == 0' >/dev/null \
@@ -57,7 +62,11 @@ _seed_target_file() {
 # --- run (--yes) ---
 
 @test "browser-migrate run --yes: empty registry → no-op + exit 0 + migrated:0" {
-  run bash "${SCRIPTS_DIR}/browser-migrate.sh" run --yes
+  # Empty migrators dir override (same reason as the check test above).
+  empty_dir="${BATS_TEST_TMPDIR}/empty-migrators"
+  mkdir -p "${empty_dir}"
+  BROWSER_SKILL_MIGRATORS_DIR="${empty_dir}" \
+    run bash "${SCRIPTS_DIR}/browser-migrate.sh" run --yes
   assert_status 0
   last="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last}" | jq -e '.verb == "migrate" and .mode == "run" and .migrated == 0' >/dev/null \

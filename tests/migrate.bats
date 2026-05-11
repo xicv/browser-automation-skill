@@ -93,7 +93,10 @@ _seed_target_file() {
 
 @test "migrate_check: empty registry → no schemas needing migration; exit 0; pending:0" {
   migrate_init
-  run migrate_check
+  empty_dir="${BATS_TEST_TMPDIR}/empty-migrators"
+  mkdir -p "${empty_dir}"
+  BROWSER_SKILL_MIGRATORS_DIR="${empty_dir}" \
+    run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/migrate.sh'; migrate_check"
   assert_status 0
   last="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last}" | jq -e '.verb == "migrate" and .pending == 0' >/dev/null \
@@ -114,7 +117,10 @@ _seed_target_file() {
 
 @test "migrate_run: empty registry → no-op; exit 0; migrated:0" {
   migrate_init
-  run migrate_run
+  empty_dir="${BATS_TEST_TMPDIR}/empty-migrators"
+  mkdir -p "${empty_dir}"
+  BROWSER_SKILL_MIGRATORS_DIR="${empty_dir}" \
+    run bash -c "source '${LIB_DIR}/common.sh'; source '${LIB_DIR}/migrate.sh'; migrate_run"
   assert_status 0
   last="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last}" | jq -e '.verb == "migrate" and .migrated == 0' >/dev/null \
