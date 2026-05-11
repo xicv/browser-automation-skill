@@ -10,7 +10,7 @@ effort: low
 
 # browser-automation-skill
 
-Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura). 41 verbs covering site/session/credential management, navigation, snapshot+ref-based interaction, capture pipelines (console/network/screenshot/Lighthouse), declarative flow runner with replay+diff, and a per-archetype memory cache (`browser-do`) that lets agents skip LLM ref-resolution on repeat actions.
+Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura). 42 verbs covering site/session/credential management, navigation, snapshot+ref-based interaction, capture pipelines (console/network/screenshot/Lighthouse), declarative flow runner with replay+diff, a per-archetype memory cache (`browser-do`) that lets agents skip LLM ref-resolution on repeat actions, and per-schema state migration tooling (`browser-migrate`).
 
 ## Verbs
 
@@ -86,6 +86,28 @@ Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp
 | `do --intent`   | Look up cached selector for `(site, archetype, intent)`; on hit dispatch existing verb (zero LLM tokens); on miss emit `cache_miss` event | `… do --site prod --verb click --intent "click delete" --pattern '/devices/:id'` |
 | `do record`     | Explicit cache write-back; auto-derives pattern + archetype-id; refuses `PASSWORD-CANARY` | `… do record --site prod --intent "click delete" --selector "button.delete" --url 'https://prod/devices/123'` |
 | `do propose`    | Auto-cluster URLs into URL patterns (`:id`, `:uuid`); emits proposals for clusters >= threshold; suppresses already-known | `… do propose --site prod --threshold 3 --url 'https://x/devices/1' --url '...'` |
+
+### Schema migration (`browser-migrate`)
+
+| Verb | What it does | Example |
+|---|---|---|
+| `migrate check`         | Read-only — enumerate pending migrations (one `_kind:migration_needed` event per registered migrator with current schema_version == from). No lock acquired; safe to call any time (and `doctor` does). | `bash scripts/browser-migrate.sh check` |
+| `migrate status`        | Echo current per-schema versions from `~/.browser-skill/versions.json`. Read-only. | `bash scripts/browser-migrate.sh status` |
+| `migrate run`           | Apply registered migrators. Atomic-swap + automatic backup; refuses bump on JSON validation failure. Destructive: requires `--yes` flag OR interactive typed-phrase `migrate now`. `--schema NAME` narrows scope. PID-tracked lock prevents concurrent runs. | `bash scripts/browser-migrate.sh run --yes --schema memory` |
+| `migrate rollback`      | Restore one schema from its most-recent backup. Requires `--schema NAME`. Destructive: requires `--yes` OR typed-phrase `migrate rollback <schema>`. | `bash scripts/browser-migrate.sh rollback --schema memory --yes` |
+| `migrate clean-backups` | Prune old backups; keep newest `--keep N` per schema (default 5). Destructive: requires `--yes` OR typed-phrase `clean backups`. | `bash scripts/browser-migrate.sh clean-backups --keep 3 --yes` |
+
+## Migration & schema evolution
+
+Skill state (`~/.browser-skill/`) is versioned per-schema (`versions.json`). Each schema (sites / sessions / credentials / captures / baselines / memory / config) carries its own `schema_version`; migrating one doesn't touch the others. When the skill ships a schema bump, it lands a migrator under `scripts/lib/migrators/<schema>/v<from>_to_<to>.sh`; the migrator becomes pending on every machine until the user runs `browser-migrate run`.
+
+Key invariants:
+- **Doctor never auto-migrates.** It only surfaces pending count as a `warn:` line; user runs `browser-migrate run` explicitly.
+- **Atomic-swap + automatic backup.** Each migrated file is backed up to `backups/<schema>/<basename>.bak.v<prior_version>` (mode 0600) before the migrator runs. JSON validation via `jq -e .` precedes the version bump; failure restores from backup.
+- **Manual rollback.** Single-step `rollback --schema NAME` restores from the newest backup. Multi-version chains require multiple invocations.
+- **Lock file** (`~/.browser-skill/.migrate.lock`) prevents concurrent runs; stale PID auto-cleared.
+
+Today's only real migration is the no-op `memory v1_to_v2` identity bump (bumps `schema_version` from 1 to 2; no data shape change). Future per-schema migrators land case-by-case (~30 LOC + ~3 bats per new migrator).
 
 `${CLAUDE_SKILL_DIR}` is the absolute path Claude Code injects when invoking the skill — symlink under `~/.claude/skills/`.
 

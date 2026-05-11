@@ -233,6 +233,13 @@ EOF
   teardown_temp_home
   assert_status 0
   assert_output_contains "memory cache hit rate: n/a"
+  # Phase 11 v2 part 1 has SHIPPED (PR #115). "Phase 11 v2 pending" was the
+  # pre-writer text. Now: events.jsonl absent means browser-do --intent hasn't
+  # been invoked on this machine yet. Pin the accurate reason so future doc
+  # drift surfaces in CI.
+  assert_output_contains "browser-do --intent"
+  ! grep -q 'Phase 11 v2 pending' <<<"${output}" \
+    || fail "stale 'Phase 11 v2 pending' text still present; Phase 11 v2 part 1 shipped in PR #115"
   echo "${output}" | grep -E '"check":"memory_cache".*"hit_rate_pct":null' >/dev/null \
     || fail "expected {check:memory_cache,hit_rate_pct:null} JSON line; got:\n${output}"
 }
