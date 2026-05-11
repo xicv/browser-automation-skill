@@ -13,6 +13,25 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Pick A3 — `--auto-record` flag on `browser-do propose`
+
+`propose` (PR #97, 11-2-ii) is read-only by default — emits `_kind:proposal` events for URL clusters meeting the threshold AND not already in `patterns.json`. Today the agent reads the proposals and decides whether/which to record explicitly. With `--auto-record`, every proposal that survives the existing suppression filter is auto-persisted via `memory_record_pattern`. Useful for batch-onboarding a corpus of URLs at session start.
+
+- [feat] **`scripts/browser-do.sh` propose sub-mode gains `--auto-record` flag** (boolean; default off). When set, the proposal-emit loop calls `memory_record_pattern "${site}" "${url_pattern}" "${archetype_id}"` immediately after emitting each proposal event. The flag is purely additive — absence preserves the existing read-only contract (C5 invariant from 11-2-ii).
+- [feat] **Auto-record runs AFTER the suppression filter.** The proposal stream is already `not inside(known)` filtered before any auto-record call; suppressed clusters never reach the write site. Mirrors C4: "already-known patterns suppress proposals." Combined effect: re-running `propose --auto-record` on the same corpus is **idempotent** — the second run sees the patterns it just wrote as known + skips them.
+- [feat] **Best-effort writer** — `memory_record_pattern` failure emits `warn:` and continues; never taints `propose`'s exit code. Matches the established cache-write contract (Phase 11 1-ii: write-side failure must not break the read flow).
+- [feat] **Summary `auto_recorded:N` field** — `summary_json` now reports the count of patterns persisted this run. Always present (zero when flag absent OR when no proposals were emitted), so consumers can rely on the field shape unconditionally.
+- [internal] 4 new bats in `tests/browser-do.bats` (41 → 45 cases): (a) 3 numeric URLs → patterns.json gains 1 row + `auto_recorded:1`; (b) already-known pattern → 0 proposals + 0 auto-records (suppression filter wins; matches C4); (c) absence of `--auto-record` → patterns.json NOT created (preserves C5 read-only contract); (d) 2 distinct clusters → 2 rows + `auto_recorded:2`.
+
+**Sub-scope (this PR):**
+- **No design surface change.** propose's C1-C6 invariants from 11-2-ii are unchanged: pure compute on URL list / numeric + UUID heuristics only / default threshold N=3 / suppress already-known / always emit-never-auto-record-by-default / always exits 0.
+- **No `--auto-record` typed-phrase confirmation.** Unlike `browser-migrate run` (destructive — bumps version), pattern recording is additive + idempotent; the flag suffices.
+- **No retroactive auto-record of previous proposals.** This PR adds the flag to the current run only; persisting historical proposals would need a separate sub-mode.
+- **No `--auto-record` on the `record` sub-mode.** `record` is already explicit-write-by-design; `--auto-record` is meaningful only when paired with the read-only `propose` flow.
+- **No interaction with self-heal.** Pattern recording bumps `hit_count` on the pattern row; doesn't touch any archetype's `self_heal_history[]`.
+
+User-facing verb count unchanged (42). `propose` summary line gains one new field (`auto_recorded`); existing fields unchanged.
+
 ### Pick A5 — `self_heal_history[]` audit-trail population
 
 Phase 11 1-iii (PR #92) shipped the disable mechanic (`fail_count > 3 → disabled:true`) and the D2 heal mechanic (`memory_record` resets `fail_count` + `disabled`). The archetype schema reserved a `self_heal_history[]` array field on every interaction since Phase 11 1-i — but **no writer existed**. The field stayed `[]` forever. Pick A5 lights up the audit trail.

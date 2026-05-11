@@ -672,3 +672,93 @@ EOF
   n="$(jq -s 'length' "${events}")"
   [ "${n}" -ge 3 ] || fail "expected >=3 lines after 3 invocations; got ${n}"
 }
+
+# ---------- Pick A3: --auto-record flag on propose ----------
+# propose (PR #97, 11-2-ii) is read-only by default — emits _kind:proposal
+# events; never writes. With --auto-record, each proposal NOT already in
+# patterns.json triggers memory_record_pattern. Default behavior unchanged.
+
+@test "browser-do propose --auto-record: 3 numeric URLs → patterns.json gains /:id row + auto_recorded:1" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --auto-record \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3'
+  assert_status 0
+  patterns_path="${BROWSER_SKILL_HOME}/memory/app/patterns.json"
+  [ -f "${patterns_path}" ] || fail "patterns.json was not created"
+  jq -e '.patterns | length == 1 and .[0].url_pattern == "/devices/:id" and .[0].archetype_id == "devices-id"' \
+    "${patterns_path}" >/dev/null \
+    || fail "patterns.json shape wrong: $(cat "${patterns_path}")"
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.auto_recorded == 1 and .proposals == 1' >/dev/null \
+    || fail "summary should report auto_recorded:1 + proposals:1; got ${last}"
+}
+
+@test "browser-do propose --auto-record: already-known pattern suppressed (idempotent; mirrors C4)" {
+  _register_site app
+  source "${LIB_DIR}/memory.sh"
+  memory_record_pattern app '/devices/:id' devices-id
+
+  patterns_path="${BROWSER_SKILL_HOME}/memory/app/patterns.json"
+  before_count="$(jq '.patterns | length' "${patterns_path}")"
+  before_hit_count="$(jq '.patterns[0].hit_count' "${patterns_path}")"
+
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --auto-record \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3'
+  assert_status 0
+  # Already-known cluster: 0 proposals emitted; 0 auto-records (the suppression
+  # filter runs BEFORE the auto-record check; matches C4 semantics).
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] || fail "expected 0 proposals on already-known pattern; got ${count}"
+  # patterns.json must not grow rows; existing row unchanged (hit_count is
+  # touched ONLY by explicit memory_record_pattern calls — not by suppression).
+  after_count="$(jq '.patterns | length' "${patterns_path}")"
+  [ "${after_count}" = "${before_count}" ] || fail "patterns.json grew rows on suppressed proposal: ${after_count} != ${before_count}"
+  after_hit_count="$(jq '.patterns[0].hit_count' "${patterns_path}")"
+  [ "${after_hit_count}" = "${before_hit_count}" ] || fail "hit_count bumped on suppressed proposal: ${after_hit_count} != ${before_hit_count}"
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.auto_recorded == 0 and .skipped_known == 1' >/dev/null \
+    || fail "summary should report auto_recorded:0 + skipped_known:1; got ${last}"
+}
+
+@test "browser-do propose (no --auto-record): patterns.json is NOT created — preserves default read-only contract" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3'
+  assert_status 0
+  # Proposal still emitted.
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "1" ] || fail "expected 1 proposal; got ${count}"
+  # But no write side-effect.
+  patterns_path="${BROWSER_SKILL_HOME}/memory/app/patterns.json"
+  [ ! -f "${patterns_path}" ] || fail "patterns.json was created without --auto-record flag (violates C5 read-only contract): $(cat "${patterns_path}")"
+  # Summary explicitly reports auto_recorded:0 so consumers can rely on the field always being present.
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.auto_recorded == 0' >/dev/null \
+    || fail "summary should report auto_recorded:0 even without --auto-record; got ${last}"
+}
+
+@test "browser-do propose --auto-record: 2 distinct clusters → 2 rows + auto_recorded:2" {
+  _register_site app
+  # Two clusters: /devices/:id (3 numerics) AND /users/:id (3 numerics).
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --auto-record \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3' \
+    --url 'https://app.example.com/users/10' \
+    --url 'https://app.example.com/users/20' \
+    --url 'https://app.example.com/users/30'
+  assert_status 0
+  patterns_path="${BROWSER_SKILL_HOME}/memory/app/patterns.json"
+  [ -f "${patterns_path}" ] || fail "patterns.json was not created"
+  rows="$(jq '.patterns | length' "${patterns_path}")"
+  [ "${rows}" = "2" ] || fail "expected 2 patterns rows; got ${rows}: $(cat "${patterns_path}")"
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.auto_recorded == 2 and .proposals == 2' >/dev/null \
+    || fail "summary should report auto_recorded:2 + proposals:2; got ${last}"
+}
