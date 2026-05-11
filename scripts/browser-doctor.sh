@@ -188,6 +188,59 @@ if [ "${captures_unsanitized}" -gt 0 ]; then
   warn "${captures_unsanitized} capture(s) with sanitization disabled — review ${captures_unsanitized_ids}"
 fi
 
+# --- Pending migrations (advisory; never fails doctor) ---
+# Phase 10 follow-up. Sources lib/migrate.sh and calls migrate_check, which is
+# read-only by design (no lock acquired; MIG4 invariant from the Phase 10
+# design doc — "doctor never auto-migrates"). Doctor surfaces pending count
+# only; user invokes `browser-migrate run` to apply them.
+# shellcheck source=lib/migrate.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/migrate.sh"
+migrations_pending=0
+# migrate_check emits one _kind:migration_needed line per pending migrator,
+# then a summary line. Count the _kind events; ignore the summary.
+mig_out="$(migrate_check 2>/dev/null || true)"
+if [ -n "${mig_out}" ]; then
+  migrations_pending="$(printf '%s\n' "${mig_out}" \
+    | jq -s 'map(select(._kind == "migration_needed")) | length' 2>/dev/null \
+    || printf '0')"
+fi
+jq -nc --argjson n "${migrations_pending}" '{check:"migrations", pending:$n}'
+if [ "${migrations_pending}" -gt 0 ]; then
+  warn "${migrations_pending} pending migration(s) — run 'browser-migrate check' for details (advisory; never fails doctor)"
+else
+  ok "no pending migrations"
+fi
+
+# --- Memory cache hit-rate (advisory; forward-compat read side) ---
+# Phase 11 v2 will tee `verb=do mode=intent` summary lines into
+# ${BROWSER_SKILL_HOME}/memory/events.jsonl. Doctor's read side ships now;
+# absent file → "n/a" line. Lifetime ratio over all events (no time filter
+# until events carry timestamps).
+cache_events_log="${BROWSER_SKILL_HOME}/memory/events.jsonl"
+if [ -f "${cache_events_log}" ]; then
+  cache_total="$(jq -s 'map(select(.cache_hit == true or .cache_hit == false)) | length' \
+    "${cache_events_log}" 2>/dev/null || printf '0')"
+  cache_hits="$(jq -s 'map(select(.cache_hit == true)) | length' \
+    "${cache_events_log}" 2>/dev/null || printf '0')"
+  if [ "${cache_total}" -gt 0 ]; then
+    # Integer-only math; bc not available everywhere and shellcheck dislikes pipe-to-bc.
+    cache_rate_pct=$(( cache_hits * 100 / cache_total ))
+    ok "memory cache hit rate: ${cache_rate_pct}% (${cache_hits}/${cache_total} events)"
+    jq -nc \
+      --argjson hits "${cache_hits}" \
+      --argjson total "${cache_total}" \
+      --argjson pct "${cache_rate_pct}" \
+      '{check:"memory_cache", hits:$hits, total:$total, hit_rate_pct:$pct}'
+  else
+    ok "memory cache hit rate: n/a (events log present but empty)"
+    jq -nc '{check:"memory_cache", hits:0, total:0, hit_rate_pct:null}'
+  fi
+else
+  ok "memory cache hit rate: n/a (observation log not enabled — Phase 11 v2 pending)"
+  jq -nc '{check:"memory_cache", hits:0, total:0, hit_rate_pct:null}'
+fi
+
 duration_ms=$(( $(now_ms) - started_at_ms ))
 
 # Status semantics (§5.3 of extension-model spec).

@@ -176,3 +176,99 @@ EOF
   assert_output_contains "sanitized:false: 1"
   assert_output_contains "sanitization disabled"
 }
+
+# ---------- Phase 10 follow-up: pending migrations surfaced by doctor ----------
+# Doctor calls migrate_check (read-only; no lock per MIG4 invariant) and reports
+# pending migration count as advisory output. Never auto-migrates; never fails.
+
+@test "doctor: zero pending migrations → reports 'no pending migrations' + JSON pending:0; exit still 0" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  empty_migrators="${TEST_HOME}/empty-migrators"
+  mkdir -p "${empty_migrators}"
+  BROWSER_SKILL_MIGRATORS_DIR="${empty_migrators}" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "no pending migrations"
+  # JSON event for machine consumers
+  echo "${output}" | grep -E '"check":"migrations".*"pending":0' >/dev/null \
+    || fail "expected {check:migrations,pending:0} JSON line; got:\n${output}"
+}
+
+@test "doctor: identity migrator registered → warns 'N pending migration(s)' but exit still 0" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  # Seed a fixture v1_to_v2 migrator under a test-only registry dir; default
+  # schema_version=1 for fresh init means migrate_check will report it pending.
+  migrators_dir="${TEST_HOME}/migrators"
+  mkdir -p "${migrators_dir}/test"
+  cat > "${migrators_dir}/test/v1_to_v2.sh" <<'EOF'
+migrate_test_v1_to_v2() {
+  local file_path="$1"
+  jq . "${file_path}" > "${file_path}.tmp" && mv "${file_path}.tmp" "${file_path}"
+}
+EOF
+  BROWSER_SKILL_MIGRATORS_DIR="${migrators_dir}" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "pending migration"
+  echo "${output}" | grep -E '"check":"migrations".*"pending":1' >/dev/null \
+    || fail "expected {check:migrations,pending:1} JSON line; got:\n${output}"
+}
+
+# ---------- Phase 11 v2 forward-compat: memory cache hit-rate read side ----------
+# Doctor reads ${BROWSER_SKILL_HOME}/memory/events.jsonl when present and reports
+# hit rate. Phase 11 v2 will tee `summary_json verb=do mode=intent ...` lines
+# into this file (the write side); doctor's read side ships now.
+
+@test "doctor: no memory events log → reports 'cache hit rate: n/a' + JSON hit_rate_pct:null" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "memory cache hit rate: n/a"
+  echo "${output}" | grep -E '"check":"memory_cache".*"hit_rate_pct":null' >/dev/null \
+    || fail "expected {check:memory_cache,hit_rate_pct:null} JSON line; got:\n${output}"
+}
+
+@test "doctor: memory events log with 3 hits / 2 misses → reports '60% (3/5 events)'" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 700 "${BROWSER_SKILL_HOME}" "${BROWSER_SKILL_HOME}/memory"
+  # Phase 11 v2 will tee the verb=do mode=intent summary line; doctor reads
+  # .cache_hit (true|false) on lines matching that shape.
+  cat > "${BROWSER_SKILL_HOME}/memory/events.jsonl" <<'EOF'
+{"verb":"do","mode":"intent","cache_hit":true,"site":"a"}
+{"verb":"do","mode":"intent","cache_hit":true,"site":"a"}
+{"verb":"do","mode":"intent","cache_hit":false,"site":"a"}
+{"verb":"do","mode":"intent","cache_hit":true,"site":"a"}
+{"verb":"do","mode":"intent","cache_hit":false,"site":"a"}
+EOF
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "memory cache hit rate: 60%"
+  assert_output_contains "(3/5 events)"
+  echo "${output}" | grep -E '"check":"memory_cache".*"hits":3.*"total":5.*"hit_rate_pct":60' >/dev/null \
+    || fail "expected {check:memory_cache,hits:3,total:5,hit_rate_pct:60} JSON line; got:\n${output}"
+}
+
+@test "doctor: memory events log present but empty → reports 'n/a (events log present but empty)'" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 700 "${BROWSER_SKILL_HOME}" "${BROWSER_SKILL_HOME}/memory"
+  : > "${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "memory cache hit rate: n/a"
+  assert_output_contains "events log present but empty"
+}
