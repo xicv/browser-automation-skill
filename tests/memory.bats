@@ -143,6 +143,104 @@ _arch_json() {
     "${arch_path}" >/dev/null || fail "expected disabled:true at fail_count:4"
 }
 
+# ---------- Pick A5: self_heal_history[] audit-trail population ----------
+# Phase 11 1-iii shipped the disable mechanic (fail_count > 3 → disabled:true)
+# + the D2 heal mechanic (memory_record resets fail_count + disabled). Both
+# previously left self_heal_history[] empty — the field was reserved but no
+# writer existed. Pick A5 lights up the audit trail: on the transition
+# false→true (disable) and the transition true→false (heal), append a
+# {ts, event, fail_count, selector_at_time} entry.
+
+@test "self_heal_history: 4th failure appends one 'disabled' entry with fail_count:4 + selector_at_time" {
+  memory_save_archetype prod-app devices-detail "$(_arch_json devices-detail '/devices/:id')"
+  memory_record prod-app devices-detail "click save" "button.save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+
+  arch_path="${BROWSER_SKILL_HOME}/memory/prod-app/archetypes/devices-detail.json"
+  jq -e '.interactions[0].self_heal_history | length == 1' "${arch_path}" >/dev/null \
+    || fail "expected self_heal_history length 1; got $(jq -c '.interactions[0].self_heal_history' "${arch_path}")"
+  jq -e '
+    .interactions[0].self_heal_history[0] |
+    .event == "disabled" and .fail_count == 4 and
+    .selector_at_time == "button.save" and (.ts | length > 0)
+  ' "${arch_path}" >/dev/null \
+    || fail "disabled entry shape wrong: $(jq -c '.interactions[0].self_heal_history[0]' "${arch_path}")"
+}
+
+@test "self_heal_history: failures BELOW threshold (1-3) append NO entries" {
+  memory_save_archetype prod-app devices-detail "$(_arch_json devices-detail '/devices/:id')"
+  memory_record prod-app devices-detail "click save" "button.save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+
+  arch_path="${BROWSER_SKILL_HOME}/memory/prod-app/archetypes/devices-detail.json"
+  jq -e '.interactions[0].fail_count == 3 and .interactions[0].disabled == false' \
+    "${arch_path}" >/dev/null || fail "preconditions wrong"
+  jq -e '.interactions[0].self_heal_history | length == 0' "${arch_path}" >/dev/null \
+    || fail "expected 0 history entries while not-yet-disabled; got $(jq -c '.interactions[0].self_heal_history' "${arch_path}")"
+}
+
+@test "self_heal_history: failures BEYOND threshold (5th, 6th) do NOT double-log; only the transition fires" {
+  memory_save_archetype prod-app devices-detail "$(_arch_json devices-detail '/devices/:id')"
+  memory_record prod-app devices-detail "click save" "button.save"
+  # 4 failures → disabled (1 history entry expected).
+  for _ in 1 2 3 4; do
+    memory_record_failure prod-app devices-detail "click save"
+  done
+  # 5th + 6th failures: already disabled; lib spec is "log only on the
+  # transition." Repeated calls must not append further entries.
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+
+  arch_path="${BROWSER_SKILL_HOME}/memory/prod-app/archetypes/devices-detail.json"
+  jq -e '.interactions[0].self_heal_history | length == 1' "${arch_path}" >/dev/null \
+    || fail "transition is single-shot; got length $(jq '.interactions[0].self_heal_history | length' "${arch_path}")"
+}
+
+@test "self_heal_history: memory_record on a disabled interaction appends 'healed' entry; resets fail_count + disabled" {
+  memory_save_archetype prod-app devices-detail "$(_arch_json devices-detail '/devices/:id')"
+  memory_record prod-app devices-detail "click save" "button.save"
+  # Drive to disabled:true.
+  for _ in 1 2 3 4; do
+    memory_record_failure prod-app devices-detail "click save"
+  done
+  arch_path="${BROWSER_SKILL_HOME}/memory/prod-app/archetypes/devices-detail.json"
+  jq -e '(.interactions[0].disabled == true) and (.interactions[0].self_heal_history | length == 1)' \
+    "${arch_path}" >/dev/null || fail "precondition: disabled+1-entry not reached"
+
+  # Now heal: agent re-records the same intent with a (possibly new) selector.
+  memory_record prod-app devices-detail "click save" "button.save-v2"
+
+  jq -e '.interactions[0].self_heal_history | length == 2' "${arch_path}" >/dev/null \
+    || fail "expected 2 history entries after heal; got $(jq -c '.interactions[0].self_heal_history' "${arch_path}")"
+  jq -e '
+    .interactions[0].self_heal_history[1] |
+    .event == "healed" and .selector_at_time == "button.save-v2" and (.ts | length > 0)
+  ' "${arch_path}" >/dev/null \
+    || fail "healed entry shape wrong: $(jq -c '.interactions[0].self_heal_history[1]' "${arch_path}")"
+  # Heal also resets fail_count + disabled (Phase 11 1-iii D2 invariant unchanged).
+  jq -e '.interactions[0].fail_count == 0 and .interactions[0].disabled == false' \
+    "${arch_path}" >/dev/null || fail "heal did not reset fail_count + disabled"
+}
+
+@test "self_heal_history: memory_record on a NOT-disabled interaction does NOT append a 'healed' entry" {
+  memory_save_archetype prod-app devices-detail "$(_arch_json devices-detail '/devices/:id')"
+  memory_record prod-app devices-detail "click save" "button.save"
+  memory_record_failure prod-app devices-detail "click save"
+  memory_record_failure prod-app devices-detail "click save"
+  # Not disabled yet (only 2 failures); a normal success path must not log
+  # a heal event (nothing was broken).
+  memory_record prod-app devices-detail "click save" "button.save"
+
+  arch_path="${BROWSER_SKILL_HOME}/memory/prod-app/archetypes/devices-detail.json"
+  jq -e '.interactions[0].self_heal_history | length == 0' "${arch_path}" >/dev/null \
+    || fail "expected 0 history entries on non-healing success; got $(jq -c '.interactions[0].self_heal_history' "${arch_path}")"
+}
+
 # --- memory_record_pattern ---
 
 @test "memory_record_pattern: writes patterns.json mode 0600; idempotent on same (pattern, archetype)" {
