@@ -570,15 +570,63 @@ EOF
   rm -f "${STUB_LOG_FILE}"
 }
 
-@test "browser-do propose: slug-shaped segments don't cluster (no numeric/UUID)" {
+@test "browser-do propose: slug-shaped segments cluster to /:slug (Pick A2)" {
   _register_site app
   run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
     --url 'https://app.example.com/posts/my-post' \
     --url 'https://app.example.com/posts/your-post' \
     --url 'https://app.example.com/posts/their-post'
   assert_status 0
+  prop="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal"))')"
+  [ "$(printf '%s' "${prop}" | jq 'length')" = "1" ] \
+    || fail "expected 1 slug proposal; got ${prop}"
+  printf '%s' "${prop}" | jq -e '
+    .[0].url_pattern == "/posts/:slug" and
+    .[0].archetype_id == "posts-slug" and
+    .[0].count == 3
+  ' >/dev/null || fail "slug-shape wrong: ${prop}"
+}
+
+@test "browser-do propose: too-short hyphenated segments do NOT cluster (length<5 rejected)" {
+  # `a-b`, `c-d`, `e-f` are too short to be confident slugs (likely codes).
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/x/a-b' \
+    --url 'https://app.example.com/x/c-d' \
+    --url 'https://app.example.com/x/e-f'
+  assert_status 0
   count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
-  [ "${count}" = "0" ] || fail "expected 0 proposals (slugs out of scope v1); got ${count}"
+  [ "${count}" = "0" ] \
+    || fail "expected 0 proposals (short codes are not slugs); got ${count}: ${output}"
+}
+
+@test "browser-do propose: single-word path segments (no hyphen) do NOT cluster" {
+  # `about`, `login`, `contact` — literal routes, no templating intended.
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/x/about' \
+    --url 'https://app.example.com/x/login' \
+    --url 'https://app.example.com/x/contact'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] \
+    || fail "expected 0 proposals (single-word routes are not slugs); got ${count}: ${output}"
+}
+
+@test "browser-do propose: slug + non-slug mix proposes only the slug cluster" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/posts/my-post' \
+    --url 'https://app.example.com/posts/your-post' \
+    --url 'https://app.example.com/posts/their-post' \
+    --url 'https://app.example.com/about' \
+    --url 'https://app.example.com/login'
+  assert_status 0
+  prop="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal"))')"
+  [ "$(printf '%s' "${prop}" | jq 'length')" = "1" ] \
+    || fail "expected exactly 1 proposal (slug; literals ignored); got ${prop}"
+  printf '%s' "${prop}" | jq -e '.[0].url_pattern == "/posts/:slug"' >/dev/null \
+    || fail "wrong pattern: ${prop}"
 }
 
 # ---------- Phase 11 v2 part 1 — events.jsonl writer (Pick A1) ----------

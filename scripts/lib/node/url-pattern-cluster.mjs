@@ -6,12 +6,20 @@
 // Stdin:  {"urls": ["https://...", ...]}
 // Stdout: {"clusters": [{"templated": "/devices/:id", "urls": [...], "count": N}, ...]}
 //
-// Heuristic (deliberate v1 subset):
-//   numeric segment   (^[0-9]+$)                          → :id
-//   UUID segment      (8-4-4-4-12 hex)                    → :uuid
+// Heuristic:
+//   numeric segment   (^[0-9]+$)                                       → :id
+//   UUID segment      (8-4-4-4-12 hex)                                 → :uuid
+//   slug segment      (^[a-z0-9_]+(-[a-z0-9_]+)+$/i + length ≥ 5)      → :slug
 //   other segments    → verbatim
 //
-// Slug detection deferred (too high-entropy for v1 — false-positive prone).
+// Slug heuristic (Pick A2) — locked decision:
+//   - Requires at least ONE hyphen separating alphanumeric groups.
+//   - Each side of every hyphen must be ≥1 char of [a-zA-Z0-9_].
+//   - Total segment length ≥ 5 chars (filters short codes like `a-b` or
+//     `1-2` which are more likely to be opaque identifiers than slugs).
+//   - All-numeric is already caught by the numeric branch above (which
+//     fires before slug detection in this `if`-chain order).
+//
 // Cross-site clustering not in scope (caller passes per-site URLs).
 
 let stdin = "";
@@ -30,6 +38,8 @@ const urls = Array.isArray(payload.urls) ? payload.urls : [];
 
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 const NUMERIC_RE = /^[0-9]+$/;
+const SLUG_RE = /^[a-z0-9_]+(-[a-z0-9_]+)+$/i;
+const MIN_SLUG_LEN = 5;
 
 function templatePathname(pathname) {
   // Split preserves the leading "/" as an empty first element.
@@ -38,6 +48,9 @@ function templatePathname(pathname) {
     if (seg === "") return seg;
     if (UUID_RE.test(seg)) return ":uuid";
     if (NUMERIC_RE.test(seg)) return ":id";
+    // Pick A2: slug heuristic. Fires after numeric/UUID; only on hyphenated
+    // multi-group segments of length >= MIN_SLUG_LEN.
+    if (seg.length >= MIN_SLUG_LEN && SLUG_RE.test(seg)) return ":slug";
     return seg;
   });
   return templated.join("/");
