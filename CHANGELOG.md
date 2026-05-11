@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Pick A2 — Slug heuristic in `url-pattern-cluster.mjs` — closes Phase 11 v2 hardening backlog
+
+`url-pattern-cluster.mjs` (PR #97, 11-2-ii) previously clustered only numeric (`/items/123`) and UUID (`/items/abc-...`) segments. Slug paths (`/posts/my-post-title`, `/users/alice-cooper`) stayed as distinct unique strings → never reached the cluster threshold → never proposed. Pick A2 adds entropy-based slug detection.
+
+- [feat] **`scripts/lib/node/url-pattern-cluster.mjs` gains a slug detection branch.** New regex `SLUG_RE = /^[a-z0-9_]+(-[a-z0-9_]+)+$/i` + length floor `MIN_SLUG_LEN = 5`. Fires after numeric/UUID in the `if`-chain order. Qualifying segments template to `:slug`; the cluster mechanism + threshold filter then propose the canonical pattern row.
+- [feat] **Heuristic locked at the simplest reviewable shape:** segment must (a) contain ≥1 hyphen, (b) have ≥1 alphanumeric char on each side of every hyphen, (c) total length ≥5. Rejects short codes (`a-b` 3 chars, `1-2` 3 chars) + single-word literals (`about`, `login`, `contact` — no hyphen). Accepts `my-post` (7), `alice-cooper` (12), `2025-01-15` (10 — dates legitimately cluster).
+- [feat] **No Node deps added.** Standard library RegExp only; ~6 LOC in the helper. Matches the no-deps constraint of the existing helper.
+- [internal] 4 bats updates in `tests/browser-do.bats`: 1 flipped (slug bats from PR #97 `"slugs don't cluster"` → `"slugs DO cluster + correct archetype_id"`); 3 new (too-short hyphenated rejected · single-word literals rejected · slug + non-slug mix yields only slug cluster).
+
+**Sub-scope (this PR):**
+- **Heuristic only — no machine-learning / dictionary lookup.** A Markov chain on common path words could refine; deferred until false-positive surface area justifies the complexity (none seen in the 4 fixture cases shipped).
+- **`:slug` derivation order is fixed.** numeric → UUID → slug → literal. Numeric segments like `123` continue to template to `:id` (NOT `:slug` even though they "would have matched" without the numeric branch).
+- **No new archetype-id heuristic.** Existing `_derive_archetype_id` chain produces `posts-slug` for `/posts/:slug`; no special handling needed.
+- **No retroactive reclassification of stored patterns.** Existing `patterns.json` rows untouched — only NEW `propose` invocations see the new clustering. Combined with A4's canonical compare (PR #123), the storage layer self-heals over time as duplicates collapse.
+- **No interaction with --auto-record (PR #121) or --from-recent (PR #125) — composes naturally.** Both consume the same cluster output; the new slug branch enriches it.
+
+User-facing verb count unchanged (42). The cluster helper grew from ~80 LOC → ~90 LOC; no other surface affected.
+
+**Phase 11 v2 hardening backlog ✅ COMPLETE for v1.5.** All A-series picks shipped: A1 (events.jsonl writer) / A2 (slug heuristic) / A3 (--auto-record) / A4 (pattern canonicalization) / A5 (self_heal_history) / A6 (recent_urls observation log). Only **Pick B (daemon e2e)** + adoption work remain.
+
 ### Pick A6 — `recent_urls.jsonl` passive navigation observation log + `propose --from-recent`
 
 `browser-do --intent` records cache hits/misses (PR #115 `events.jsonl`). What's been MISSING: every URL the user **visited** (via `browser-open`, `browser-flow run`, etc). Without that signal, `browser-do propose` could only see URLs the agent fed via `--url`. Pick A6: passive observation — `browser-open` tees URLs to a new append-only log; `propose --from-recent` reads from it.
