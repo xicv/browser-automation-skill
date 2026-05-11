@@ -114,6 +114,14 @@ for the rules):
 If `doctor` reports `~/.browser-skill` missing, run `./install.sh` (or
 `./install.sh --with-hooks` for the credential-leak blocker).
 
+`doctor` also surfaces (advisory; never fails):
+
+- **Pending schema migrations** — `warn: N pending migration(s) — run 'browser-migrate check' for details`.
+  Doctor never auto-migrates (MIG4 invariant from Phase 10 design); apply via `browser-migrate run`.
+- **Memory cache hit-rate** — `ok: memory cache hit rate: X% (H/T events)` when
+  `${BROWSER_SKILL_HOME}/memory/events.jsonl` is present; `n/a (observation log not enabled — Phase 11 v2 pending)` otherwise.
+  Cheapest daily ROI signal: high hit-rate = the cache is paying for itself; low/empty = repetition isn't compounding yet.
+
 ## Output contract
 
 Every verb prints zero or more streaming JSON lines, then ends with a

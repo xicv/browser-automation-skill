@@ -13,6 +13,29 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 10 follow-up + Phase 11 v2 forward-compat — `browser-doctor` migrate-warn + memory cache hit-rate
+
+Single doctor refresh PR bundling two advisory checks. Both are read-only; neither changes doctor's exit code (still 0 on healthy adapters; still `EXIT_PREFLIGHT_FAILED` on real problems).
+
+- [feat] **`browser-doctor.sh` now surfaces pending migrations.** Sources `lib/migrate.sh` and calls `migrate_check` (read-only by design — no lock acquired; MIG4 invariant preserved). Emits:
+  - Machine: `{"check":"migrations","pending":N}` JSON line on stdout (mirrors the per-adapter `check:"adapter"` event pattern).
+  - Human: `warn: N pending migration(s) — run 'browser-migrate check' for details` when N>0; `ok: no pending migrations` otherwise.
+  - **Doctor never auto-migrates.** Surfacing only; user invokes `browser-migrate run` to apply.
+- [feat] **`browser-doctor.sh` now reports memory cache hit-rate (read-side forward-compat).** Looks for `${BROWSER_SKILL_HOME}/memory/events.jsonl`. When present, counts `.cache_hit == true` vs `.cache_hit == false` lines and emits both a human-readable percent + JSON event. When absent, reports `n/a (observation log not enabled — Phase 11 v2 pending)`.
+  - Machine: `{"check":"memory_cache","hits":H,"total":T,"hit_rate_pct":P}` (or `hit_rate_pct:null` when n/a).
+  - Human: `ok: memory cache hit rate: 60% (3/5 events)` style.
+- [feat] **Forward-compat dependency landing.** This PR ships the *read* side; Phase 11 v2 ships the *write* side (tee `verb=do mode=intent` summary lines into `events.jsonl` from `browser-do.sh`). When Phase 11 v2 lights up, doctor's line switches from `n/a` to a real percent with zero doctor changes — same pattern as PR-N-ships-skip-side then PR-N+1-lights-it-up (mirrors `BROWSER_DO_DISPATCH_OVERRIDE` precedent in 11-1-iii self-heal).
+- [internal] 5 new bats in `tests/doctor.bats` (15 → 20 cases): zero-pending warn-line absence; identity migrator via `BROWSER_SKILL_MIGRATORS_DIR` → `pending:1` JSON + warn; events.jsonl absent → `hit_rate_pct:null`; events.jsonl with 3 hits / 2 misses → `60% (3/5 events)`; events.jsonl present-but-empty → `n/a (events log present but empty)`.
+
+**Sub-scope (this PR):**
+- **No `browser-do.sh` edits.** Phase 11 v2 ships the events.jsonl writer separately (Pick A from the v2 hardening list).
+- **No new lib helper.** Doctor sources `lib/migrate.sh` directly and reads `events.jsonl` via plain `jq -s`.
+- **No `bc` dependency.** Integer-only math: `(hits * 100) / total`. Loses fractional precision (60% not 60.0%); good enough for an advisory.
+- **No time-window filter on cache hit rate.** Lifetime ratio over all events. When Phase 11 v2 timestamps events, doctor can add `--window 7d`; not now.
+- **No data migration of `events.jsonl` shape.** Read side accepts the existing `summary_json verb=do mode=intent` shape; Phase 11 v2 just `tee`s without transformation.
+
+User-facing verb count unchanged (42). All four adapter checks unchanged.
+
 ### Phase 10 part 1-iii — first real migrator (no-op v1_to_v2 for memory) — CLOSES Phase 10 part 1
 
 - [feat] new `scripts/lib/migrators/memory/v1_to_v2.sh` defining `migrate_memory_v1_to_v2 <file_path>` — first real migrator. **No-op identity** (purely bumps `schema_version` from 1 to 2; no data shape change). Validates the registry + dispatch end-to-end against production code (not test fixtures).
