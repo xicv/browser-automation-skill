@@ -13,6 +13,30 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 10 part 1-i — `lib/migrate.sh` foundation
+
+- [feat] new `scripts/lib/migrate.sh` — pure read/write API for schema-version detection + migration dispatch + atomic-swap with backup + manual rollback. No verb integration yet (10-1-ii ships `browser-migrate`); no real migrators registered (10-1-iii ships first identity migrator).
+- [feat] **MIG1 — Per-schema versions:** `${BROWSER_SKILL_HOME}/versions.json` (mode 0600, lazy-created) carries `{schema_version:1, schema_versions:{sites:1,sessions:1,credentials:1,captures:1,baselines:1,memory:1,config:1}, skill_version:"v0.56.0"}`. Legacy `version` file (single integer) seeds versions.json on first init.
+- [feat] **MIG2 — Registry directory:** `scripts/lib/migrators/<schema>/v<from>_to_<to>.sh` pattern. Auto-loaded by `_migrate_load_registry`; each file defines a fn `migrate_<schema>_v<from>_to_v<to>` per filename convention. Empty in 10-1-i (only `README.md` placeholder); real migrators ship in 10-1-iii.
+- [feat] **MIG3 — Atomic write + automatic backup:** `migrate_run` backs up each migrated file to `${BROWSER_SKILL_HOME}/backups/<schema>/<basename>.bak.v<prior_version>` (mode 0700 dir, 0600 file) BEFORE running the migrator. Validates post-migration JSON via `jq -e .`; refuses to bump schema version on validation failure (file restored from backup).
+- [feat] **MIG5 — Pure bash + jq:** no Node dependency in lib/migrate.sh. Per-migrator unit-testable with fixture file + expected output.
+- [feat] **`BROWSER_SKILL_MIGRATORS_DIR` env override** — test-only seam (mirrors `BROWSER_DO_DISPATCH_OVERRIDE` from 11-1-iii self-heal). Production code never sets this; tests use it to inject fixture migrators without touching `scripts/lib/migrators/`.
+- [feat] **Public API surface:** `migrate_init` · `migrate_get_version SCHEMA` · `migrate_set_version SCHEMA N` · `migrate_check` · `migrate_run [SCHEMA]` · `migrate_rollback SCHEMA` · `migrate_status` · `migrate_clean_backups [N]`.
+- [internal] new `scripts/lib/migrators/README.md` — directory scaffold + convention doc explaining the `migrate_<schema>_v<from>_to_v<to>` fn naming + filename-parsing auto-load.
+- [internal] new `tests/migrate.bats` (12 cases): init creates mode 0600/0700 + idempotent · legacy version file seeds versions.json · get_version defaults to 1 · set_version round-trip · check empty registry pending:0 · check identity migrator emits `_kind:migration_needed` · run empty migrated:0 · run identity bumps version + creates backup mode 0600 · run validates JSON refuses bad output · rollback restores from backup · clean_backups keeps newest N · status echoes versions.json.
+- [docs] `docs/superpowers/plans/2026-05-11-phase-10-part-1-i-migrate-foundation.md` — phase plan with locked decisions MIG1/MIG2/MIG3/MIG5 + open questions deferred to 10-1-ii.
+
+**Sub-scope (10-1-i):**
+- **No `browser-migrate` verb.** 10-1-ii.
+- **No real migrators registered.** Empty registry; tests use fixture migrators via env override.
+- **No typed-phrase confirmation.** Verb-layer concern; 10-1-ii.
+- **No concurrent-migration lock file.** Lib doesn't enforce single-instance; 10-1-ii adds `${BROWSER_SKILL_HOME}/.migrate.lock`.
+- **No multi-version chain rollback.** Single-step only; chains require multiple invocations.
+- **No automatic migration trigger.** All migrations explicit via `migrate_run`.
+- **No skill_version write to versions.json beyond initial value.** 10-1-ii's verb refreshes it.
+
+User-facing verb count unchanged. Phase 10 part 1 in flight — 1/3 sub-parts shipped (foundation; verb + first migrator queued).
+
 ### Phase 10 design doc — schema migration tooling
 
 Pure-design PR; no code yet. Locks decisions before implementation. Mirrors PR #57 (Phase 11 design) shape — design doc lands separately so implementation PRs can reference locked decisions instead of re-deriving them.
