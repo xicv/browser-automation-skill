@@ -13,6 +13,30 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 10 part 1-iii — first real migrator (no-op v1_to_v2 for memory) — CLOSES Phase 10 part 1
+
+- [feat] new `scripts/lib/migrators/memory/v1_to_v2.sh` defining `migrate_memory_v1_to_v2 <file_path>` — first real migrator. **No-op identity** (purely bumps `schema_version` from 1 to 2; no data shape change). Validates the registry + dispatch end-to-end against production code (not test fixtures).
+- [feat] **F1 — Identity migrator only.** No data shape change. Migrator just ensures `.schema_version = 2`. Atomic-swap + backup + validation handled by `lib/migrate.sh::migrate_run` (10-1-i).
+- [feat] **F2 — Memory archetype JSONs are the target.** Already-isolated state (Phase 11 1-i shape); single-file pattern; clean schema_version field; not user-facing data — corruption would only break cache hits, not credentials/sessions. Lowest-risk first migration target.
+- [feat] **F5 — Migration scope: every `*.json` under `${BROWSER_SKILL_HOME}/memory/`** — both `patterns.json` AND archetype JSONs. Migrator is uniform (just bumps schema_version on whatever JSON it gets); lib's `find -type f -name '*.json'` walks both.
+- [internal] new `tests/migrators-memory.bats` (3 cases): registry auto-loads memory v1_to_v2 + `migrate_check` emits `_kind:migration_needed schema:memory from:1 to:2` · `browser-migrate run --yes --schema memory` bumps versions.json + archetype JSON + creates backup mode 0600 · patterns.json AND archetype JSON both migrated (find walks both).
+
+**Sub-scope (10-1-iii):**
+- **No data shape change.** Identity migrator only.
+- **No new lib helpers.** Reuses 10-1-i (lib/migrate.sh) + 10-1-ii (browser-migrate verb) entirely.
+- **No `--auto-migrate` flag on doctor.** Migration stays opt-in.
+- **No documentation of the v2 shape** — there isn't one beyond `schema_version: 2`. Real shape changes ship per future migrator.
+- **No migration of existing user state.** Tests use fresh fixtures; production users on v1 will see "1 migration needed" on first `browser-migrate check` post-upgrade.
+
+**Phase 10 part 1 ✅ CLOSED.** All 3 sub-parts shipped:
+1. `lib/migrate.sh` foundation (10-1-i, PR #109) — pure read/write API
+2. `browser-migrate` verb (10-1-ii, PR #110) — sub-mode dispatch + lock + typed-phrase
+3. First real migrator (this PR — 10-1-iii) — no-op identity for memory
+
+**Phase 10 ✅ COMPLETE for v1.** Future per-schema migrators ship case-by-case as schema bumps land (~30 LOC + ~3 bats per new migrator). No Phase 10 part 2 planned.
+
+User-facing verb count unchanged (browser-migrate landed in 10-1-ii). Memory schema is the only real-migrated schema today.
+
 ### Phase 10 part 1-ii — `browser-migrate` verb (sub-mode dispatch + lock + typed-phrase confirmation)
 
 - [feat] new `scripts/browser-migrate.sh` — agent + user surface over `lib/migrate.sh` (10-1-i). Five sub-modes: `check` · `status` · `run [--yes] [--schema NAME]` · `rollback --schema NAME [--yes]` · `clean-backups [--keep N] [--yes]`.
