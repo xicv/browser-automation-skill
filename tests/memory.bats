@@ -272,6 +272,70 @@ _arch_json() {
   [ -z "${arch}" ] || fail "expected empty on miss; got '${arch}'"
 }
 
+# ---------- Pick A4: pattern-equivalence canonicalization ----------
+# /devices/:id and /devices/:itemId describe the SAME URL family but differ
+# in lexical name. memory_record_pattern's idempotency check used raw string
+# equality, creating redundant rows. Locked decision: canonical key collapses
+# all `:NAME` segments to `:_` for COMPARE only; original names preserved in
+# storage. Idempotency drops the AND archetype_id clause — first-write wins
+# on canonical match.
+
+@test "memory_record_pattern: equivalent patterns (same archetype, different :NAME) collapse to 1 row" {
+  memory_record_pattern prod-app '/devices/:id' devices-detail
+  memory_record_pattern prod-app '/devices/:itemId' devices-detail
+
+  patterns_path="${BROWSER_SKILL_HOME}/memory/prod-app/patterns.json"
+  rows="$(jq '.patterns | length' "${patterns_path}")"
+  [ "${rows}" = "1" ] || fail "expected 1 row after equivalent pattern; got ${rows}: $(cat "${patterns_path}")"
+  jq -e '.patterns[0].hit_count == 2' "${patterns_path}" >/dev/null \
+    || fail "expected hit_count:2 after equivalent re-record; got $(jq -c '.patterns[0]' "${patterns_path}")"
+}
+
+@test "memory_record_pattern: equivalent patterns preserve FIRST-WRITTEN url_pattern in storage" {
+  memory_record_pattern prod-app '/devices/:id' devices-detail
+  memory_record_pattern prod-app '/devices/:itemId' devices-detail
+
+  patterns_path="${BROWSER_SKILL_HOME}/memory/prod-app/patterns.json"
+  stored="$(jq -r '.patterns[0].url_pattern' "${patterns_path}")"
+  [ "${stored}" = "/devices/:id" ] \
+    || fail "expected stored url_pattern unchanged (:id, not :itemId or :_); got '${stored}'"
+}
+
+@test "memory_record_pattern: canonical match wins over archetype_id mismatch (first archetype_id wins)" {
+  # Locked decision: canonical url_pattern is THE idempotency key. If a row
+  # exists with the canonical pattern, subsequent records bump hit_count + keep
+  # the existing archetype_id, regardless of what archetype_id the new record
+  # specifies. This consolidates the common case where _derive_archetype_id
+  # gave two agents different archetype names for the same URL family.
+  memory_record_pattern prod-app '/devices/:id' devices-id
+  memory_record_pattern prod-app '/devices/:itemId' devices-itemid
+
+  patterns_path="${BROWSER_SKILL_HOME}/memory/prod-app/patterns.json"
+  rows="$(jq '.patterns | length' "${patterns_path}")"
+  [ "${rows}" = "1" ] || fail "expected canonical match to keep 1 row; got ${rows}: $(cat "${patterns_path}")"
+  arch="$(jq -r '.patterns[0].archetype_id' "${patterns_path}")"
+  [ "${arch}" = "devices-id" ] || fail "expected first-written archetype_id 'devices-id'; got '${arch}'"
+}
+
+@test "memory_record_pattern: non-equivalent patterns (different paths) still create separate rows" {
+  memory_record_pattern prod-app '/devices/:id' devices-detail
+  memory_record_pattern prod-app '/users/:id' users-detail
+
+  patterns_path="${BROWSER_SKILL_HOME}/memory/prod-app/patterns.json"
+  rows="$(jq '.patterns | length' "${patterns_path}")"
+  [ "${rows}" = "2" ] \
+    || fail "different path → different row; got ${rows}: $(cat "${patterns_path}")"
+}
+
+@test "memory_resolve_archetype: matches URL when stored pattern uses different :NAME (regression — resolver already param-agnostic)" {
+  # The resolver compiles `:NAME` → `[^/]+` regardless of name; this test
+  # pins that property as a regression net for the canonicalization PR.
+  memory_record_pattern prod-app '/devices/:itemId' devices-detail
+  arch="$(memory_resolve_archetype prod-app 'https://prod.example.com/devices/123')"
+  [ "${arch}" = "devices-detail" ] \
+    || fail "URL should resolve regardless of stored param name; got '${arch}'"
+}
+
 # --- self-heal: memory_record on existing disabled intent resets fail_count + disabled ---
 
 @test "memory_record (self-heal): re-record on disabled intent resets fail_count:0 + disabled:false; bumps success_count" {

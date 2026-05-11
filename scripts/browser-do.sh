@@ -298,8 +298,14 @@ if [ "${sub_mode}" = "propose" ]; then
     --argjson threshold "${arg_threshold}" \
     --argjson known "${known_json}" \
     --arg site "${site}" \
-    '.clusters
-     | map(select(.count >= $threshold and ([.templated] | inside($known) | not)))
+    '# Pick A4: canonicalize both the cluster pattern and each known pattern
+     # before compare so /devices/:id matches an already-known /devices/:itemId.
+     # Original cluster .templated is preserved on emit (only the compare uses
+     # the canonical form).
+     def _canonical: gsub(":[A-Za-z_][A-Za-z0-9_]*"; ":_");
+     ($known | map(_canonical)) as $known_canon
+     | .clusters
+     | map(select(.count >= $threshold and ([(.templated | _canonical)] | inside($known_canon) | not)))
      | .[] |
        {_kind:"proposal", site:$site,
         url_pattern:.templated,
@@ -312,11 +318,13 @@ if [ "${sub_mode}" = "propose" ]; then
         sample_urls:(.urls[0:3]),
         count:.count}')
 
-  # Count clusters skipped due to "already in patterns.json".
+  # Count clusters skipped due to "already in patterns.json" (canonical match).
   skipped_known="$(printf '%s' "${cluster_output}" | jq -r \
     --argjson threshold "${arg_threshold}" \
     --argjson known "${known_json}" \
-    '.clusters | map(select(.count >= $threshold and ([.templated] | inside($known)))) | length')"
+    'def _canonical: gsub(":[A-Za-z_][A-Za-z0-9_]*"; ":_");
+     ($known | map(_canonical)) as $known_canon
+     | .clusters | map(select(.count >= $threshold and ([(.templated | _canonical)] | inside($known_canon)))) | length')"
 
   duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
   summary_json verb=do mode=propose site="${site}" \

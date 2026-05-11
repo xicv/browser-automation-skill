@@ -13,6 +13,25 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Pick A4 — Pattern-equivalence canonicalization (`:NAME` collapse for compares)
+
+Today, agents that hand-record patterns often pick different parameter names — `/devices/:id` and `/devices/:itemId` describe the SAME URL family but are stored as **different** rows in `patterns.json`, creating redundant entries and splitting cache hits across two archetypes. Pick A4 collapses `:NAME` segments to a canonical form (`:NAME` → `:_`) for comparison; storage preserves original names for readability.
+
+- [feat] **`scripts/lib/memory.sh::memory_record_pattern` idempotency check now uses canonical form.** New inline jq helper `def _canonical: gsub(":[A-Za-z_][A-Za-z0-9_]*"; ":_")`. Idempotency key is **only the canonical url_pattern** (dropped the AND `.archetype_id` clause): re-recording `/devices/:itemId` when `/devices/:id` exists → 1 row, `hit_count` bumped, first-written `url_pattern` + `archetype_id` preserved.
+- [feat] **`scripts/browser-do.sh::propose` suppression filter now canonical-aware.** The `inside($known)` check canonicalizes both the proposed cluster's `templated` and each known `url_pattern` from `patterns.json` before compare. Cluster `/devices/:id` is suppressed when `patterns.json` already has `/devices/:itemId`. `skipped_known` counter reflects canonical-match suppressions.
+- [feat] **Resolver path unchanged.** `scripts/lib/node/url-pattern-resolver.mjs` already compiles `:NAME` → `[^/]+` agnostic to param name (its regex `/:[A-Za-z_][\w$]*/g`); URL→pattern matching has always worked across name variants. A4 adds the missing piece: the **write-side** equivalence check that prevents redundant rows from being created in the first place. New bats pin this resolver behavior as a regression net.
+- [internal] 6 new bats: 5 in `tests/memory.bats` (collapse + first-write-wins preservation + canonical match wins over archetype_id mismatch + non-equivalent paths stay separate + resolver param-agnostic regression) + 1 in `tests/browser-do.bats` (propose suppresses canonically-equivalent cluster).
+
+**Sub-scope (this PR):**
+- **Locked decision: lexical normalization, not structural.** `:NAME` → `:_` for compare only. Skip Levenshtein / AST-style alternatives — they need more design surface for marginal gain.
+- **Canonical key is COMPUTE-ONLY.** Storage preserves the original `url_pattern` text written by the user; the canonical form never lands on disk. Readability + audit trail remain intact.
+- **No storage migration.** Existing rows keep their names; comparisons just stop discriminating on name. Doctor still surfaces `migrations` count of 0 after this PR (no schema bump).
+- **No `_derive_archetype_id` canonicalization.** Archetype IDs are still derived from raw patterns (`/devices/:id` → `devices-id`; `/devices/:itemId` → `devices-itemid`). Two agents hand-recording with different `:NAME`s will produce different archetype IDs — but the SECOND record's archetype_id is silently discarded on canonical match (first-write wins).
+- **No retroactive deduplication.** Existing redundant rows from before this PR stay as-is. A future maintenance verb (`browser-do dedup`?) could consolidate; deferred until demand surfaces.
+- **No `memory_resolve_archetype` change.** The resolver already does the right thing per the JS regex; the bats regression test pins this behavior.
+
+User-facing verb count unchanged (42). `patterns.json` schema unchanged.
+
 ### Pick A3 — `--auto-record` flag on `browser-do propose`
 
 `propose` (PR #97, 11-2-ii) is read-only by default — emits `_kind:proposal` events for URL clusters meeting the threshold AND not already in `patterns.json`. Today the agent reads the proposals and decides whether/which to record explicitly. With `--auto-record`, every proposal that survives the existing suppression filter is auto-persisted via `memory_record_pattern`. Useful for batch-onboarding a corpus of URLs at session start.

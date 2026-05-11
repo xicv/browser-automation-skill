@@ -762,3 +762,23 @@ EOF
   printf '%s' "${last}" | jq -e '.auto_recorded == 2 and .proposals == 2' >/dev/null \
     || fail "summary should report auto_recorded:2 + proposals:2; got ${last}"
 }
+
+# ---------- Pick A4: propose suppression uses canonical pattern compare ----------
+
+@test "browser-do propose: cluster /devices/:id suppressed when patterns.json has /devices/:itemId (canonical match)" {
+  _register_site app
+  source "${LIB_DIR}/memory.sh"
+  # Pre-seed patterns.json with the EQUIVALENT (different param name) pattern.
+  memory_record_pattern app '/devices/:itemId' devices-itemid
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app \
+    --url 'https://app.example.com/devices/1' \
+    --url 'https://app.example.com/devices/2' \
+    --url 'https://app.example.com/devices/3'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] \
+    || fail "expected 0 proposals on canonically-equivalent known pattern; got ${count}: ${output}"
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.skipped_known == 1' >/dev/null \
+    || fail "summary should report skipped_known:1; got ${last}"
+}
