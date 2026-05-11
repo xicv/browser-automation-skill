@@ -200,7 +200,15 @@ memory_record_failure() {
 
 # memory_record_pattern SITE URL_PATTERN ARCHETYPE_ID
 # Upserts a (url_pattern, archetype_id) pair into <site>/patterns.json.
-# Idempotent: same pair → bumps last_seen + hit_count, doesn't duplicate.
+# Idempotent: same canonical url_pattern → bumps last_seen + hit_count.
+#
+# Pick A4 — pattern-equivalence canonicalization: `:NAME` segments differ
+# in name (`/devices/:id` vs `/devices/:itemId`) but describe the SAME URL
+# family. Idempotency uses the CANONICAL form (`:NAME` → `:_` collapse)
+# for compare; the original url_pattern + archetype_id are preserved in
+# storage (first-write wins on canonical match — subsequent records bump
+# hit_count, archetype_id unchanged even if new record specified a
+# different one).
 memory_record_pattern() {
   local site="$1" url_pattern="$2" arch_id="$3"
   assert_safe_name "${site}" "site-name"
@@ -219,18 +227,23 @@ memory_record_pattern() {
 
   updated="$(printf '%s' "${current}" | jq \
     --arg p "${url_pattern}" --arg arch "${arch_id}" --arg now "${now}" '
-    if ((.patterns // []) | map(select(.url_pattern == $p and .archetype_id == $arch)) | length) > 0 then
-      .patterns |= map(
-        if .url_pattern == $p and .archetype_id == $arch then
-          .last_seen = $now | .hit_count = ((.hit_count // 0) + 1)
-        else . end
-      )
-    else
-      .patterns = ((.patterns // []) + [{
-        url_pattern: $p, archetype_id: $arch,
-        first_seen: $now, last_seen: $now, hit_count: 1
-      }])
-    end
+    # Pick A4: canonical-pattern helper. Collapses all `:NAME` segments to
+    # `:_` so /devices/:id and /devices/:itemId match on compare. The regex
+    # mirrors the JS resolver helper (`/:[A-Za-z_][\w$]*/g`).
+    def _canonical: gsub(":[A-Za-z_][A-Za-z0-9_]*"; ":_");
+    ($p | _canonical) as $pc
+    | if ((.patterns // []) | map(select((.url_pattern | _canonical) == $pc)) | length) > 0 then
+        .patterns |= map(
+          if (.url_pattern | _canonical) == $pc then
+            .last_seen = $now | .hit_count = ((.hit_count // 0) + 1)
+          else . end
+        )
+      else
+        .patterns = ((.patterns // []) + [{
+          url_pattern: $p, archetype_id: $arch,
+          first_seen: $now, last_seen: $now, hit_count: 1
+        }])
+      end
   ')"
 
   _memory_write_json "${patterns_path}" "${updated}"
