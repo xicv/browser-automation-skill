@@ -132,6 +132,16 @@ memory_record() {
             # Self-heal (Phase 11 1-iii D2): a successful re-record clears
             # any prior failure state. This is what "agent re-resolved →
             # cache heals" means at the storage layer.
+            #
+            # Pick A5: log the disabled→enabled transition. Check BEFORE
+            # resetting so the entry can capture the pre-reset fail_count.
+            | (if (.disabled // false) == true then
+                 .self_heal_history = ((.self_heal_history // []) + [{
+                   ts: $now, event: "healed",
+                   fail_count: (.fail_count // 0),
+                   selector_at_time: $sel
+                 }])
+               else . end)
             | .fail_count = 0
             | .disabled = false
           else . end
@@ -168,6 +178,17 @@ memory_record_failure() {
       if .intent == $intent then
         .fail_count = ((.fail_count // 0) + 1)
         | .last_used = $now
+        # Pick A5: log the enabled→disabled transition (single-shot). Append
+        # ONLY when the new fail_count crosses the threshold AND the prior
+        # .disabled was not already true. Subsequent failures past the
+        # threshold do not double-log.
+        | (if (.fail_count > 3) and ((.disabled // false) == false) then
+             .self_heal_history = ((.self_heal_history // []) + [{
+               ts: $now, event: "disabled",
+               fail_count: .fail_count,
+               selector_at_time: .selector
+             }])
+           else . end)
         | .disabled = (.fail_count > 3)
       else . end
     ))

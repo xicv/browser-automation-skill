@@ -13,6 +13,25 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Pick A5 — `self_heal_history[]` audit-trail population
+
+Phase 11 1-iii (PR #92) shipped the disable mechanic (`fail_count > 3 → disabled:true`) and the D2 heal mechanic (`memory_record` resets `fail_count` + `disabled`). The archetype schema reserved a `self_heal_history[]` array field on every interaction since Phase 11 1-i — but **no writer existed**. The field stayed `[]` forever. Pick A5 lights up the audit trail.
+
+- [feat] **`scripts/lib/memory.sh::memory_record_failure`** appends one entry to `self_heal_history[]` on the **enabled→disabled transition** (single-shot). Shape: `{ts, event:"disabled", fail_count, selector_at_time}`. Subsequent failures past the threshold do NOT double-log — the guard `(.disabled // false) == false` ensures only the crossing fires. `selector_at_time` captures the cached selector that broke; useful for forensic queries ("what selectors keep breaking?").
+- [feat] **`scripts/lib/memory.sh::memory_record`** appends one entry on the **disabled→enabled transition** (D2 heal path). Shape: `{ts, event:"healed", fail_count, selector_at_time}`. `fail_count` captures the **pre-reset** value (e.g. 4, the value at the time of disable). `selector_at_time` captures the **new** selector the agent re-resolved to. The guard `(.disabled // false) == true` ensures the entry only fires when there was something to heal — calling `memory_record` on a healthy interaction (D2 not triggered) does NOT append an entry.
+- [feat] **Entry shape is stable + minimal:** `{ts, event, fail_count, selector_at_time}`. No nesting; no nullable optional fields; doctor + future forensic verbs can `jq` over `self_heal_history` reliably without optional-field shenanigans.
+- [security] **No canary surface.** `selector_at_time` is a CSS selector (already in cache); `ts` is server-side time; `event` + `fail_count` are pure metadata. The recipe `cache-write-security.md` constraints continue to hold — entries are computed, not user-supplied.
+- [internal] 5 new bats in `tests/memory.bats` (13 → 18 cases): 4th failure → 1 "disabled" entry with `fail_count:4` + `selector_at_time` · 1-3 failures → 0 entries (below threshold) · 5th/6th failures past threshold → still 1 entry (single-shot, no double-log) · `memory_record` on disabled → 1 "healed" entry appended + `fail_count` reset to 0 + `disabled:false` (D2 invariant preserved) · `memory_record` on NOT-disabled → 0 entries (no spurious heal events).
+
+**Sub-scope (this PR):**
+- **No new verb.** Storage-layer write-side only; no agent surface change. Reading `self_heal_history[]` happens via `jq` directly today; a future verb can wrap that if demand surfaces.
+- **No design changes to disable/heal mechanics.** Both transitions stay exactly as 1-iii specified (4-failure threshold; D2 healing on re-record). Only the audit trail's write side is new.
+- **No timestamp format change.** Uses existing `now_iso` (second-precision ISO 8601). If sub-second precision is needed later, `now_ms` is the upgrade path; not now.
+- **No retention/pruning of `self_heal_history[]`.** Append-only; grows with every disable/heal cycle. A 50-cycle interaction would have ~50 entries — well below any realistic concern. Pruning would land as a separate maintenance pass if archetype JSONs ever balloon.
+- **No emission of `self_heal_history` entries to `events.jsonl`.** PR #115's observation log is for cache-hit/miss; this audit trail lives in the archetype JSON. Two different scopes; do not conflate.
+
+User-facing verb count unchanged (42). Interaction shape unchanged at the schema-version level (still v2; `self_heal_history` was reserved at v1, populated at v2).
+
 ### Pick D — README/SKILL.md refresh for `browser-migrate` + doctor n/a-message text fix
 
 Tiny doc-only PR (with one source-text tweak). Closes a doc-debt item pending since Phase 10 closure (`browser-migrate` shipped 4 PRs ago but the SKILL.md verb table never gained the row).
