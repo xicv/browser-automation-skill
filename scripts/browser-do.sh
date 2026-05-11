@@ -230,7 +230,7 @@ fi
 # pathname (numeric → :id, UUID → :uuid); emits _kind:proposal events for
 # clusters meeting threshold AND not already in patterns.json.
 if [ "${sub_mode}" = "propose" ]; then
-  arg_site="" arg_threshold="3" arg_auto_record="false"
+  arg_site="" arg_threshold="3" arg_auto_record="false" arg_from_recent="false"
   cli_urls=()
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -238,6 +238,7 @@ if [ "${sub_mode}" = "propose" ]; then
       --threshold)   arg_threshold="$2"; shift 2 ;;
       --url)         cli_urls+=("$2");   shift 2 ;;
       --auto-record) arg_auto_record="true"; shift ;;
+      --from-recent) arg_from_recent="true"; shift ;;
       -h|--help)     usage; exit 0 ;;
       *) die "${EXIT_USAGE_ERROR}" "browser-do propose: unknown flag '$1'" ;;
     esac
@@ -258,6 +259,18 @@ if [ "${sub_mode}" = "propose" ]; then
       [[ "${line}" =~ ^[[:space:]]*# ]] && continue
       urls+=("${line}")
     done
+  fi
+
+  # Pick A6: --from-recent appends URLs from the navigation observation log
+  # filtered to the current site. Absent log → no-op (not an error).
+  if [ "${arg_from_recent}" = "true" ]; then
+    recent_file="${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl"
+    if [ -f "${recent_file}" ]; then
+      while IFS= read -r recent_url; do
+        [ -z "${recent_url}" ] && continue
+        urls+=("${recent_url}")
+      done < <(jq -r --arg s "${site}" 'select(.site == $s) | .url' "${recent_file}" 2>/dev/null || true)
+    fi
   fi
 
   # Build node-helper input + invoke. Empty urls → empty cluster set.

@@ -336,6 +336,58 @@ _arch_json() {
     || fail "URL should resolve regardless of stored param name; got '${arch}'"
 }
 
+# ---------- Pick A6: recent_urls.jsonl passive observation log ----------
+# Phase 11 v2 Pick A6: every navigation verb tees the URL to
+# ${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl. Best-effort append-only
+# writer; mode 0600 file in mode 0700 memory/. propose --from-recent reads
+# the log + clusters. Schema starts at v1 from inception (no migrator
+# needed until shape changes).
+
+@test "memory_record_recent_url: appends row to recent_urls.jsonl mode 0600" {
+  memory_record_recent_url prod-app 'https://prod.example.com/devices/1' open
+
+  log_path="${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl"
+  [ -f "${log_path}" ] || fail "recent_urls.jsonl not written"
+  mode="$(file_mode "${log_path}")"
+  [ "${mode}" = "600" ] || fail "expected mode 600; got ${mode}"
+  jq -e '
+    .url == "https://prod.example.com/devices/1" and
+    .verb == "open" and
+    .site == "prod-app" and
+    .schema_version == 1 and
+    (.ts | length > 0)
+  ' "${log_path}" >/dev/null \
+    || fail "shape wrong: $(cat "${log_path}")"
+}
+
+@test "memory_record_recent_url: appends across multiple invocations (no truncate)" {
+  for n in 1 2 3; do
+    memory_record_recent_url prod-app "https://prod.example.com/devices/${n}" open
+  done
+  log_path="${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl"
+  count="$(jq -s 'length' "${log_path}")"
+  [ "${count}" = "3" ] || fail "expected 3 lines after 3 calls; got ${count}"
+}
+
+@test "memory_record_recent_url: parent dir mode 0700 lazy-created" {
+  # Fresh state — no memory dir exists yet.
+  rm -rf "${BROWSER_SKILL_HOME}/memory"
+  memory_record_recent_url prod-app 'https://prod.example.com/x' open
+  mem_mode="$(file_mode "${BROWSER_SKILL_HOME}/memory")"
+  [ "${mem_mode}" = "700" ] || fail "expected memory/ mode 700; got ${mem_mode}"
+}
+
+@test "memory_record_recent_url: write failure (parent dir unwritable) emits warn but does NOT die" {
+  # Best-effort contract: caller's exit code must not be tainted by recent-urls write failure.
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 500 "${BROWSER_SKILL_HOME}/memory"  # read+execute only; no write
+  run memory_record_recent_url prod-app 'https://prod.example.com/x' open
+  # Restore for teardown.
+  chmod 700 "${BROWSER_SKILL_HOME}/memory"
+  # Must return 0 (best-effort); status is bats's run-captured exit code.
+  [ "${status}" = "0" ] || fail "best-effort write should return 0 even on failure; got ${status}"
+}
+
 # --- self-heal: memory_record on existing disabled intent resets fail_count + disabled ---
 
 @test "memory_record (self-heal): re-record on disabled intent resets fail_count:0 + disabled:false; bumps success_count" {

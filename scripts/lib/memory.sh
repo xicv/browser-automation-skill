@@ -249,6 +249,44 @@ memory_record_pattern() {
   _memory_write_json "${patterns_path}" "${updated}"
 }
 
+# --- Pick A6: passive navigation observation log (recent_urls.jsonl) ---
+
+# memory_record_recent_url SITE URL VERB
+# Append one observation row to ${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl
+# (mode 0600 in mode 0700 memory/). Shape: {ts, url, verb, site, schema_version:1}.
+# Best-effort writer — failure emits warn: and continues; never taints caller
+# exit code. Same convention as browser-do.sh::_record_event (PR #115 events.jsonl).
+#
+# Schema starts at v1 from inception; no migrator needed until shape changes.
+# (lib/migrators/recent_urls/ stays empty until a future bump.)
+memory_record_recent_url() {
+  local site="$1" url="$2" verb="$3"
+  local events_dir events_file ts line
+  events_dir="$(_memory_dir)"
+  events_file="${events_dir}/recent_urls.jsonl"
+  ts="$(now_iso)"
+
+  if ! mkdir -p "${events_dir}" 2>/dev/null; then
+    warn "memory_record_recent_url: mkdir failed (best-effort; navigation unaffected)"
+    return 0
+  fi
+  chmod 700 "${events_dir}" 2>/dev/null || true
+
+  if ! line="$(jq -nc \
+      --arg ts "${ts}" --arg url "${url}" --arg verb "${verb}" --arg site "${site}" \
+      '{ts:$ts, url:$url, verb:$verb, site:$site, schema_version:1}' 2>/dev/null)"; then
+    warn "memory_record_recent_url: encode failed (best-effort; navigation unaffected)"
+    return 0
+  fi
+
+  # O_APPEND atomicity for short JSON lines (well below PIPE_BUF 4KB).
+  if ! printf '%s\n' "${line}" >> "${events_file}" 2>/dev/null; then
+    warn "memory_record_recent_url: append failed (best-effort; navigation unaffected)"
+    return 0
+  fi
+  chmod 600 "${events_file}" 2>/dev/null || true
+}
+
 # memory_resolve_archetype SITE URL
 # Echoes the archetype_id for the first matching url_pattern in <site>/patterns.json.
 # Empty on miss (or if patterns.json is absent). URLPattern resolution is
