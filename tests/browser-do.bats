@@ -580,3 +580,95 @@ EOF
   count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
   [ "${count}" = "0" ] || fail "expected 0 proposals (slugs out of scope v1); got ${count}"
 }
+
+# ---------- Phase 11 v2 part 1 — events.jsonl writer (Pick A1) ----------
+# Tee verb=do mode=intent observations into ${BROWSER_SKILL_HOME}/memory/events.jsonl
+# so doctor's read side (PR #113) reports a real cache-hit-rate. Shape contract:
+# each line is JSON with at least .cache_hit (bool); doctor counts these.
+
+@test "browser-do --intent: cache hit appends events.jsonl line with cache_hit:true" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click delete" "button.delete"
+  STUB_LOG_FILE="$(mktemp)"
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  STUB_LOG_FILE="${STUB_LOG_FILE}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click delete" \
+      --url 'https://app.example.com/devices/123'
+  assert_status 0
+  events="${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  [ -f "${events}" ] || fail "events.jsonl was not created"
+  hits="$(jq -s 'map(select(.cache_hit == true)) | length' "${events}")"
+  [ "${hits}" = "1" ] || fail "expected 1 cache_hit:true line; got ${hits}; file:\n$(cat "${events}")"
+  rm -f "${STUB_LOG_FILE}"
+}
+
+@test "browser-do --intent: cache miss (no_pattern_for_url) appends events.jsonl line with cache_hit:false + reason" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" \
+    --site app --verb click \
+    --intent "click delete" \
+    --url 'https://app.example.com/devices/123'
+  assert_status 11
+  events="${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  [ -f "${events}" ] || fail "events.jsonl was not created on miss"
+  reason="$(jq -rs 'map(select(.cache_hit == false))[0].reason' "${events}")"
+  [ "${reason}" = "no_pattern_for_url" ] || fail "expected reason:no_pattern_for_url; got ${reason}; file:\n$(cat "${events}")"
+}
+
+@test "browser-do --intent: cache miss (intent_not_cached) appends events.jsonl line with cache_hit:false + reason" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click save" "button.save"
+  run bash "${SCRIPTS_DIR}/browser-do.sh" \
+    --site app --verb click \
+    --intent "click delete-not-cached" \
+    --url 'https://app.example.com/devices/123'
+  assert_status 11
+  events="${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  [ -f "${events}" ] || fail "events.jsonl was not created on miss"
+  reason="$(jq -rs 'map(select(.cache_hit == false))[0].reason' "${events}")"
+  [ "${reason}" = "intent_not_cached" ] || fail "expected reason:intent_not_cached; got ${reason}; file:\n$(cat "${events}")"
+}
+
+@test "browser-do --intent: events.jsonl is mode 0600 after first write" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" \
+    --site app --verb click \
+    --intent "anything" \
+    --url 'https://app.example.com/x'
+  events="${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  [ -f "${events}" ] || fail "events.jsonl was not created"
+  m="$(file_mode "${events}")"
+  [ "${m}" = "600" ] || fail "expected events.jsonl mode 600; got ${m}"
+}
+
+@test "browser-do --intent: events.jsonl never contains intent string (privacy defense in depth)" {
+  # Intent strings can contain user input; events.jsonl is doctor-readable +
+  # not encrypted-at-rest. Doctor only needs .cache_hit (bool); intent omitted
+  # from logged fields so even a hostile intent can't leak through the log.
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" \
+    --site app --verb click \
+    --intent "PRIVACY-CANARY-SHOULD-NOT-APPEAR" \
+    --url 'https://app.example.com/devices/123'
+  events="${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  [ -f "${events}" ] || fail "events.jsonl was not created"
+  ! grep -q "PRIVACY-CANARY-SHOULD-NOT-APPEAR" "${events}" \
+    || fail "intent string leaked into events.jsonl:\n$(cat "${events}")"
+}
+
+@test "browser-do --intent: events.jsonl appends (does not truncate) across multiple invocations" {
+  _register_site app
+  for _ in 1 2 3; do
+    bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click \
+      --intent "click delete" \
+      --url 'https://app.example.com/devices/123' >/dev/null 2>&1 || true
+  done
+  events="${BROWSER_SKILL_HOME}/memory/events.jsonl"
+  [ -f "${events}" ] || fail "events.jsonl was not created"
+  n="$(jq -s 'length' "${events}")"
+  [ "${n}" -ge 3 ] || fail "expected >=3 lines after 3 invocations; got ${n}"
+}
