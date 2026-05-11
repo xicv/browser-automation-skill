@@ -744,9 +744,18 @@ async function daemonChildMain(flags) {
         const text = typeof msg.text === 'string' ? msg.text : '';
         // Selector path (PL3): use page.locator(selector).first().fill().
         // Skips refMap precondition. Same secret-scrub semantics as ref path.
+        //
+        // Tier 3: short-timeout default. Playwright's default locator timeout
+        // is 30s — too long when --selector matches nothing (blocks the daemon).
+        // Default 5s; env override BROWSER_SKILL_FILL_TIMEOUT_MS for tests
+        // that legitimately need longer.
+        const fillTimeoutMs = Number.parseInt(
+          process.env.BROWSER_SKILL_FILL_TIMEOUT_MS || '5000',
+          10,
+        );
         if (msg.selector) {
           try {
-            await page.locator(msg.selector).first().fill(text);
+            await page.locator(msg.selector).first().fill(text, { timeout: fillTimeoutMs });
           } catch (err) {
             let safeMessage = err && err.message ? err.message : String(err);
             if (text && safeMessage.includes(text)) {

@@ -109,3 +109,23 @@ teardown() {
     fail "secret leaked into selector-path reply: ${output}"
   fi
 }
+
+# ---------- Tier 3: fill --selector short-timeout ----------
+# PR #129 dropped this case because Playwright's default locator timeout
+# (30s) blocked the daemon. This PR adds a short-timeout default (~5s) to
+# the IPC fill handler; the no-match case now returns within ~15s budget
+# (timeout + IPC overhead + Playwright startup).
+
+@test "stateful e2e: fill --selector on no-match returns well-formed error event within short-timeout budget (Tier 3)" {
+  node scripts/lib/node/playwright-driver.mjs daemon-start >/dev/null
+  node scripts/lib/node/playwright-driver.mjs open --url https://example.com >/dev/null
+  local t0 t1 elapsed
+  t0="$(date +%s)"
+  run node scripts/lib/node/playwright-driver.mjs fill --selector 'input[name="missing"]' --text 'irrelevant'
+  t1="$(date +%s)"
+  elapsed=$(( t1 - t0 ))
+  printf '%s' "${output}" | jq -e '.event == "error"' >/dev/null \
+    || fail "expected error event on no-match selector; got: ${output}"
+  # Default short-timeout 5s + IPC + Playwright overhead → budget 15s.
+  [ "${elapsed}" -lt 15 ] || fail "fill --selector blocked ${elapsed}s; expected < 15s"
+}
