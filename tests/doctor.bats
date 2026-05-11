@@ -279,3 +279,37 @@ EOF
   assert_output_contains "memory cache hit rate: n/a"
   assert_output_contains "events log present but empty"
 }
+
+# ---------- Tier 3: recent_urls.jsonl observation log surface ----------
+# Parallel to memory cache hit-rate block. Reports line count + mode +
+# emits check:"recent_urls" JSON event. Advisory only (never fails).
+
+@test "doctor: no recent_urls log → reports 'recent_urls: 0 entries (no navigations yet)' + JSON count:0" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "recent_urls: 0 entries"
+  echo "${output}" | grep -E '"check":"recent_urls".*"count":0' >/dev/null \
+    || fail "expected {check:recent_urls,count:0} JSON line; got:\n${output}"
+}
+
+@test "doctor: recent_urls log with 3 entries → reports '3 entries'" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 700 "${BROWSER_SKILL_HOME}" "${BROWSER_SKILL_HOME}/memory"
+  cat > "${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl" <<'EOF'
+{"ts":"2026-05-12T00:00:00Z","url":"https://a.example/1","verb":"open","site":"a","schema_version":1}
+{"ts":"2026-05-12T00:00:01Z","url":"https://a.example/2","verb":"open","site":"a","schema_version":1}
+{"ts":"2026-05-12T00:00:02Z","url":"https://a.example/3","verb":"open","site":"a","schema_version":1}
+EOF
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "recent_urls: 3 entries"
+  echo "${output}" | grep -E '"check":"recent_urls".*"count":3' >/dev/null \
+    || fail "expected {check:recent_urls,count:3} JSON line; got:\n${output}"
+}

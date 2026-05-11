@@ -13,6 +13,31 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Tier 3 papercut bundle — doctor `recent_urls` surface + `fill --selector` short-timeout
+
+Two small follow-ups bundled per HANDOFF "bundle-with-next-touching-area" guidance. Both flagged across prior PRs:
+- Doctor surface for `recent_urls.jsonl` (flagged by HANDOFF after PR #125 Pick A6 shipped).
+- `fill --selector` short-timeout (deferred test case from PR #129 Pick B).
+
+#### Doctor `recent_urls` surface
+
+- [feat] **`scripts/browser-doctor.sh` adds `check:"recent_urls"` block.** Parallel shape to `check:"memory_cache"` (PR #113). Reports line count of `${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl` + emits JSON event. Absent file → `0 entries (no navigations yet)`; present → `N entries (passive navigation log)`. Never fails doctor.
+- [internal] 2 new bats in `tests/doctor.bats`: absent log → `count:0` JSON + "0 entries" line; present with 3 entries → `count:3` JSON + "3 entries" line.
+
+#### `fill --selector` short-timeout
+
+- [fix] **`scripts/lib/node/playwright-driver.mjs` `case 'fill'` selector path passes `timeout: 5000` to `locator.fill()`.** Default Playwright locator timeout (30s) was blocking the daemon when `--selector` matched nothing — the test case dropped from PR #129 documented this. Now: no-match returns a well-formed error event within ~5s instead of timing out the IPC channel after 30s.
+- [feat] **`BROWSER_SKILL_FILL_TIMEOUT_MS` env override** for tests/use cases that legitimately need longer (slow pages, long-loading dynamic forms). Default 5000ms covers 99% of cases.
+- [internal] 1 new bats in `tests/playwright-lib_stateful_e2e.bats`: `fill --selector 'input[name="missing"]'` returns `event:"error"` AND completes within 15s budget (timeout + IPC + Playwright startup).
+
+**Sub-scope (this PR):**
+- **Only `fill` selector path got the short-timeout.** Click selector path doesn't have the same issue (clicking a non-existent selector also waits, but click rarely hits no-match in agent workflows; defer fix until needed).
+- **No env override for `click`.** Same reason.
+- **Doctor `recent_urls` block is line-count only.** No per-site breakdown, no time-window (last 7 days?), no oldest/newest timestamps. Future maintenance verbs can add aggregation if demand surfaces.
+- **No global "fill failed quickly" event distinction.** Error event shape unchanged; only the WAIT time changes. Consumers parsing `.event == "error"` see same shape.
+
+Full suite: 977/0 (was 974; +3). Project lint exit 0.
+
 ### Stage 4 part 1 — agent-workflow recipes (4 tutorial-shaped walkthroughs)
 
 All HANDOFF-locked PR picks shipped (PRs #113-#129). Remaining work was Stage 4 adoption: recipes / demo / cookbook. This PR ships **agent-workflow recipes** — distinct from existing pattern recipes (codified discipline). Workflow recipes show sequenced commands + expected output for actual user-facing tasks.

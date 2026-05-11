@@ -241,6 +241,20 @@ else
   jq -nc '{check:"memory_cache", hits:0, total:0, hit_rate_pct:null}'
 fi
 
+# --- Tier 3: recent_urls.jsonl line count (advisory; forward-compat read side) ---
+# Parallel to memory_cache check above. Phase 11 v2 Pick A6 (PR #125) added
+# the writer; doctor reports the line count so users see passive observation
+# is actually accumulating. Absent log → 0 entries (not an error).
+recent_urls_log="${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl"
+if [ -f "${recent_urls_log}" ]; then
+  recent_urls_count="$(jq -s 'length' "${recent_urls_log}" 2>/dev/null || printf '0')"
+  ok "recent_urls: ${recent_urls_count} entries (passive navigation log)"
+else
+  recent_urls_count=0
+  ok "recent_urls: 0 entries (no navigations yet — run 'browser-open --site SITE --url URL' to populate)"
+fi
+jq -nc --argjson n "${recent_urls_count}" '{check:"recent_urls", count:$n}'
+
 duration_ms=$(( $(now_ms) - started_at_ms ))
 
 # Status semantics (§5.3 of extension-model spec).
