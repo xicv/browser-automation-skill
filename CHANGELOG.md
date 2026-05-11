@@ -13,6 +13,27 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Pick A6 — `recent_urls.jsonl` passive navigation observation log + `propose --from-recent`
+
+`browser-do --intent` records cache hits/misses (PR #115 `events.jsonl`). What's been MISSING: every URL the user **visited** (via `browser-open`, `browser-flow run`, etc). Without that signal, `browser-do propose` could only see URLs the agent fed via `--url`. Pick A6: passive observation — `browser-open` tees URLs to a new append-only log; `propose --from-recent` reads from it.
+
+- [feat] **New helper `scripts/lib/memory.sh::memory_record_recent_url SITE URL VERB`.** Appends `{ts, url, verb, site, schema_version:1}` to `${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl` (mode 0600 in mode 0700 `memory/`). Best-effort writer — failure emits `warn:` and continues; never taints caller exit code. Same convention as `_record_event` in `browser-do.sh` (PR #115).
+- [feat] **`scripts/browser-open.sh` tees on success.** After the adapter returns 0, `memory_record_recent_url "${ARG_SITE:-$(current_get)}" "${url}" "open"` writes one row. Site resolution: `--site` flag wins; falls back to `current_get` (sticky current site). Site-less navigations skip the tee (recent_urls is site-scoped for `propose --from-recent` consumption).
+- [feat] **`--dry-run` does NOT tee.** Mirrors the adapter call semantics — dry-run never executed the adapter, so no navigation actually happened. Bats pins this.
+- [feat] **`scripts/browser-do.sh::propose --from-recent` flag.** Reads `recent_urls.jsonl`, filters to lines matching the resolved site, appends URLs to the cluster input. Composes additively with existing `--url` args and stdin URLs. Absent log → no-op (not an error). Useful for end-of-session: `bash scripts/browser-do.sh propose --site app --from-recent --auto-record` consolidates the day's navigation history into pattern rows in one call.
+- [feat] **New `scripts/lib/migrators/recent_urls/` directory** (placeholder; README only). Schema starts at `v1` from inception — no migrator needed until a future shape bump. Mirrors the `lib/migrators/memory/` precedent from PR #111 (where `v1_to_v2.sh` shipped per actual bump, not preemptively).
+- [internal] 10 new bats: 4 in `tests/memory.bats` (helper shape + mode 0600 + parent-dir 0700 lazy-create + best-effort write-failure non-fatal) + 4 in `tests/browser-do.bats` (`propose --from-recent` clusters + site-filter + combines with `--url` + absent-log graceful) + 2 in `tests/browser-open.bats` (success tees + `--dry-run` does NOT tee).
+
+**Sub-scope (this PR):**
+- **Initial write site is `browser-open` ONLY.** Smallest reviewable surface. Future verbs (`browser-flow run`, `browser-replay`, `browser-do` cache-hit dispatches) can tee in follow-up PRs without API surface change.
+- **No retention/pruning.** Log grows unbounded for v1. Future maintenance verb (`browser-do clean-recent --keep N` or `--older-than D`?) can land case-by-case if growth becomes operational.
+- **No URL canary check.** URLs may contain query params with sensitive bytes (tokens, session IDs). The log is mode 0600 inside mode 0700 `memory/` (same as credential metadata + archetype caches); content-filtering on URLs is out of scope and would break legitimate use cases (any URL with `?token=` parameter — those are agent-driven navigations the user explicitly wants logged for replay/cluster).
+- **No time-window filter in `--from-recent`.** All lines are read; `propose`'s existing threshold filter handles the "is this URL family significant?" question. Future `--last-n` / `--since` flags could window the read; deferred.
+- **No migrator code for v0_to_v1.** Schema starts at `v1`; the registry walks the `recent_urls` namespace via the placeholder README's existence (no fn to register).
+- **No doctor surface for `recent_urls.jsonl`.** Doctor already surfaces `events.jsonl` via the `check:"memory_cache"` block (PR #113); a separate `check:"recent_urls"` block could land in a tiny follow-up.
+
+User-facing verb count unchanged (42). Total memory-dir files: 3 (`patterns.json`, archetype JSONs, `events.jsonl`) → 4 (add `recent_urls.jsonl`). All mode 0600 inside mode 0700 `memory/`.
+
 ### Pick A4 — Pattern-equivalence canonicalization (`:NAME` collapse for compares)
 
 Today, agents that hand-record patterns often pick different parameter names — `/devices/:id` and `/devices/:itemId` describe the SAME URL family but are stored as **different** rows in `patterns.json`, creating redundant entries and splitting cache hits across two archetypes. Pick A4 collapses `:NAME` segments to a canonical form (`:NAME` → `:_`) for comparison; storage preserves original names for readability.

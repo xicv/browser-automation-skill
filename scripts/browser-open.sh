@@ -22,6 +22,12 @@ source "${SCRIPT_DIR}/lib/router.sh"
 # shellcheck source=lib/verb_helpers.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/verb_helpers.sh"
+# shellcheck source=lib/site.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/site.sh"
+# shellcheck source=lib/memory.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/memory.sh"
 
 init_paths
 
@@ -73,6 +79,15 @@ set -e
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 
 if [ "${adapter_rc}" -eq 0 ]; then
+  # Pick A6: passive observation. Best-effort tee to recent_urls.jsonl when a
+  # site is in scope. --site flag (ARG_SITE from parse_verb_globals) wins;
+  # falls back to current_get (sticky current site). Site-less navigations
+  # skip the tee — recent_urls is site-scoped for `propose --from-recent`.
+  # Failure emits warn: in the helper and continues; never taints exit code.
+  _open_site="${ARG_SITE:-$(current_get 2>/dev/null || true)}"
+  if [ -n "${_open_site}" ]; then
+    memory_record_recent_url "${_open_site}" "${url}" "open" 2>/dev/null || true
+  fi
   emit_summary verb=open tool="${tool_name}" why="${why}" status=ok url="${url}"
   exit 0
 fi

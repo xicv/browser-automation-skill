@@ -765,6 +765,62 @@ EOF
 
 # ---------- Pick A4: propose suppression uses canonical pattern compare ----------
 
+# ---------- Pick A6: propose --from-recent reads recent_urls.jsonl ----------
+
+@test "browser-do propose --from-recent: clusters URLs from recent_urls.jsonl" {
+  _register_site app
+  source "${LIB_DIR}/memory.sh"
+  # Seed 3 numeric-suffix URLs into recent_urls.jsonl via the helper.
+  memory_record_recent_url app 'https://app.example.com/devices/1' open
+  memory_record_recent_url app 'https://app.example.com/devices/2' open
+  memory_record_recent_url app 'https://app.example.com/devices/3' open
+
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --from-recent
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "1" ] || fail "expected 1 proposal from recent log; got ${count}; output: ${output}"
+  prop="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal"))[0]')"
+  printf '%s' "${prop}" | jq -e '.url_pattern == "/devices/:id" and .count == 3' >/dev/null \
+    || fail "shape wrong: ${prop}"
+}
+
+@test "browser-do propose --from-recent: filters by --site (other sites' URLs ignored)" {
+  _register_site app
+  _register_site other
+  source "${LIB_DIR}/memory.sh"
+  memory_record_recent_url app 'https://app.example.com/devices/1' open
+  memory_record_recent_url app 'https://app.example.com/devices/2' open
+  memory_record_recent_url other 'https://other.example.com/devices/1' open
+  memory_record_recent_url other 'https://other.example.com/devices/2' open
+
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --from-recent
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  # site=app has only 2 URLs (below default threshold N=3) → 0 proposals.
+  [ "${count}" = "0" ] || fail "expected 0 proposals (site=app has 2 URLs); got ${count}; output: ${output}"
+}
+
+@test "browser-do propose --from-recent: combines with --url args (both sources)" {
+  _register_site app
+  source "${LIB_DIR}/memory.sh"
+  memory_record_recent_url app 'https://app.example.com/devices/1' open
+  memory_record_recent_url app 'https://app.example.com/devices/2' open
+  # 2 from recent + 1 from --url → 3 total → cluster meets threshold.
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --from-recent \
+    --url 'https://app.example.com/devices/3'
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "1" ] || fail "expected 1 proposal combining sources; got ${count}; output: ${output}"
+}
+
+@test "browser-do propose --from-recent: absent log → 0 proposals (no error)" {
+  _register_site app
+  run bash "${SCRIPTS_DIR}/browser-do.sh" propose --site app --from-recent
+  assert_status 0
+  count="$(printf '%s\n' "${lines[@]}" | jq -rs 'map(select(._kind=="proposal")) | length')"
+  [ "${count}" = "0" ] || fail "expected 0 proposals on absent log; got ${count}; output: ${output}"
+}
+
 @test "browser-do propose: cluster /devices/:id suppressed when patterns.json has /devices/:itemId (canonical match)" {
   _register_site app
   source "${LIB_DIR}/memory.sh"
