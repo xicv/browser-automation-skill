@@ -13,6 +13,26 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Phase 10 part 1-ii — `browser-migrate` verb (sub-mode dispatch + lock + typed-phrase confirmation)
+
+- [feat] new `scripts/browser-migrate.sh` — agent + user surface over `lib/migrate.sh` (10-1-i). Five sub-modes: `check` · `status` · `run [--yes] [--schema NAME]` · `rollback --schema NAME [--yes]` · `clean-backups [--keep N] [--yes]`.
+- [feat] **Destructive sub-modes (`run`, `rollback`, `clean-backups`) require confirmation:** `--yes` flag for scripted use; otherwise interactive TTY typed-phrase prompt (`migrate now` for run, `migrate rollback <schema>` for rollback, `clean backups` for clean-backups). Mismatch → `EXIT_USAGE_ERROR`. Non-TTY without `--yes` → `EXIT_TTY_REQUIRED (27)`.
+- [feat] **PID-tracked lock file** at `${BROWSER_SKILL_HOME}/.migrate.lock` (mode 0600). Prevents concurrent migrations: if lock exists + PID alive → die `EXIT_USAGE_ERROR` ("another migration in progress; wait or kill it"). Stale lock (PID dead) auto-cleared with `warn:` line + overwrite. `trap _release_migrate_lock EXIT` ensures cleanup on success or failure. **`check` and `status` are read-only — they don't acquire the lock.**
+- [feat] **`--schema NAME` filter** — applies to `run` (limits scope to one schema) and is required for `rollback`. `check`/`status`/`clean-backups` always full-scope.
+- [feat] **Sub-mode dispatch shape mirrors `browser-history.sh` (PR #86 precedent)** — single bash file ~190 LOC; case-statement at the top routes to per-sub-mode flag-parsing blocks; sub-modes call into `lib/migrate.sh` API directly.
+- [fix] `scripts/lib/migrate.sh::migrate_clean_backups` — refactored to use newline-separated find pipelines (find→sed→sort) instead of space-joined values in associative array. **Bug discovered during 10-1-ii bats:** verb sets `IFS=$'\n\t'` (per common.sh convention), which prevented unquoted-array word-splitting on space — `printf '%s\n' ${by_key[X]}` produced one big string instead of one line per version. Newline-separated streams work under any IFS. Lib bats now exercises the fix in 10-1-i + 10-1-ii.
+- [internal] new `tests/browser-migrate.bats` (12 cases): `check` empty pending:0 · `status` echoes versions.json · `run --yes` empty migrated:0 · `run` no --yes no TTY → exit 27 · `run --yes --schema test` with identity migrator → version bumped + backup · `rollback --schema test --yes` restores · `rollback` missing --schema → exit 2 · `clean-backups --keep 1 --yes` keeps newest only · lock test: alive PID refuses · lock test: dead PID stale-cleared + proceeds · unknown sub-mode → exit 2 · missing sub-mode → exit 2.
+- [docs] `docs/superpowers/plans/2026-05-11-phase-10-part-1-ii-browser-migrate.md` — phase plan with locked decisions Q3 (typed-phrase) + Q4 (lock file).
+
+**Sub-scope (10-1-ii):**
+- **No real migrators registered.** 10-1-iii ships first (no-op `v1_to_v2` for memory archetype JSONs).
+- **No verb-router promotion.** `browser-migrate` invoked directly (skill-internal state operation; no adapter routing).
+- **No `--all` flag** — `migrate run` defaults to all schemas; `--schema` narrows.
+- **No JSON-formatted prompt** — typed-phrase prompts to stderr; only the JSON event stream goes to stdout.
+- **Lock helper inline in browser-migrate.sh** — not promoted to `lib/lock.sh` until a second verb needs file-locking. Defer until demand.
+
+User-facing verb count: 41 → **42** (`browser-migrate` is a new parent row; skill-internal verb counted alongside `doctor`).
+
 ### Phase 10 part 1-i — `lib/migrate.sh` foundation
 
 - [feat] new `scripts/lib/migrate.sh` — pure read/write API for schema-version detection + migration dispatch + atomic-swap with backup + manual rollback. No verb integration yet (10-1-ii ships `browser-migrate`); no real migrators registered (10-1-iii ships first identity migrator).
