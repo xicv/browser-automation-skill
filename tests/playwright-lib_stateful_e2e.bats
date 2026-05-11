@@ -77,3 +77,35 @@ teardown() {
     fail "secret leaked into client reply: ${output}"
   fi
 }
+
+# ---------- Pick B: --selector daemon e2e (closes PR #105's coverage gap) ----------
+# PR #105 shipped --selector plumbing in the driver (CLI parse + IPC handler
+# branches). Parse-layer bats existed; the daemon-runtime branches were
+# untested across 22 PRs. Pick B's cases exercise page.locator(selector)
+# end-to-end.
+
+@test "stateful e2e: click --selector h1 reaches the daemon's selector branch + replies ok" {
+  node scripts/lib/node/playwright-driver.mjs daemon-start >/dev/null
+  node scripts/lib/node/playwright-driver.mjs open --url https://example.com >/dev/null
+  # No snapshot needed — selector path doesn't require refMap.
+  run node scripts/lib/node/playwright-driver.mjs click --selector h1
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.event == "click" and .status == "ok"' >/dev/null \
+    || fail "selector-path click failed: ${output}"
+  # Reply must indicate selector was used (no .ref field; selector branch).
+  printf '%s' "${output}" | jq -e '(.ref // null) == null' >/dev/null \
+    || fail "selector-path reply should not carry .ref: ${output}"
+}
+
+@test "stateful e2e: fill --selector --secret-stdin secret never leaks in reply (selector path)" {
+  node scripts/lib/node/playwright-driver.mjs daemon-start >/dev/null
+  node scripts/lib/node/playwright-driver.mjs open --url https://example.com >/dev/null
+  # Secret-scrub regression for the selector branch (parallel to existing
+  # ref-branch test above). Even though the fill fails (no matching input),
+  # the secret must NEVER appear in stdout/stderr.
+  local secret="selector-path-SECRET-CANARY-42"
+  run bash -c "printf '%s' '${secret}' | node scripts/lib/node/playwright-driver.mjs fill --selector 'input[name=\"x\"]' --secret-stdin"
+  if echo "${output}" | grep -q "${secret}"; then
+    fail "secret leaked into selector-path reply: ${output}"
+  fi
+}

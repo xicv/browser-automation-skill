@@ -13,6 +13,22 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+### Pick B — Daemon e2e for `playwright-lib --selector` (closes PR #105's daemon-runtime coverage gap)
+
+PR #105 (Sep 2026) shipped `playwright-lib --selector` driver plumbing — IPC handler branches in `scripts/lib/node/playwright-driver.mjs` that route `msg.selector` through `page.locator(selector).first()` instead of the `refMap` lookup. Parse-layer bats covered argv plumbing thoroughly; the **daemon-runtime selector branches stayed untested** across 22 PRs. Pick B closes that gap with 2 e2e cases against a real Playwright daemon.
+
+- [internal] **`tests/playwright-lib_stateful_e2e.bats` gains 2 cases:**
+  - `click --selector h1`: end-to-end daemon round-trip — start → open → click(selector=h1) → assert `event:"click", status:"ok"` AND `.ref == null` (proves selector branch took, not ref branch).
+  - `fill --selector --secret-stdin`: secret-scrub regression for the selector branch (parallel to the existing ref-branch test). Even though the fill fails (no matching `<input>` on example.com), the secret literal MUST NEVER appear in stdout/stderr.
+- [internal] **Tests gated behind real Playwright install** via `setup_file()` (existing pattern — `if ! command -v playwright; then skip; fi`). CI without Playwright skips these cases; local dev with Playwright installed runs them.
+
+**Sub-scope (this PR):**
+- **No production code change.** Pure test addition. PR #105's driver code is unchanged; bats simply exercise the previously-uncovered runtime branches.
+- **No `fill --selector` against missing-input no-match.** Initial test attempt tried `fill --selector 'input[name="missing"]'` expecting a quick error event; Playwright's locator semantics wait 30s (default locator timeout) on the element to appear before timing out. This is **not selector-specific** — `--ref` against a removed ref has the same behavior. Out of Pick B scope. (Real bug? Arguably — `playwright-driver.mjs` could pass a short timeout to `locator.fill()`. Deferred to a separate PR if user demand surfaces.)
+- **No `hover --selector` / `select --selector` e2e.** PR #101 (hover) + PR #103 (select) shipped selector-mode only via `chrome-devtools-mcp`; `playwright-lib` doesn't expose those verbs at all. Out of scope.
+
+**Result: PR #105's runtime branches are now CI-gated.** The selector branch can't silently regress without breaking the e2e suite (when Playwright is installed).
+
 ### Pick A2 — Slug heuristic in `url-pattern-cluster.mjs` — closes Phase 11 v2 hardening backlog
 
 `url-pattern-cluster.mjs` (PR #97, 11-2-ii) previously clustered only numeric (`/items/123`) and UUID (`/items/abc-...`) segments. Slug paths (`/posts/my-post-title`, `/users/alice-cooper`) stayed as distinct unique strings → never reached the cluster threshold → never proposed. Pick A2 adds entropy-based slug detection.
