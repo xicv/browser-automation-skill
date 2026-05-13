@@ -2,7 +2,7 @@
 
 A [Claude Code](https://claude.com/claude-code) skill for driving real browsers from an LLM. **42 verbs** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a per-archetype memory cache that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
 
-> **Status:** Phases 1–11 ✅ ALL COMPLETE for v1. Phase 10 (schema migration tooling) ✅ shipped. Phase 11 v2 part 1 (events.jsonl writer) ✅ shipped — end-to-end ROI loop is closed (`browser-do --intent` → events.jsonl → `browser-doctor.sh` reports real cache-hit-rate). Selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). **Production-ready v1.0.**
+> **Status:** v1.5 — Phases 1–11 ✅ ALL COMPLETE. Phase 10 (schema migration tooling) ✅ shipped. **Phase 11 v2 ✅ FULLY SHIPPED**: events.jsonl writer (cache observability), `self_heal_history[]` audit trail, `--auto-record` proposal flag, pattern-equivalence canonicalization, slug clustering, `recent_urls.jsonl` passive observation log. End-to-end ROI loop closed (`browser-do --intent` → events.jsonl → `browser-doctor.sh` reports real cache-hit-rate). Selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). 11 recipes shipped (7 pattern + 4 agent-workflow). **Production-ready v1.5.**
 
 ## What it does
 
@@ -108,8 +108,8 @@ SECURITY.md             # threat model + disclosure
 .gitignore              # blocks credential / session / capture / memory patterns
 .githooks/pre-commit    # credential-leak blocker
 scripts/                # 42 verbs + 6 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers + lib/migrators/
-tests/                  # 941+ bats; runs in <60s
-references/             # routing-heuristics + recipes (cache-write-security, privacy-canary, path-security, body-bytes-not-body, model-routing, anti-patterns-tool-extension, add-a-tool-adapter)
+tests/                  # 977 bats; runs in <60s
+references/             # routing-heuristics + 11 recipes (7 pattern: cache-write-security, privacy-canary, path-security, body-bytes-not-body, model-routing, anti-patterns-tool-extension, add-a-tool-adapter; + 4 agent-workflow: login-then-scrape, incremental-pattern-discovery, flow-record-and-replay, cache-driven-bulk-operation)
 docs/superpowers/       # design specs + per-phase plan-docs + HANDOFF.md
 ```
 
@@ -125,4 +125,6 @@ Removes the `~/.claude/skills/browser-automation-skill` symlink. State at `~/.br
 
 See `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` for the design and `docs/superpowers/plans/` for executable plans. Current "what's next" lives in `docs/superpowers/HANDOFF.md` (refreshed after every shipped PR).
 
-**v1.0 work ✅ COMPLETE.** Remaining hardening (all opt-in, none blocking): Phase 11 v2 backlog A2-A6 (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / `self_heal_history[]` audit trail / active observation `recent_urls.jsonl`); daemon e2e for playwright-lib selector path; press cache-scope decision codification.
+**v1.5 work ✅ COMPLETE.** All Phase 11 v2 hardening shipped (A1-A6: events writer, self-heal audit trail, --auto-record, pattern canonicalization, slug heuristic, recent_urls log). Daemon e2e for playwright-lib selector path shipped (PR #129). Stage 4 part 1 agent-workflow recipes shipped (PR #131). Tier 3 papercut bundle shipped (PR #133: doctor `recent_urls` surface + `fill --selector` short-timeout).
+
+**Next move (per HANDOFF):** Tier 4 7-day dogfood pause on a real site — measure cache hit rate (target ≥70%; useful ≥40%), wall-clock, token cost. Findings shape any further Tier 3 papercuts. Open opt-in items: `press` cache-scope decision; `click --selector` short-timeout (parallel to PR #133's `fill`); `browser-init` wizard; `browser-doctor --fix`. All speculative until dogfood data justifies them.
