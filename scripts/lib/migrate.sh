@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # scripts/lib/migrate.sh
 # Phase 10 part 1-i — schema migration foundation.
 # Per-schema versions in versions.json; per-schema atomic-swap with backup;
@@ -22,7 +23,10 @@ readonly BROWSER_SKILL_MIGRATE_LOADED=1
 # Known schemas; versions.json is initialized with all of these at v1 by
 # migrate_init when no prior state exists. Adding a new schema = append here +
 # add the corresponding entry to versions.json on next migrate_init call.
-readonly _MIGRATE_KNOWN_SCHEMAS=(sites sessions credentials captures baselines memory config)
+# Phase 12 part 2: `stats` schema registered for per-action telemetry log
+# (memory/stats.jsonl + stats.db). v1 only; v2+ migrators land at
+# scripts/lib/migrators/stats/v<from>_to_<to>.sh when shape evolves.
+readonly _MIGRATE_KNOWN_SCHEMAS=(sites sessions credentials captures baselines memory config stats)
 
 # Default backup retention.
 readonly _MIGRATE_DEFAULT_KEEP=5

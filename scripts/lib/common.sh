@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # scripts/lib/common.sh
 # Shared helpers for browser-automation-skill. Source this file from every
 # verb script and lib module. Mirrors mqtt-skill's lib/common.sh pattern.
@@ -10,6 +11,9 @@ readonly BROWSER_SKILL_COMMON_LOADED=1
 umask 077
 
 # --- Exit code table (matches docs/superpowers/specs §5.1) ---
+# Consumed by every verb script via `die "${EXIT_USAGE_ERROR}"` etc.; shellcheck
+# can't see cross-file usage, so disable the unused-var warning for this block.
+# shellcheck disable=SC2034
 readonly EXIT_OK=0
 readonly EXIT_GENERIC_ERROR=1
 readonly EXIT_USAGE_ERROR=2
@@ -175,13 +179,24 @@ summary_json() {
 # --- Millisecond timestamp ---
 # now_ms echoes the current epoch time in milliseconds as a positive integer.
 # Verbs use this to compute duration_ms for their JSON summary.
-# Portable across GNU date (%3N) and BSD date (no %3N — falls through to python3).
+# Phase 12 part 2 perf: bash 5.0+ $EPOCHREALTIME first (fork-free); then GNU
+# date %3N (Linux); then BSD/macOS date second precision × 1000 (one fork,
+# still better than the prior python3 fork). The python3 fallback is removed
+# — bash 5.0 is universal on modern macOS/Linux + the skill's other bash-isms
+# already require Homebrew bash on macOS.
 now_ms() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    # EPOCHREALTIME = "<sec>.<microsec>". Slice to ms via parameter expansion.
+    local secs=${EPOCHREALTIME%.*}
+    local frac=${EPOCHREALTIME#*.}
+    printf '%s%s\n' "${secs}" "${frac:0:3}"
+    return 0
+  fi
   local t
   t="$(date +%s%3N 2>/dev/null)"
   case "${t}" in
-    *N) python3 -c 'import time; print(int(time.time()*1000))' ;;
-    *)  printf '%s\n' "${t}" ;;
+    *N|'') printf '%s000\n' "$(date +%s)" ;;
+    *)     printf '%s\n' "${t}" ;;
   esac
 }
 

@@ -27,6 +27,9 @@ source "${SCRIPT_DIR}/lib/router.sh"
 # shellcheck source=lib/verb_helpers.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/verb_helpers.sh"
+# shellcheck source=lib/stats.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/stats.sh"
 
 init_paths
 
@@ -126,10 +129,19 @@ why="${picked#*$'\t'}"
 
 source_picked_adapter "${tool_name}"
 
+stats_t0="$(now_ms)"
 set +e
 adapter_out="$(invoke_with_retry extract "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
+
+# Phase 12 part 1: per-action telemetry. extract covers chrome-devtools-mcp
+# (default) + obscura (--scrape/--stealth). observed=adapter_out so
+# element_value post-conditions can match extracted text/JSON.
+BROWSER_STATS_OBSERVED="${adapter_out}" \
+  stats_run_adapter_emit \
+    "extract" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
+    -- "${verb_argv[@]}" || true
 
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 

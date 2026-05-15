@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # scripts/lib/router.sh — single source of truth for routing precedence.
 # Verb scripts call pick_tool; the router returns "TOOL_NAME\tWHY".
 # Adding a new precedence rule = define a function + append to ROUTING_RULES.
@@ -53,15 +54,31 @@ _has_flag() {
 # _tool_supports TOOL_NAME VERB [FLAGS...] — returns 0 if the adapter declares
 # support for VERB in its tool_capabilities() output, 1 otherwise. Sources the
 # adapter in a subshell to keep verb-dispatch namespace clean.
+#
+# Phase 12 part 2 audit: per-process memo. Worst-case pick_tool walks 18 rules
+# and each rule may probe `_tool_supports`; the un-cached version forked
+# `source + tool_capabilities + jq -e` for every probe. The cache makes each
+# (tool, verb) tuple cost one fork on first probe and zero forks thereafter.
+declare -gA _TOOL_SUPPORTS_CACHE 2>/dev/null || true
 _tool_supports() {
   local tool="$1" verb="$2"
   shift 2
-  [ -f "${LIB_TOOL_DIR}/${tool}.sh" ] || return 1
-  jq -e --arg v "${verb}" '.verbs | has($v)' >/dev/null 2>&1 <<<"$(
-    # shellcheck source=/dev/null
-    source "${LIB_TOOL_DIR}/${tool}.sh"
-    tool_capabilities 2>/dev/null
-  )"
+  local key="${tool}\t${verb}"
+  case "${_TOOL_SUPPORTS_CACHE[${key}]:-}" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+  esac
+  [ -f "${LIB_TOOL_DIR}/${tool}.sh" ] || { _TOOL_SUPPORTS_CACHE[${key}]=no; return 1; }
+  if jq -e --arg v "${verb}" '.verbs | has($v)' >/dev/null 2>&1 <<<"$(
+      # shellcheck source=/dev/null
+      source "${LIB_TOOL_DIR}/${tool}.sh"
+      tool_capabilities 2>/dev/null
+    )"; then
+    _TOOL_SUPPORTS_CACHE[${key}]=yes
+    return 0
+  fi
+  _TOOL_SUPPORTS_CACHE[${key}]=no
+  return 1
 }
 
 # --- Precedence rules (in order). Each fn echoes "TOOL\tWHY" if it matches.

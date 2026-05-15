@@ -28,6 +28,9 @@ source "${SCRIPT_DIR}/lib/router.sh"
 # shellcheck source=lib/verb_helpers.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/verb_helpers.sh"
+# shellcheck source=lib/stats.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/stats.sh"
 
 init_paths
 
@@ -102,10 +105,19 @@ source_picked_adapter "${tool_name}"
 
 # stdin (if --secret-stdin) flows through to tool_fill -> adapter binary.
 # Capture stdout in subshell; stdin inherits naturally.
+stats_t0="$(now_ms)"
 set +e
 adapter_out="$(invoke_with_retry fill "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
+
+# Phase 12 part 1: per-action telemetry. CRITICAL — when --secret-stdin was
+# used, do NOT pass --text content in stats argv. The helper extracts only
+# selector metadata, not the typed text, so secrets stay out of the JSONL.
+BROWSER_STATS_OBSERVED="${adapter_out}" \
+  stats_run_adapter_emit \
+    "fill" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
+    -- "${verb_argv[@]}" || true
 
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 

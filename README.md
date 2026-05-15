@@ -1,8 +1,8 @@
 # browser-automation-skill
 
-A [Claude Code](https://claude.com/claude-code) skill for driving real browsers from an LLM. **42 verbs** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a per-archetype memory cache that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
+A [Claude Code](https://claude.com/claude-code) skill for driving real browsers from an LLM. **42 verbs + a per-action audit surface** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a per-archetype memory cache that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
 
-> **Status:** Phases 1–11 ✅ ALL COMPLETE for v1. Phase 10 (schema migration tooling) ✅ shipped. Phase 11 v2 part 1 (events.jsonl writer) ✅ shipped — end-to-end ROI loop is closed (`browser-do --intent` → events.jsonl → `browser-doctor.sh` reports real cache-hit-rate). Selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). **Production-ready v1.0.**
+> **Status:** Phases 1–12 ✅ ALL COMPLETE for v1. Phase 10 (schema migration tooling) ✅ shipped. Phase 11 v2 part 1 (events.jsonl writer) ✅ shipped — end-to-end ROI loop is closed (`browser-do --intent` → events.jsonl → `browser-doctor.sh` reports real cache-hit-rate). Selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). **Phase 12 (per-action telemetry + balance-triangle audit) ✅ shipped** — `browser-stats` surface emits one OTel-shaped JSONL event per adapter call into `memory/stats.jsonl`, with a lazy SQLite mirror, post-condition asserter, `oblivious_success` detection, and `/autoresearch` handoff via `browser-stats tune`. **Production-ready v1.1.**
 
 ## What it does
 
@@ -11,6 +11,7 @@ A [Claude Code](https://claude.com/claude-code) skill for driving real browsers 
 - **Capture pipelines.** `inspect` aggregates console + network (sanitized HAR) + screenshot. `audit` runs Lighthouse. All captures persist under `~/.browser-skill/captures/<NNN>/` with `meta.json` + per-aspect files; auto-prune at retention thresholds (default: 500 captures / 14 days; baselines exempt).
 - **Declarative flow runner.** `flow run task.flow.yaml` executes a YAML flow with `${var}` + `${refs.NAME}` templating. `flow record` wraps `playwright codegen` (password-canary write-side: `/password/i` becomes `${secrets.password}` placeholder; literal dropped). `replay <id>` re-executes a capture's steps + emits structured per-step diff. `history list/show/diff/clear` + `baseline save/list/remove` for managing the capture corpus.
 - **Per-archetype memory cache (Phase 11).** `browser-do --intent "click delete" --pattern '/devices/:id'` looks up cached selector for the `(site, archetype, intent)` triple; on hit, dispatches the existing verb at zero LLM tokens; on miss, emits `cache_miss` event. `browser-do record` for explicit write-back. `browser-do propose` auto-clusters URLs into patterns. Self-heal: 4 consecutive failures disable the cached selector; agent re-resolves + re-records to heal.
+- **Per-action telemetry + balance-triangle audit (Phase 12).** Every adapter call (`open`/`click`/`fill`/`snapshot`/`extract`) emits one OTel-shaped JSONL event to `~/.browser-skill/memory/stats.jsonl` (mode 0600). `browser-stats report --pareto` rolls events into a route × verb table: success rate, post-condition hit rate, token-proxy byte counts, p50 duration, $$ cost (when `CLAUDE_USAGE_*` env injected), 13-value failure-mode histogram, and **`oblivious_success` detection** (adapter said ok but post-condition assertion failed — the dominant invisible-error class for browser agents). `browser-stats tune` surfaces worst-performing `(verb, route)` candidates for `/autoresearch` handoff. `browser-stats mark <span> success|fail[:reason]` records user overrides. Schema follows OpenInference + OTel GenAI v1.40 naming for forward-compat with Langfuse/Phoenix/Jaeger via OTLP exporter. See [`references/browser-stats-cheatsheet.md`](references/browser-stats-cheatsheet.md).
 
 ## Security at a glance
 
@@ -24,9 +25,9 @@ A [Claude Code](https://claude.com/claude-code) skill for driving real browsers 
 ## Requirements
 
 **Skill itself (always required):**
-- bash ≥ 4 (`brew install bash` on macOS — system bash 3.2 is too old)
+- bash **≥ 5.0** (`brew install bash` on macOS — system bash 3.2 is too old; bash 5.0 needed for `$EPOCHREALTIME` fast path used by the Phase-12 telemetry emitter)
 - `jq`
-- `python3`
+- `sqlite3` (Phase 12 — lazy-built SQLite mirror at `memory/stats.db`; standard on macOS and most Linux distros)
 
 **For real browser flows (install at least one):**
 - **chrome-devtools-mcp** (recommended; most-complete adapter): `npx -y chrome-devtools-mcp@latest`
@@ -87,6 +88,17 @@ bash scripts/browser-do.sh \
   --intent "click delete" \
   --pattern '/devices/:id'
 # → cache hit; dispatches click; bumps success_count
+
+# Phase 12 telemetry: every adapter call above emits one stats event automatically.
+# Review the audit:
+bash scripts/browser-stats.sh rebuild
+bash scripts/browser-stats.sh report --days 7 --pareto
+
+# Assert a post-condition so the audit can flag oblivious_success:
+BROWSER_STATS_EXPECT_TYPE=url \
+BROWSER_STATS_EXPECT_MATCH=include \
+BROWSER_STATS_EXPECT_VALUE='/devices/123' \
+  bash scripts/browser-open.sh --url 'https://app.example.com/devices/123'
 ```
 
 ## Output contract
@@ -107,9 +119,9 @@ SKILL.md                # Claude Code skill manifest (verb table; updated at eve
 SECURITY.md             # threat model + disclosure
 .gitignore              # blocks credential / session / capture / memory patterns
 .githooks/pre-commit    # credential-leak blocker
-scripts/                # 42 verbs + 6 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers + lib/migrators/
-tests/                  # 941+ bats; runs in <60s
-references/             # routing-heuristics + recipes (cache-write-security, privacy-canary, path-security, body-bytes-not-body, model-routing, anti-patterns-tool-extension, add-a-tool-adapter)
+scripts/                # 42 verbs + browser-stats + 7 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers + lib/migrators/{memory,recent_urls,stats}
+tests/                  # 957+ bats (16 new for browser-stats); runs in <60s
+references/             # routing-heuristics + recipes + browser-stats-cheatsheet + stats-schema.json + stats-prices.json
 docs/superpowers/       # design specs + per-phase plan-docs + HANDOFF.md
 ```
 
@@ -125,4 +137,4 @@ Removes the `~/.claude/skills/browser-automation-skill` symlink. State at `~/.br
 
 See `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` for the design and `docs/superpowers/plans/` for executable plans. Current "what's next" lives in `docs/superpowers/HANDOFF.md` (refreshed after every shipped PR).
 
-**v1.0 work ✅ COMPLETE.** Remaining hardening (all opt-in, none blocking): Phase 11 v2 backlog A2-A6 (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / `self_heal_history[]` audit trail / active observation `recent_urls.jsonl`); daemon e2e for playwright-lib selector path; press cache-scope decision codification.
+**v1.1 work ✅ COMPLETE.** Remaining hardening (all opt-in, none blocking): Phase 11 v2 backlog A2-A6 (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / `self_heal_history[]` audit trail / active observation `recent_urls.jsonl`); daemon e2e for playwright-lib selector path; press cache-scope decision codification; Phase 12 backlog (TOON output mode for tabular verbs, plugin-wrapper distribution shape, wire remaining 25 verbs to `stats_run_adapter_emit`).

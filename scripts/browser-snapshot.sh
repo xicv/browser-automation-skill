@@ -29,6 +29,9 @@ source "${SCRIPT_DIR}/lib/verb_helpers.sh"
 # shellcheck source=lib/capture.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/capture.sh"
+# shellcheck source=lib/stats.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/stats.sh"
 
 init_paths
 
@@ -82,10 +85,19 @@ fi
 
 # invoke_with_retry wraps tool_snapshot in transparent retry-on-EXIT_SESSION_
 # EXPIRED (phase-5 part 3-ii).
+stats_t0="$(now_ms)"
 set +e
 adapter_out="$(invoke_with_retry snapshot "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
+
+# Phase 12 part 1: per-action telemetry. Snapshots have no natural post-cond
+# observed value beyond the snapshot body; observed=adapter_out supports
+# element_value matchers (rare but supported).
+BROWSER_STATS_OBSERVED="${adapter_out}" \
+  stats_run_adapter_emit \
+    "snapshot" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
+    -- "${verb_argv[@]}" || true
 
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 

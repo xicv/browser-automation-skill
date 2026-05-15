@@ -1,9 +1,9 @@
 ---
 name: browser-automation-skill
-description: Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp, playwright-cli, playwright-lib, obscura). Credentials and sessions stay strictly local in $HOME/.browser-skill/ (mode 0700 dir, 0600 files) and never appear on argv, in git, or in the Claude transcript.
-when_to_use: The user mentions a browser task — register a site, capture a session, verify a page, fill a form, capture console errors, run a lighthouse audit, scrape multiple URLs, debug a UI bug iteratively, or run a recorded flow.
+description: Drives a real browser from Claude Code by routing across four backends (chrome-devtools-mcp, playwright-cli, playwright-lib, obscura), so verbs like open/click/fill/scrape/inspect/audit pick the cheapest adapter that supports each operation. Persists credentials, sessions, captures, and per-action telemetry strictly local under $HOME/.browser-skill/ (mode 0700 dir, 0600 files); secrets never appear on argv, in git, or in the Claude transcript. Surfaces a balance-of-tokens-accuracy-latency audit via browser-stats.
+when_to_use: User mentions a browser task — registering a site, capturing a session, verifying a page, filling a form, capturing console errors, running a lighthouse audit, scraping multiple URLs, debugging a UI bug iteratively, replaying a recorded flow, or auditing skill efficiency (browser-stats report/tune).
 argument-hint: [verb] [--site NAME] [--session NAME] [--tool NAME] [--dry-run]
-allowed-tools: Bash(bash *) Bash(jq *) Bash(chmod *) Bash(mkdir *) Bash(stat *) Bash(rm *) Bash(mv *) Bash(cat *)
+allowed-tools: Bash(bash *) Bash(jq *) Bash(chmod *) Bash(mkdir *) Bash(stat *) Bash(rm *) Bash(mv *) Bash(cat *) Bash(sqlite3 *) Bash(awk *) Bash(sed *) Bash(grep *) Bash(openssl *) Bash(date *) Bash(wc *) Bash(tr *) Bash(tail *) Bash(head *) Bash(sleep *) Bash(printf *) Bash(python3 *)
 model: sonnet
 effort: low
 ---
@@ -78,6 +78,22 @@ Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp
 | `baseline save` | Mark capture as baseline (`meta.is_baseline:true` + `baselines.json` entry) | `… baseline save 042 --as after-redesign` |
 | `baseline list` | List named baselines | `… baseline list` |
 | `baseline remove` | Remove baseline marker (capture dir untouched) | `… baseline remove after-redesign --yes-i-know` |
+
+### Telemetry / audit / tuning (`browser-stats`)
+
+| Verb | What it does | Example |
+|---|---|---|
+| `stats rebuild`  | Tail `memory/stats.jsonl` from cursor → upsert into `memory/stats.db`. Idempotent; builds schema on first run. | `bash scripts/browser-stats.sh rebuild` |
+| `stats report`   | Human-readable per-route × verb summary: success rate, post-condition hit-rate, p50 token-proxy bytes, avg duration, failure-mode histogram, oblivious_success count, cost ($) when `CLAUDE_USAGE_*` env injected. `--pareto` adds composite efficiency score. | `bash scripts/browser-stats.sh report --days 7 --pareto` |
+| `stats mark`     | User override: record `success` / `fail[:reason]` for one `span_id`. Audit-report applies overrides over self-reported outcomes. | `bash scripts/browser-stats.sh mark a1b2c3d4e5f6a7b8 fail:wrong_element_acted` |
+| `stats tune`     | Surface worst-performing `(verb, route)` candidates over last N days for `/autoresearch` handoff. Human-in-loop — never auto-mutates the skill. | `bash scripts/browser-stats.sh tune --days 30` |
+
+Per-action events are emitted automatically by `open`, `click`, `fill`,
+`snapshot`, and `extract` (covering all 4 routes). Adding emission to a new
+verb = 3 lines (see [`references/browser-stats-cheatsheet.md`](references/browser-stats-cheatsheet.md)).
+Schema: [`references/stats-schema.json`](references/stats-schema.json) — follows
+OpenInference + OTel GenAI v1.40 conventions for forward-compat with
+Langfuse/Phoenix/Jaeger exporters.
 
 ### Memory cache (`browser-do`)
 

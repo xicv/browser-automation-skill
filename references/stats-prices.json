@@ -1,0 +1,42 @@
+{
+  "_doc": "Anthropic model prices in USD per token. Sourced from docs.anthropic.com/pricing as of 2026-05-15. Used by `browser-stats report` to convert token counts into $ at query time (re-priceable). Override path via env: BROWSER_STATS_PRICES_FILE.",
+  "_last_updated": "2026-05-15",
+  "models": {
+    "claude-opus-4-7": {
+      "input": 0.000005,
+      "output": 0.000025,
+      "cache_create_5m": 0.00000625,
+      "cache_create_1h": 0.00001000,
+      "cache_create": 0.00000625,
+      "cache_read": 0.00000050
+    },
+    "claude-sonnet-4-6": {
+      "input": 0.000003,
+      "output": 0.000015,
+      "cache_create_5m": 0.00000375,
+      "cache_create_1h": 0.00000600,
+      "cache_create": 0.00000375,
+      "cache_read": 0.00000030
+    },
+    "claude-haiku-4-5": {
+      "input": 0.000001,
+      "output": 0.000005,
+      "cache_create_5m": 0.00000125,
+      "cache_create_1h": 0.00000200,
+      "cache_create": 0.00000125,
+      "cache_read": 0.00000010
+    }
+  },
+  "modifiers": {
+    "_doc": "Multipliers applied at report time. `inference_geo=us` adds 1.1x; fast_mode is 6x and stacks; batch is 0.5x (mutually exclusive with fast_mode).",
+    "inference_geo_us": 1.1,
+    "fast_mode": 6.0,
+    "batch": 0.5
+  },
+  "server_tools": {
+    "_doc": "Server-side tool use billed per request, not tokens.",
+    "web_search_request": 0.01,
+    "web_fetch_request": 0.0,
+    "code_execution_session_hour": 0.08
+  }
+}

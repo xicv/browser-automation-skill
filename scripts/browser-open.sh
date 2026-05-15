@@ -28,6 +28,9 @@ source "${SCRIPT_DIR}/lib/site.sh"
 # shellcheck source=lib/memory.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/memory.sh"
+# shellcheck source=lib/stats.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/stats.sh"
 
 init_paths
 
@@ -71,10 +74,18 @@ why="${picked#*$'\t'}"
 
 source_picked_adapter "${tool_name}"
 
+stats_t0="$(now_ms)"
 set +e
 adapter_out="$(invoke_with_retry open "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
+
+# Phase 12 part 1: per-action telemetry. observed=URL so post-condition checks
+# on URL substrings work when BROWSER_STATS_EXPECT_* env vars are set by caller.
+BROWSER_STATS_OBSERVED="${url}" \
+  stats_run_adapter_emit \
+    "open" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
+    -- "${verb_argv[@]}" || true
 
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 

@@ -219,10 +219,15 @@ fi
 # until events carry timestamps).
 cache_events_log="${BROWSER_SKILL_HOME}/memory/events.jsonl"
 if [ -f "${cache_events_log}" ]; then
-  cache_total="$(jq -s 'map(select(.cache_hit == true or .cache_hit == false)) | length' \
-    "${cache_events_log}" 2>/dev/null || printf '0')"
-  cache_hits="$(jq -s 'map(select(.cache_hit == true)) | length' \
-    "${cache_events_log}" 2>/dev/null || printf '0')"
+  # Phase 12 part 2 audit: single jq pass extracts both counts (one file
+  # read, one fork) instead of two sequential `jq -s` slurps.
+  cache_pair="$(jq -s -r '
+    [(map(select(.cache_hit == true or .cache_hit == false)) | length),
+     (map(select(.cache_hit == true)) | length)] | @tsv
+  ' "${cache_events_log}" 2>/dev/null || printf '0\t0')"
+  IFS=$'\t' read -r cache_total cache_hits <<<"${cache_pair}"
+  cache_total="${cache_total:-0}"
+  cache_hits="${cache_hits:-0}"
   if [ "${cache_total}" -gt 0 ]; then
     # Integer-only math; bc not available everywhere and shellcheck dislikes pipe-to-bc.
     cache_rate_pct=$(( cache_hits * 100 / cache_total ))
@@ -254,6 +259,45 @@ else
   ok "recent_urls: 0 entries (no navigations yet — run 'browser-open --site SITE --url URL' to populate)"
 fi
 jq -nc --argjson n "${recent_urls_count}" '{check:"recent_urls", count:$n}'
+
+# --- Tier 3: stats.jsonl — per-action telemetry health (Phase 12 part 1) ---
+# Parallel to memory_cache + recent_urls checks. Reports event count, success
+# rate over the last 7 days, and an oblivious_success warning when > 0. Absent
+# log → 0 entries (not an error). Doctor never rebuilds the SQLite mirror —
+# that's `browser-stats rebuild`'s job.
+stats_jsonl_log="${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+if [ -f "${stats_jsonl_log}" ]; then
+  # Phase 12 part 2 audit: single jq pass extracts {total, success, oblivious}
+  # in one file read + one fork. Replaces 3× sequential `jq -s` slurps.
+  stats_triple="$(jq -s -r '
+    [length,
+     (map(select(.outcome == "success")) | length),
+     (map(select(.failure_mode == "oblivious_success")) | length)] | @tsv
+  ' "${stats_jsonl_log}" 2>/dev/null || printf '0\t0\t0')"
+  IFS=$'\t' read -r stats_total stats_success stats_oblivious <<<"${stats_triple}"
+  stats_total="${stats_total:-0}"
+  stats_success="${stats_success:-0}"
+  stats_oblivious="${stats_oblivious:-0}"
+  if [ "${stats_total}" -gt 0 ]; then
+    stats_success_pct=$(( stats_success * 100 / stats_total ))
+    ok "stats events: ${stats_total} (${stats_success_pct}% success)"
+  else
+    ok "stats events: 0 (log present but empty)"
+    stats_success_pct=0
+  fi
+  if [ "${stats_oblivious}" -gt 0 ]; then
+    warn "${stats_oblivious} oblivious_success event(s) — adapter reported ok but post-condition failed; run 'browser-stats report'"
+  fi
+  jq -nc \
+    --argjson total "${stats_total}" \
+    --argjson success "${stats_success}" \
+    --argjson oblivious "${stats_oblivious}" \
+    --argjson pct "${stats_success_pct:-0}" \
+    '{check:"stats", total:$total, success:$success, success_pct:$pct, oblivious_success:$oblivious}'
+else
+  ok "stats events: 0 (no telemetry yet — emitted automatically by open/click/fill/snapshot/extract)"
+  jq -nc '{check:"stats", total:0, success:0, success_pct:null, oblivious_success:0}'
+fi
 
 duration_ms=$(( $(now_ms) - started_at_ms ))
 

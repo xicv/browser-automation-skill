@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/xicv/browser-automation-skill/references/stats-schema.json",
+  "title": "browser-automation-skill stats event",
+  "description": "One JSONL line per adapter invocation written to ${BROWSER_SKILL_HOME}/memory/stats.jsonl. Field naming follows OpenInference + OTel GenAI v1.40 conventions (snake_case dot-name flattening) for forward-compat with OTLP exporters and Langfuse/Phoenix.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "ts",
+    "span_id",
+    "trace_id",
+    "verb",
+    "adapter_route",
+    "outcome",
+    "rc",
+    "duration_ms",
+    "argv_bytes",
+    "stdout_bytes",
+    "stderr_bytes"
+  ],
+  "properties": {
+    "schema_version":      {"type": "integer", "const": 1},
+    "ts":                  {"type": "string", "format": "date-time", "description": "ISO 8601 with ms precision (UTC)."},
+    "span_id":             {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+    "trace_id":            {"type": "string", "pattern": "^[0-9a-f]{16}$"},
+    "parent_span_id":      {"type": ["string", "null"]},
+    "session_id":          {"type": ["string", "null"], "description": "$CLAUDE_SESSION_ID if injected."},
+
+    "gen_ai_operation_name": {"type": "string", "const": "execute_tool"},
+    "gen_ai_tool_name":      {"type": "string", "description": "e.g. 'chrome-devtools-mcp.click'. OTel-compliant."},
+    "gen_ai_tool_type":      {"type": "string", "enum": ["function", "extension", "datastore"]},
+
+    "verb":                {"type": "string", "description": "browser-* verb (open, click, fill, extract, ...)."},
+    "adapter_route":       {"type": "string", "enum": ["chrome-devtools-mcp", "playwright-cli", "playwright-lib", "obscura"]},
+    "site":                {"type": ["string", "null"]},
+
+    "selector_kind":       {"type": "string", "enum": ["a11y_ref", "css", "xpath", "role", "text", "none"]},
+    "selector_value":      {"type": ["string", "null"]},
+
+    "duration_ms":         {"type": "integer", "minimum": 0},
+    "argv_bytes":          {"type": "integer", "minimum": 0, "description": "Total argv bytes — input-token proxy when SDK fields absent."},
+    "stdout_bytes":        {"type": "integer", "minimum": 0, "description": "Captured stdout bytes — output-token proxy."},
+    "stderr_bytes":        {"type": "integer", "minimum": 0},
+    "rc":                  {"type": "integer", "description": "Adapter exit code (lib/common.sh EXIT_* table)."},
+
+    "outcome":             {"type": "string", "enum": ["success", "fail", "partial", "skipped"]},
+    "failure_mode":        {
+      "type": ["string", "null"],
+      "enum": [null,
+        "element_not_found", "element_ambiguous", "wrong_element_acted",
+        "stale_ref", "action_timeout", "navigation_mismatch",
+        "js_not_ready", "network_error", "captcha_blocked",
+        "auth_required", "popup_intercept", "extraction_mismatch",
+        "oblivious_success"
+      ]
+    },
+
+    "model":               {"type": ["string", "null"], "description": "From $CLAUDE_MODEL env. Null when invoked outside Claude Code."},
+    "service_tier":        {"type": ["string", "null"], "enum": [null, "standard", "priority", "batch"]},
+
+    "gen_ai_usage_input_tokens":               {"type": ["integer", "null"], "minimum": 0},
+    "gen_ai_usage_output_tokens":              {"type": ["integer", "null"], "minimum": 0},
+    "gen_ai_usage_cache_read_input_tokens":    {"type": ["integer", "null"], "minimum": 0},
+    "gen_ai_usage_cache_creation_input_tokens":{"type": ["integer", "null"], "minimum": 0},
+
+    "post_condition_target_type":  {"type": ["string", "null"], "enum": [null, "url", "element_path", "element_value"]},
+    "post_condition_matcher":      {"type": ["string", "null"], "enum": [null, "exact", "include", "semantic"]},
+    "post_condition_expected":     {"type": ["string", "null"]},
+    "post_condition_observed":     {"type": ["string", "null"]},
+    "post_condition_hit":          {"type": ["boolean", "null"]}
+  }
+}
