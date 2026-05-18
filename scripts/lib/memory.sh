@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # scripts/lib/memory.sh
 # Phase 11 part 1-i — per-archetype selector/action cache I/O foundation.
 # Pure read/write API; no verb integration (deferred to 11-1-ii browser-do).
@@ -49,7 +50,8 @@ memory_init_dir() {
 _memory_ensure_site_dir() {
   local site="$1"
   memory_init_dir
-  local site_dir="$(_memory_site_dir "${site}")"
+  local site_dir
+  site_dir="$(_memory_site_dir "${site}")"
   mkdir -p "${site_dir}/archetypes"
   chmod 700 "${site_dir}" "${site_dir}/archetypes"
 }
@@ -285,6 +287,124 @@ memory_record_recent_url() {
     return 0
   fi
   chmod 600 "${events_file}" 2>/dev/null || true
+}
+
+# --- Phase 13: weak-fingerprint selector rescue --------------------------
+
+# _memory_parse_selector_to_fp SELECTOR
+# Echo a JSON fingerprint {tag, classes, attrs} derived from a CSS selector
+# string. "Weak" — handles the common shapes recorded by browser-do record:
+# `tag`, `tag.class`, `tag.class1.class2`, `#id`, `[name=value]`, mixed.
+# Combinators (`>`, `+`, `~`), pseudo-classes (`:hover`), attribute operators
+# (`^=`, `*=`, etc.) are not parsed — the resulting fingerprint will simply be
+# weaker, and the JS scorer falls back gracefully (score < threshold = miss).
+_memory_parse_selector_to_fp() {
+  local sel="$1"
+  local tag="*" id="" classes=()
+  if [[ "${sel}" =~ ^([a-zA-Z][a-zA-Z0-9]*) ]]; then
+    tag="${BASH_REMATCH[1]^^}"
+  fi
+  local rest="${sel}"
+  while [[ "${rest}" =~ \.([A-Za-z][A-Za-z0-9_-]*) ]]; do
+    classes+=("${BASH_REMATCH[1]}")
+    rest="${rest/${BASH_REMATCH[0]}/}"
+  done
+  if [[ "${sel}" =~ \#([A-Za-z][A-Za-z0-9_-]*) ]]; then
+    id="${BASH_REMATCH[1]}"
+  fi
+  local classes_json="[]"
+  if [ "${#classes[@]}" -gt 0 ]; then
+    classes_json="$(printf '%s\n' "${classes[@]}" | jq -R . | jq -sc .)"
+  fi
+  jq -nc --arg tag "${tag}" --arg id "${id}" --argjson cls "${classes_json}" '
+    {tag: $tag,
+     classes: $cls,
+     attrs: (if $id != "" then {id: $id} else {} end)}'
+}
+
+# memory_fingerprint_rescue SITE ARCHETYPE_ID INTENT CACHED_SELECTOR
+# Echo the rescued selector on hit, empty on miss. Best-effort — failures emit
+# warn: and return 0 without rescuing.
+# Threshold defaults to 0.70; override per-session via BROWSER_DO_RESCUE_THRESHOLD.
+# Algorithm + selector synthesis lives in scripts/lib/fingerprint-rescue.js.
+# SITE/ARCHETYPE/INTENT are reserved for future strong-fingerprint mode that
+# reads archetype-stored fingerprint dimensions; the weak v1 only needs the
+# cached selector itself.
+memory_fingerprint_rescue() {
+  local site="$1" archetype="$2" intent="$3" cached_selector="$4"
+  : "${site}" "${archetype}" "${intent}"  # silence SC2034 — strong-fp v2 will use
+  local threshold="${BROWSER_DO_RESCUE_THRESHOLD:-0.70}"
+  local script_dir lib_dir js_template js_payload
+  lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+  script_dir="$(cd "${lib_dir}/.." && pwd)"
+  js_template="${lib_dir}/fingerprint-rescue.js"
+  [ -f "${js_template}" ] || { warn "memory_fingerprint_rescue: missing ${js_template}"; return 0; }
+
+  local fp_json
+  fp_json="$(_memory_parse_selector_to_fp "${cached_selector}" 2>/dev/null || printf '')"
+  [ -z "${fp_json}" ] && return 0
+
+  # Prepend the two constants the JS payload reads.
+  js_payload="const __FP=${fp_json};const __TH=${threshold};$(cat "${js_template}")"
+
+  # Invoke browser-extract --eval; capture stdout. Best-effort — adapter
+  # failure / no daemon / no current page → empty rescue, fall through to
+  # the existing fail_count path.
+  local out
+  if ! out="$(bash "${script_dir}/browser-extract.sh" --eval "${js_payload}" 2>/dev/null)"; then
+    return 0
+  fi
+
+  # Streaming output: pick the line carrying {rescued_selector:...}. Tolerant
+  # of multiple lines (events + summary); jq returns empty if the field is null.
+  local rescued
+  rescued="$(printf '%s\n' "${out}" \
+    | jq -rs '
+        map(select(type=="object" and has("rescued_selector"))) as $hits
+        | if ($hits | length) == 0 then ""
+          else
+            ($hits | last) as $h
+            | if ($h.rescued_selector == null) then ""
+              else $h.rescued_selector end
+          end' 2>/dev/null || printf '')"
+  printf '%s' "${rescued}"
+}
+
+# memory_record_heal SITE ARCHETYPE_ID INTENT FROM_SELECTOR TO_SELECTOR
+# Overwrite an interaction's cached selector after a successful fingerprint
+# rescue + retry. Resets fail_count, bumps success_count, appends a "rescued"
+# entry to self_heal_history. Distinct from memory_record so the audit trail
+# can tell LLM-resolution (memory_record) from pre-LLM fingerprint rescue
+# (memory_record_heal).
+memory_record_heal() {
+  local site="$1" id="$2" intent="$3" from_sel="$4" to_sel="$5"
+  local path now updated
+  path="$(_memory_archetype_path "${site}" "${id}")"
+  if [ ! -f "${path}" ]; then
+    die "${EXIT_USAGE_ERROR}" "memory_record_heal: archetype not found: ${site}/${id}"
+  fi
+  now="$(now_iso)"
+  updated="$(jq --arg intent "${intent}" --arg from "${from_sel}" \
+                --arg to "${to_sel}" --arg now "${now}" '
+    .interactions = ((.interactions // []) | map(
+      if .intent == $intent then
+        .selector = $to
+        | .last_used = $now
+        | .success_count = ((.success_count // 0) + 1)
+        | .fail_count = 0
+        | .disabled = false
+        | .self_heal_history = ((.self_heal_history // []) + [{
+            ts: $now,
+            event: "rescued",
+            from_selector: $from,
+            to_selector: $to
+          }])
+      else . end
+    ))
+    | .last_seen = $now
+    | .use_count = ((.use_count // 0) + 1)
+  ' "${path}")"
+  memory_save_archetype "${site}" "${id}" "${updated}"
 }
 
 # memory_resolve_archetype SITE URL

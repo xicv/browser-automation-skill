@@ -67,6 +67,10 @@
     "post_condition_matcher":      {"type": ["string", "null"], "enum": [null, "exact", "include", "semantic"]},
     "post_condition_expected":     {"type": ["string", "null"]},
     "post_condition_observed":     {"type": ["string", "null"]},
-    "post_condition_hit":          {"type": ["boolean", "null"]}
+    "post_condition_hit":          {"type": ["boolean", "null"]},
+
+    "rescued":                     {"type": ["boolean", "null"], "description": "Phase 13 fingerprint rescue outcome. true=cache silently healed (selector overwritten, fail_count reset); false=rescue attempted but failed; null=rescue not attempted (default for adapter-direct events)."},
+    "fingerprint_from_selector":   {"type": ["string", "null"], "description": "Phase 13: the cached selector that went stale. Null when rescued != true."},
+    "fingerprint_to_selector":     {"type": ["string", "null"], "description": "Phase 13: the rescued selector that replaced the stale one. Null when rescued != true."}
   }
 }

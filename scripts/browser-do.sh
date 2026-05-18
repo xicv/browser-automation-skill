@@ -24,6 +24,9 @@ source "${SCRIPT_DIR}/lib/site.sh"
 # shellcheck source=lib/memory.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/memory.sh"
+# shellcheck source=lib/stats.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/stats.sh"
 
 init_paths
 
@@ -453,10 +456,79 @@ elif [ "${dispatch_rc}" -eq "${EXIT_EMPTY_RESULT}" ] || [ "${dispatch_rc}" -eq "
   # "expected element absent" exit codes drive the failure counter. Network
   # errors (30), tool crashes (42), timeouts (43) are environmental — they
   # would poison the cache if we counted them.
-  if ! memory_record_failure "${site}" "${archetype_id}" "${arg_intent}" 2>/dev/null; then
-    warn "browser-do: cache fail_count update failed (best-effort; action exit unchanged)"
-  else
-    self_heal_triggered=true
+
+  # Phase 13: weak-fingerprint rescue tier — try BEFORE incrementing fail_count.
+  # Algorithm scores DOM candidates by tag + classes + attrs Jaccard, returns
+  # a synthesised selector if any candidate scores >= BROWSER_DO_RESCUE_THRESHOLD
+  # (default 0.70). If the rescued selector works on retry, the cache silently
+  # heals (selector overwritten, fail_count reset, self_heal_history appended).
+  rescued_selector=""
+  rescued_selector="$(memory_fingerprint_rescue "${site}" "${archetype_id}" \
+                       "${arg_intent}" "${selector}" 2>/dev/null || printf '')"
+  rescued=false
+  if [ -n "${rescued_selector}" ] && [ "${rescued_selector}" != "${selector}" ]; then
+    # Retry the verb with the rescued selector. Capture rc separately so the
+    # original dispatch_rc only flips to 0 when the retry actually succeeds.
+    retry_rc=0
+    bash "${verb_script}" --selector "${rescued_selector}" "${extra_args[@]+"${extra_args[@]}"}" \
+      || retry_rc=$?
+    if [ "${retry_rc}" -eq 0 ]; then
+      if memory_record_heal "${site}" "${archetype_id}" "${arg_intent}" \
+                            "${selector}" "${rescued_selector}" 2>/dev/null; then
+        rescued=true
+        self_heal_triggered=true
+        dispatch_rc=0  # treat as success for the verb's exit-code contract
+        printf '%s\n' "$(jq -nc \
+          --arg from "${selector}" --arg to "${rescued_selector}" \
+          '{_kind:"fingerprint_rescue", from_selector:$from, to_selector:$to,
+            rescued:true}')"
+        # Phase 13 + 12 audit hook: emit a dedicated stats.jsonl event so
+        # `browser-stats report` can compute heal-rate over time. Best-effort.
+        _rescue_span_id="$(stats_random_id 2>/dev/null || printf '')"
+        _rescue_ts="$(stats_now_iso_ms 2>/dev/null || printf '')"
+        if [ -n "${_rescue_span_id}" ] && [ -n "${_rescue_ts}" ]; then
+          _rescue_event="$(jq -nc \
+            --argjson schema_version 1 \
+            --arg ts "${_rescue_ts}" \
+            --arg span_id "${_rescue_span_id}" \
+            --arg trace_id "${BROWSER_SKILL_TRACE_ID:-${_rescue_span_id}}" \
+            --arg verb "do" \
+            --arg site "${site}" \
+            --arg from "${selector}" \
+            --arg to "${rescued_selector}" '
+            { schema_version: $schema_version,
+              ts: $ts, span_id: $span_id, trace_id: $trace_id,
+              parent_span_id: null, session_id: null,
+              gen_ai_operation_name: "execute_tool",
+              gen_ai_tool_name: "browser-do.fingerprint_rescue",
+              gen_ai_tool_type: "function",
+              verb: $verb,
+              adapter_route: "browser-do",
+              site: ($site | select(. != "") // null),
+              selector_kind: "css", selector_value: $from,
+              duration_ms: 0, argv_bytes: 0, stdout_bytes: 0, stderr_bytes: 0,
+              rc: 0,
+              outcome: "success",
+              failure_mode: null,
+              rescued: true,
+              fingerprint_from_selector: $from,
+              fingerprint_to_selector: $to
+            }' 2>/dev/null || printf '')"
+          [ -n "${_rescue_event}" ] && stats_emit_event "${_rescue_event}" 2>/dev/null || true
+        fi
+      else
+        warn "browser-do: rescue retry succeeded but memory_record_heal failed (best-effort)"
+      fi
+    fi
+  fi
+  if [ "${rescued}" != "true" ]; then
+    # Fingerprint rescue didn't apply or didn't succeed — original fail_count
+    # path runs (Phase 11 1-iii D1 self-heal still escalates to LLM after 4 fails).
+    if ! memory_record_failure "${site}" "${archetype_id}" "${arg_intent}" 2>/dev/null; then
+      warn "browser-do: cache fail_count update failed (best-effort; action exit unchanged)"
+    else
+      self_heal_triggered=true
+    fi
   fi
 fi
 

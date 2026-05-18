@@ -2,7 +2,7 @@
 
 A [Claude Code](https://claude.com/claude-code) skill for driving real browsers from an LLM. **42 verbs + a per-action audit surface** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a per-archetype memory cache that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
 
-> **Status:** Phases 1–12 ✅ ALL COMPLETE for v1. Phase 10 (schema migration tooling) ✅ shipped. Phase 11 v2 part 1 (events.jsonl writer) ✅ shipped — end-to-end ROI loop is closed (`browser-do --intent` → events.jsonl → `browser-doctor.sh` reports real cache-hit-rate). Selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). **Phase 12 (per-action telemetry + balance-triangle audit) ✅ shipped** — `browser-stats` surface emits one OTel-shaped JSONL event per adapter call into `memory/stats.jsonl`, with a lazy SQLite mirror, post-condition asserter, `oblivious_success` detection, and `/autoresearch` handoff via `browser-stats tune`. **Production-ready v1.1.**
+> **Status:** Phases 1–13 ✅ ALL COMPLETE. Phase 10 (schema migration tooling) ✅ shipped. Phase 11 v2 part 1 (events.jsonl writer) ✅ shipped — end-to-end ROI loop is closed (`browser-do --intent` → events.jsonl → `browser-doctor.sh` reports real cache-hit-rate). Selector-mode plumbing 3/4 verbs in `browser-do` cache dispatch (`[click fill hover select]`; press deferred). **Phase 12 (per-action telemetry + balance-triangle audit) ✅ shipped** — `browser-stats` surface emits one OTel-shaped JSONL event per adapter call into `memory/stats.jsonl`, with a lazy SQLite mirror, post-condition asserter, `oblivious_success` detection, and `/autoresearch` handoff via `browser-stats tune`. **Phase 13 (pre-LLM fingerprint rescue tier) ✅ shipped** — on a cache-hit-then-fail, the skill scores live-DOM candidates by weak-fingerprint similarity (tag + classes + attrs Jaccard, threshold 0.70) BEFORE incrementing fail_count. If a candidate scores ≥ threshold AND the retry succeeds, the cache silently heals (selector overwritten, `self_heal_history[]` appended with `event:"rescued"`, dedicated `browser-do.fingerprint_rescue` event in stats audit). **Production-ready v1.2.**
 
 ## What it does
 
@@ -119,9 +119,9 @@ SKILL.md                # Claude Code skill manifest (verb table; updated at eve
 SECURITY.md             # threat model + disclosure
 .gitignore              # blocks credential / session / capture / memory patterns
 .githooks/pre-commit    # credential-leak blocker
-scripts/                # 42 verbs + browser-stats + 7 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers + lib/migrators/{memory,recent_urls,stats}
-tests/                  # 957+ bats (16 new for browser-stats); runs in <60s
-references/             # routing-heuristics + recipes + browser-stats-cheatsheet + stats-schema.json + stats-prices.json
+scripts/                # 42 verbs + browser-stats + 7 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers + lib/fingerprint-rescue.js + lib/migrators/{memory,recent_urls,stats}
+tests/                  # 1002 bats (25 new across Phases 12 + 13); runs in <60s
+references/             # routing-heuristics + recipes (incl. fingerprint-rescue.md) + browser-stats-cheatsheet + stats-schema.json + stats-prices.json
 docs/superpowers/       # design specs + per-phase plan-docs + HANDOFF.md
 ```
 
@@ -137,4 +137,4 @@ Removes the `~/.claude/skills/browser-automation-skill` symlink. State at `~/.br
 
 See `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` for the design and `docs/superpowers/plans/` for executable plans. Current "what's next" lives in `docs/superpowers/HANDOFF.md` (refreshed after every shipped PR).
 
-**v1.1 work ✅ COMPLETE.** Remaining hardening (all opt-in, none blocking): Phase 11 v2 backlog A2-A6 (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / `self_heal_history[]` audit trail / active observation `recent_urls.jsonl`); daemon e2e for playwright-lib selector path; press cache-scope decision codification; Phase 12 backlog (TOON output mode for tabular verbs, plugin-wrapper distribution shape, wire remaining 25 verbs to `stats_run_adapter_emit`).
+**v1.2 work ✅ COMPLETE.** Remaining hardening (all opt-in, none blocking): Phase 11 v2 backlog A2-A6 (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / `self_heal_history[]` audit trail / active observation `recent_urls.jsonl`); daemon e2e for playwright-lib selector path; press cache-scope decision codification; Phase 12 backlog (TOON output mode for tabular verbs, plugin-wrapper distribution shape, wire remaining 25 verbs to `stats_run_adapter_emit`); Phase 13 backlog (strong-fingerprint mode that captures dimensions at `browser-do record` time instead of parsing them out of the cached selector string; LLM-judge upgrade for the `semantic` post-condition matcher).
