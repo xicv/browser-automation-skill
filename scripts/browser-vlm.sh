@@ -174,43 +174,41 @@ cmd_status() {
   fi
 }
 
-cmd_smoke() {
-  # Requires the server to be up. Runs the 4 smokes from
-  # references/midscene-integration.md and emits one JSON summary per smoke,
-  # then a final aggregate line — same shape contract as our verb scripts.
-  if ! curl -sfm 3 "http://${VLM_HOST}:${VLM_PORT}/health" >/dev/null 2>&1; then
-    die "${EXIT_PREFLIGHT_FAILED}" \
-      "vlm not reachable at http://${VLM_HOST}:${VLM_PORT} — run 'browser-vlm start' first"
+# Module-scope smoke helpers (refactored from cmd_smoke so cmd_bench can also
+# call them per-model). Each emits one JSONL line on stdout + updates the
+# caller's SMOKE_PASS / SMOKE_FAIL globals — keeps the function pure-ish
+# without IPC. Endpoint resolution defers to VLM_HOST + VLM_PORT at call time.
+SMOKE_PASS=0
+SMOKE_FAIL=0
+
+_smoke_endpoint() {
+  printf 'http://%s:%s/v1/chat/completions\n' "${VLM_HOST}" "${VLM_PORT}"
+}
+
+_run_text_smoke() {
+  local label="$1" prompt="$2" t0 t1 lat resp completion
+  local endpoint
+  endpoint="$(_smoke_endpoint)"
+  t0=$(python3 -c "import time;print(time.time())" 2>/dev/null || date +%s)
+  resp="$(curl -sS -m 30 "${endpoint}" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg p "${prompt}" '{model:"q",max_tokens:12,messages:[{role:"user",content:$p}]}')" 2>/dev/null)"
+  t1=$(python3 -c "import time;print(time.time())" 2>/dev/null || date +%s)
+  lat=$(python3 -c "print(round($t1 - $t0, 2))" 2>/dev/null || echo "n/a")
+  completion="$(printf '%s' "${resp}" | jq -r '.choices[0].message.content // .error.message' 2>/dev/null)"
+  printf '{"smoke":"%s","type":"text","latency_s":%s,"completion":"%s"}\n' \
+    "${label}" "${lat}" "${completion//\"/\\\"}"
+  if [ -n "${completion}" ] && [ "${completion}" != "null" ]; then
+    SMOKE_PASS=$((SMOKE_PASS + 1))
+  else
+    SMOKE_FAIL=$((SMOKE_FAIL + 1))
   fi
+}
 
-  local endpoint="http://${VLM_HOST}:${VLM_PORT}/v1/chat/completions"
-  local total_pass=0 total_fail=0
-
-  _run_text_smoke() {
-    local label="$1" prompt="$2" t0 t1 lat resp completion
-    t0=$(python3 -c "import time;print(time.time())" 2>/dev/null || date +%s)
-    resp="$(curl -sS -m 30 "${endpoint}" -H 'Content-Type: application/json' \
-      -d "$(jq -n --arg p "${prompt}" '{model:"q",max_tokens:12,messages:[{role:"user",content:$p}]}')" 2>/dev/null)"
-    t1=$(python3 -c "import time;print(time.time())" 2>/dev/null || date +%s)
-    lat=$(python3 -c "print(round($t1 - $t0, 2))" 2>/dev/null || echo "n/a")
-    completion="$(printf '%s' "${resp}" | jq -r '.choices[0].message.content // .error.message' 2>/dev/null)"
-    printf '{"smoke":"%s","type":"text","latency_s":%s,"completion":"%s"}\n' \
-      "${label}" "${lat}" "${completion//\"/\\\"}"
-    if [ -n "${completion}" ] && [ "${completion}" != "null" ]; then
-      total_pass=$((total_pass + 1))
-    else
-      total_fail=$((total_fail + 1))
-    fi
-  }
-
-  _run_text_smoke "text_cold" "Say hi in exactly one word."
-  _run_text_smoke "text_warm" "Reply in exactly two words."
-
-  # Vision smokes only if Python available for image synth (stdlib only).
-  if command -v python3 >/dev/null 2>&1; then
-    _run_vision_smoke() {
-      local label="$1" rgb="$2" expected="$3" t0 t1 lat resp completion png_b64
-      png_b64="$(python3 <<EOF
+_run_vision_smoke() {
+  local label="$1" rgb="$2" expected="$3" t0 t1 lat resp completion png_b64
+  local endpoint
+  endpoint="$(_smoke_endpoint)"
+  png_b64="$(python3 <<EOF
 import struct, zlib, base64
 W=H=64
 r,g,b=${rgb}
@@ -225,32 +223,163 @@ png += chunk(b'IEND', b'')
 print(base64.b64encode(png).decode())
 EOF
 )"
-      t0=$(python3 -c "import time;print(time.time())")
-      resp="$(curl -sS -m 60 "${endpoint}" -H 'Content-Type: application/json' \
-        -d "$(jq -n --arg img "data:image/png;base64,${png_b64}" '
-          {model:"q",max_tokens:20,messages:[{role:"user",content:[
-            {type:"text",text:"One word: dominant color of this image?"},
-            {type:"image_url",image_url:{url:$img}}
-          ]}]}')" 2>/dev/null)"
-      t1=$(python3 -c "import time;print(time.time())")
-      lat=$(python3 -c "print(round($t1 - $t0, 2))")
-      completion="$(printf '%s' "${resp}" | jq -r '.choices[0].message.content // .error.message' 2>/dev/null)"
-      local hit="false"
-      case "${completion,,}" in *"${expected}"*) hit="true" ;; esac
-      printf '{"smoke":"%s","type":"vision","latency_s":%s,"completion":"%s","expected":"%s","hit":%s}\n' \
-        "${label}" "${lat}" "${completion//\"/\\\"}" "${expected}" "${hit}"
-      if [ "${hit}" = "true" ]; then total_pass=$((total_pass + 1));
-      else total_fail=$((total_fail + 1)); fi
-    }
-    _run_vision_smoke "vision_red"   "224,16,16"   "red"
-    _run_vision_smoke "vision_green" "0,192,32"    "green"
+  t0=$(python3 -c "import time;print(time.time())")
+  resp="$(curl -sS -m 60 "${endpoint}" -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg img "data:image/png;base64,${png_b64}" '
+      {model:"q",max_tokens:20,messages:[{role:"user",content:[
+        {type:"text",text:"One word: dominant color of this image?"},
+        {type:"image_url",image_url:{url:$img}}
+      ]}]}')" 2>/dev/null)"
+  t1=$(python3 -c "import time;print(time.time())")
+  lat=$(python3 -c "print(round($t1 - $t0, 2))")
+  completion="$(printf '%s' "${resp}" | jq -r '.choices[0].message.content // .error.message' 2>/dev/null)"
+  local hit="false"
+  case "${completion,,}" in *"${expected}"*) hit="true" ;; esac
+  printf '{"smoke":"%s","type":"vision","latency_s":%s,"completion":"%s","expected":"%s","hit":%s}\n' \
+    "${label}" "${lat}" "${completion//\"/\\\"}" "${expected}" "${hit}"
+  if [ "${hit}" = "true" ]; then SMOKE_PASS=$((SMOKE_PASS + 1));
+  else SMOKE_FAIL=$((SMOKE_FAIL + 1)); fi
+}
+
+# Run the 4-smoke battery against the current ${VLM_HOST}:${VLM_PORT}. Resets
+# SMOKE_PASS / SMOKE_FAIL before running. Returns 0 if all smokes passed, 1
+# otherwise.
+_run_4_smoke_battery() {
+  SMOKE_PASS=0; SMOKE_FAIL=0
+  _run_text_smoke "text_cold" "Say hi in exactly one word."
+  _run_text_smoke "text_warm" "Reply in exactly two words."
+  if command -v python3 >/dev/null 2>&1; then
+    _run_vision_smoke "vision_red"   "224,16,16" "red"
+    _run_vision_smoke "vision_green" "0,192,32"  "green"
   else
     warn "python3 missing — skipping vision smokes"
   fi
+  [ "${SMOKE_FAIL}" -eq 0 ]
+}
 
-  printf '{"summary":"vlm-smoke","pass":%d,"fail":%d,"endpoint":"%s"}\n' \
-    "${total_pass}" "${total_fail}" "${endpoint}"
-  [ "${total_fail}" -eq 0 ] || return 1
+cmd_smoke() {
+  # Requires the server to be up. Runs the 4 smokes from
+  # references/midscene-integration.md and emits one JSON summary per smoke,
+  # then a final aggregate line — same shape contract as our verb scripts.
+  if ! curl -sfm 3 "http://${VLM_HOST}:${VLM_PORT}/health" >/dev/null 2>&1; then
+    die "${EXIT_PREFLIGHT_FAILED}" \
+      "vlm not reachable at http://${VLM_HOST}:${VLM_PORT} — run 'browser-vlm start' first"
+  fi
+  _run_4_smoke_battery
+  local rc=$?
+  printf '{"summary":"vlm-smoke","pass":%d,"fail":%d,"endpoint":"http://%s:%s"}\n' \
+    "${SMOKE_PASS}" "${SMOKE_FAIL}" "${VLM_HOST}" "${VLM_PORT}"
+  return "${rc}"
+}
+
+# Default model presets for `vlm bench`. Chosen so the table directly answers
+# "is Path 3 cache-rescue unblockable at this size?".
+_BENCH_DEFAULT_MODELS=(
+  "Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M"   # baseline (current local install)
+  "Qwen/Qwen3-VL-4B-Instruct-GGUF:Q8_0"     # same params, less quantization
+  "Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M"   # midscene's recommended default
+)
+
+cmd_bench() {
+  # Iterate a list of model tags. For each: stop any running vlm, set the
+  # model env var, start fresh, wait for /health, run the 4-smoke battery,
+  # stop. Emit one per-model JSONL row + a final summary line. Default model
+  # list answers the Path-3 unblock question — override by passing models on
+  # the command line.
+  #
+  # --dry-run            print which models would be benched + exit 0
+  # --max-wait-s N       seconds to wait for each model's /health (default 600)
+  local dry_run=0 max_wait_s=600
+  local models=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run)    dry_run=1; shift ;;
+      --max-wait-s) max_wait_s="$2"; shift 2 ;;
+      --help|-h)
+        cat <<'BENCHUSAGE'
+browser-vlm bench [--dry-run] [--max-wait-s N] [MODEL [MODEL ...]]
+
+Bench multiple models against the same 4-smoke battery (text-cold, vision-red,
+vision-green, text-warm). Stops any running vlm first, then for each model:
+start → wait /health → smoke → stop. Emits one JSONL row per model + final.
+
+Default model list (answers the Path-3 unblock question):
+  Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M
+  Qwen/Qwen3-VL-4B-Instruct-GGUF:Q8_0
+  Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M
+
+Use --dry-run to confirm the list without downloading anything.
+BENCHUSAGE
+        return 0
+        ;;
+      -*) die "${EXIT_USAGE_ERROR}" "bench: unknown flag '${1}'" ;;
+      *)  models+=("$1"); shift ;;
+    esac
+  done
+  [ "${#models[@]}" -gt 0 ] || models=("${_BENCH_DEFAULT_MODELS[@]}")
+
+  _ensure_home
+
+  # Emit start event (machine-parseable plan).
+  local models_json
+  models_json="$(printf '%s\n' "${models[@]}" | jq -R -s -c 'split("\n") | map(select(length > 0))')"
+  printf '{"event":"bench-start","models":%s,"ts":"%s"}\n' \
+    "${models_json}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  if [ "${dry_run}" = "1" ]; then
+    ok "dry-run: would bench ${#models[@]} model(s); no downloads, no spawns"
+    printf '{"event":"bench-done","total_models":%d,"dry_run":true}\n' "${#models[@]}"
+    return 0
+  fi
+
+  if ! command -v "${LLAMA_SERVER_BIN}" >/dev/null 2>&1; then
+    die "${EXIT_TOOL_MISSING}" "${LLAMA_SERVER_BIN} not on PATH — brew install llama.cpp"
+  fi
+
+  local model bench_pass=0 bench_fail=0
+  for model in "${models[@]}"; do
+    # Defensive stop (whatever was running before).
+    cmd_stop >/dev/null 2>&1 || true
+
+    # Spawn this model. Override env for cmd_start to pick up.
+    BROWSER_SKILL_VLM_MODEL="${model}" cmd_start >/dev/null 2>&1
+    # Poll /health with bounded wait so a slow download doesn't hang forever.
+    local waited=0
+    while [ "${waited}" -lt "${max_wait_s}" ]; do
+      if curl -sfm 2 "http://${VLM_HOST}:${VLM_PORT}/health" >/dev/null 2>&1; then
+        break
+      fi
+      sleep 5
+      waited=$((waited + 5))
+    done
+
+    if ! curl -sfm 2 "http://${VLM_HOST}:${VLM_PORT}/health" >/dev/null 2>&1; then
+      printf '{"event":"bench-model","model":"%s","status":"timeout","wait_s":%d}\n' \
+        "${model}" "${max_wait_s}"
+      bench_fail=$((bench_fail + 1))
+      cmd_stop >/dev/null 2>&1 || true
+      continue
+    fi
+
+    # Capture smokes for this model.
+    local model_log
+    model_log="$(_run_4_smoke_battery 2>/dev/null && printf '%s\n' "ok" || printf '%s\n' "fail")"
+    # The 4-smoke output is already in stdout from _run_text_smoke / _run_vision_smoke;
+    # we just need the final per-model summary.
+    printf '{"event":"bench-model","model":"%s","status":"%s","pass":%d,"fail":%d}\n' \
+      "${model}" "${model_log}" "${SMOKE_PASS}" "${SMOKE_FAIL}"
+    if [ "${SMOKE_FAIL}" -eq 0 ]; then
+      bench_pass=$((bench_pass + 1))
+    else
+      bench_fail=$((bench_fail + 1))
+    fi
+
+    cmd_stop >/dev/null 2>&1 || true
+  done
+
+  printf '{"event":"bench-done","total_models":%d,"pass":%d,"fail":%d}\n' \
+    "${#models[@]}" "${bench_pass}" "${bench_fail}"
+  [ "${bench_fail}" -eq 0 ] || return 1
 }
 
 case "${1:-}" in
@@ -258,6 +387,7 @@ case "${1:-}" in
   stop)    shift; cmd_stop ;;
   status)  shift; cmd_status ;;
   smoke)   shift; cmd_smoke ;;
+  bench)   shift; cmd_bench "$@" ;;
   --help|-h|help|"")
     cat <<'USAGE'
 browser-vlm — local llama-server lifecycle wrapper (lean config)
@@ -267,6 +397,7 @@ Usage:
   bash scripts/browser-vlm.sh stop                 # kill running instance
   bash scripts/browser-vlm.sh status               # ping /health
   bash scripts/browser-vlm.sh smoke                # 4-smoke battery (text+vision)
+  bash scripts/browser-vlm.sh bench [MODEL...]     # bench multiple models
   bash scripts/browser-vlm.sh --help               # this message
 
 Lean defaults (override via BROWSER_SKILL_VLM_*; see top of script):

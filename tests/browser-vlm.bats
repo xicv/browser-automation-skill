@@ -110,3 +110,55 @@ teardown() {
   assert_status "${EXIT_TOOL_MISSING}"
   assert_output_contains "not on PATH"
 }
+
+# --- Phase 14 (E3): vlm bench command ----------------------------------
+
+@test "browser-vlm bench --help: shows usage including default model list" {
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" bench --help
+  assert_status 0
+  assert_output_contains "Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M"
+  assert_output_contains "Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M"
+  assert_output_contains "4-smoke battery"
+}
+
+@test "browser-vlm bench --dry-run: emits bench-start + bench-done events with default models" {
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" bench --dry-run
+  assert_status 0
+  # First line should be bench-start with a models array of 3.
+  local first
+  first="$(printf '%s\n' "${lines[@]}" | grep -E '"event":"bench-start"' | head -1)"
+  [ -n "${first}" ] || fail "missing bench-start event; output: ${output}"
+  printf '%s' "${first}" | jq -e '.models | length == 3' >/dev/null \
+    || fail "default model list should have 3 entries; got: ${first}"
+  printf '%s' "${first}" | jq -e '.models[0] | test("Qwen3-VL")' >/dev/null \
+    || fail "default models should be Qwen3-VL family; got: ${first}"
+  # Final bench-done should report dry_run:true.
+  local last
+  last="$(printf '%s\n' "${lines[@]}" | grep -E '"event":"bench-done"' | tail -1)"
+  printf '%s' "${last}" | jq -e '.dry_run == true and .total_models == 3' >/dev/null \
+    || fail "bench-done should show dry_run:true; got: ${last}"
+}
+
+@test "browser-vlm bench --dry-run: positional models override the default list" {
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" bench --dry-run \
+    "Vendor/ModelA:Q1" "Vendor/ModelB:Q2"
+  assert_status 0
+  local first
+  first="$(printf '%s\n' "${lines[@]}" | grep -E '"event":"bench-start"' | head -1)"
+  printf '%s' "${first}" \
+    | jq -e '.models == ["Vendor/ModelA:Q1","Vendor/ModelB:Q2"]' >/dev/null \
+    || fail "expected positional models to win; got: ${first}"
+}
+
+@test "browser-vlm bench: llama-server missing → EXIT_TOOL_MISSING (only when not --dry-run)" {
+  LLAMA_SERVER_BIN=/nonexistent/llama-server \
+    run bash "${SCRIPTS_DIR}/browser-vlm.sh" bench "Vendor/Tiny:Q1"
+  assert_status "${EXIT_TOOL_MISSING}"
+  assert_output_contains "not on PATH"
+}
+
+@test "browser-vlm bench: unknown flag → EXIT_USAGE_ERROR" {
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" bench --bogus-flag
+  assert_status "${EXIT_USAGE_ERROR}"
+  assert_output_contains "unknown flag"
+}

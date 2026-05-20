@@ -251,6 +251,36 @@ section.
 
 Resident RAM (peak `ps -o rss` on the llama-server child): LEAN **3.99 GB** measured. FAT not directly measured but allocates ~4× the KV cache (175616 ctx × 4 slots vs 8192 × 1 slot ≈ 86× theoretical KV-buffer ratio); the prompt-cache cap dropped from 8192 MiB → 512 MiB independently.
 
+### Path-3 unblock: `browser-vlm bench`
+
+The smoke battery above ran against ONE model. To answer "which model unblocks
+Path 3?" empirically, use `bench`:
+
+```bash
+bash scripts/browser-vlm.sh bench                  # default 3-model list
+bash scripts/browser-vlm.sh bench --dry-run        # print plan, no spawns
+bash scripts/browser-vlm.sh bench \
+  Qwen/Qwen3-VL-4B-Instruct-GGUF:Q8_0 \
+  Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M           # custom list
+```
+
+Each model: start → wait `/health` → 4-smoke battery → stop. Output is one
+NDJSON line per model + a final `bench-done` aggregate. Path 3 is unblocked
+when a model reports `pass:4 fail:0` on the smoke battery (both vision color
+identifications correct).
+
+Bench default list (covers the three best Path-3 candidates):
+
+| Model | Disk (~) | Why |
+|---|---|---|
+| `Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M` | 3.5 GB | baseline (the one we measured red→"blue" miss) |
+| `Qwen/Qwen3-VL-4B-Instruct-GGUF:Q8_0` | 4.3 GB | same params, less quantization — fast test if quant was the issue |
+| `Qwen/Qwen3-VL-8B-Instruct-GGUF:Q4_K_M` | 6.5 GB | midscene's recommended default |
+
+First-time `bench` runs incur the GGUF + mmproj download cost per model
+(landed at `~/.cache/huggingface/hub/`); subsequent runs against the same
+model start in ~5 s.
+
 ### Lean launch (recommended default)
 
 ```bash
