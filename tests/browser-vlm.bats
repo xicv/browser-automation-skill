@@ -163,6 +163,39 @@ teardown() {
   assert_output_contains "unknown flag"
 }
 
+@test "browser-vlm start: port already bound by another process → EXIT_PREFLIGHT_FAILED" {
+  # Bind a port with a tiny Python http server; cmd_start must refuse to spawn
+  # rather than silently fail-bind and let bench talk to whoever's already
+  # there (the port-collision bug the bench surfaced).
+  port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 -u - <<EOF &
+import http.server, socketserver, time, threading
+srv = socketserver.TCPServer(("127.0.0.1", ${port}), http.server.BaseHTTPRequestHandler)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+time.sleep(15)
+srv.shutdown()
+EOF
+  squatter_pid=$!
+  # Wait for the squatter to bind.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then break; fi
+    sleep 0.2
+  done
+  # Use a no-op stub so cmd_start gets PAST the tool-missing guard and hits
+  # the port check.
+  no_op_stub="$(mktemp)"
+  printf '#!/usr/bin/env bash\nsleep 30\n' > "${no_op_stub}"
+  chmod +x "${no_op_stub}"
+  BROWSER_SKILL_VLM_PORT="${port}" \
+  LLAMA_SERVER_BIN="${no_op_stub}" \
+    run bash "${SCRIPTS_DIR}/browser-vlm.sh" start
+  kill "${squatter_pid}" 2>/dev/null || true
+  wait "${squatter_pid}" 2>/dev/null || true
+  rm -f "${no_op_stub}"
+  assert_status "${EXIT_PREFLIGHT_FAILED}"
+  assert_output_contains "still bound"
+}
+
 @test "browser-vlm bench: regression — bench-model status is 'ok'|'partial'|'fail' (NOT embedded JSON)" {
   # The earlier cmd_bench bug captured _run_smoke_battery's stdout (which IS
   # the smoke NDJSON) into the status field, producing multi-line garbage.
@@ -224,7 +257,7 @@ EOF
   local status_field
   status_field="$(printf '%s' "${model_line}" | jq -r '.status')"
   case "${status_field}" in
-    ok|partial|fail|timeout) : ;;
-    *) fail "status must be ok|partial|fail|timeout; got '${status_field}'" ;;
+    ok|partial|fail|timeout|start-failed) : ;;
+    *) fail "status must be ok|partial|fail|timeout|start-failed; got '${status_field}'" ;;
   esac
 }

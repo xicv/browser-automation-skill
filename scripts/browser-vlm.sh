@@ -79,6 +79,23 @@ _pid_alive() {
   kill -0 "${pid}" 2>/dev/null
 }
 
+# _wait_port_free PORT [MAX_WAIT_S]
+# Returns 0 when nothing's listening on PORT, 1 if still bound after MAX_WAIT_S.
+# Polls every 1s. Phase 14 bench-fix: needed because cmd_start spawning
+# llama-server while port is TIME_WAIT'd by a prior instance caused silent
+# bind failure + bench talking to the wrong (still-loaded) model.
+_wait_port_free() {
+  local port="${1:?port required}" max_wait="${2:-5}" waited=0
+  while [ "${waited}" -lt "${max_wait}" ]; do
+    if ! lsof -nP -iTCP:"${port}" -sTCP:LISTEN >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  return 1
+}
+
 _read_pid() {
   [ -f "${VLM_PID_FILE}" ] || return 1
   local pid
@@ -118,6 +135,16 @@ cmd_start() {
     die "${EXIT_TOOL_MISSING}" "${LLAMA_SERVER_BIN} not on PATH — brew install llama.cpp"
   fi
 
+  # Port-rebind safety (bench-fix). Refuse to spawn if the port is already
+  # bound by something else — otherwise llama-server bind-fails silently
+  # inside nohup, the recorded PID is the wrapper shell's child (not the
+  # actual server), /health continues to answer from whoever was already
+  # there, and bench ends up talking to the wrong model.
+  if ! _wait_port_free "${VLM_PORT}" 5; then
+    die "${EXIT_PREFLIGHT_FAILED}" \
+      "port ${VLM_PORT} still bound after 5s — check 'lsof -nP -iTCP:${VLM_PORT}' and stop the holder"
+  fi
+
   # Detached spawn; redirect stdout+stderr to log; record PID.
   local argv=()
   while IFS= read -r arg; do
@@ -154,6 +181,12 @@ cmd_stop() {
     ok "vlm not running (no-op)"
   fi
   rm -f "${VLM_PID_FILE}" 2>/dev/null || true
+  # Port-release wait — bench-fix companion. PID dying doesn't always release
+  # the port instantly on macOS (TIME_WAIT). 5s is enough for SO_REUSEADDR
+  # paths; if still bound, warn but don't fail (caller may have spawned a
+  # different listener that we don't own).
+  _wait_port_free "${VLM_PORT}" 5 \
+    || warn "port ${VLM_PORT} still bound after stop; next 'start' may fail-fast (use lsof to inspect)"
 }
 
 cmd_status() {
@@ -394,8 +427,15 @@ BENCHUSAGE
     # Defensive stop (whatever was running before).
     cmd_stop >/dev/null 2>&1 || true
 
-    # Spawn this model. Override env for cmd_start to pick up.
-    BROWSER_SKILL_VLM_MODEL="${model}" cmd_start >/dev/null 2>&1
+    # Spawn this model. Subshell isolates `die` from inside cmd_start so a
+    # missing tool / busy port doesn't kill the whole bench — instead we
+    # record the per-model failure and continue.
+    if ! (BROWSER_SKILL_VLM_MODEL="${model}" cmd_start) >/dev/null 2>&1; then
+      printf '{"event":"bench-model","model":"%s","status":"start-failed"}\n' \
+        "${model}"
+      bench_fail=$((bench_fail + 1))
+      continue
+    fi
     # Poll /health with bounded wait so a slow download doesn't hang forever.
     local waited=0
     while [ "${waited}" -lt "${max_wait_s}" ]; do
