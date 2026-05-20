@@ -521,6 +521,71 @@ elif [ "${dispatch_rc}" -eq "${EXIT_EMPTY_RESULT}" ] || [ "${dispatch_rc}" -eq "
       fi
     fi
   fi
+  # Phase 14 Path 3: visual rescue via local VLM (extension hook).
+  # Inserts BETWEEN fingerprint-rescue failure and the fail_count++ path.
+  # Both env vars must be set:
+  #   BROWSER_SKILL_VISION_FALLBACK=1     enable the tier
+  #   BROWSER_SKILL_VISUAL_RESCUE_CMD=PATH  executable hook script
+  # The hook receives: SITE INTENT CACHED_SELECTOR (positional). It should
+  # decide if the cached element is still the right target visually and:
+  #   exit 0 + stdout "yes" → cache rescued; click/fill proceeds as if cache hit
+  #   exit 0 + stdout "no"  → fall through to fail_count++ → cloud LLM
+  #   non-zero exit         → fall through (treat as "unreachable")
+  # See references/recipes/visual-rescue-hook.md for a llama.cpp probe example.
+  #
+  # The skill is intentionally agnostic about HOW the hook reasons (screenshot
+  # crop, full-page snapshot, OCR-only, local-model-of-choice). We ship the
+  # seam; users plug their own probe.
+  if [ "${rescued}" != "true" ] \
+     && [ "${BROWSER_SKILL_VISION_FALLBACK:-0}" = "1" ] \
+     && [ -n "${BROWSER_SKILL_VISUAL_RESCUE_CMD:-}" ] \
+     && [ -x "${BROWSER_SKILL_VISUAL_RESCUE_CMD}" ]; then
+    visual_rc=0
+    visual_out="$("${BROWSER_SKILL_VISUAL_RESCUE_CMD}" \
+                  "${site}" "${arg_intent}" "${selector}" 2>/dev/null)" \
+                || visual_rc=$?
+    if [ "${visual_rc}" -eq 0 ] && [ "${visual_out}" = "yes" ]; then
+      rescued=true
+      dispatch_rc=0  # treat as success — element is still semantically present
+      self_heal_triggered=true
+      printf '%s\n' "$(jq -nc \
+        --arg sel "${selector}" \
+        '{_kind:"visual_rescue", selector:$sel, rescued:true,
+          hook:"BROWSER_SKILL_VISUAL_RESCUE_CMD"}')"
+      # Emit stats.jsonl event so browser-stats can compute visual-rescue rate.
+      _vr_span_id="$(stats_random_id 2>/dev/null || printf '')"
+      _vr_ts="$(stats_now_iso_ms 2>/dev/null || printf '')"
+      if [ -n "${_vr_span_id}" ] && [ -n "${_vr_ts}" ]; then
+        _vr_event="$(jq -nc \
+          --argjson schema_version 1 \
+          --arg ts "${_vr_ts}" \
+          --arg span_id "${_vr_span_id}" \
+          --arg trace_id "${BROWSER_SKILL_TRACE_ID:-${_vr_span_id}}" \
+          --arg site "${site}" \
+          --arg sel "${selector}" '
+          { schema_version: $schema_version,
+            ts: $ts, span_id: $span_id, trace_id: $trace_id,
+            parent_span_id: null, session_id: null,
+            gen_ai_operation_name: "execute_tool",
+            gen_ai_tool_name: "browser-do.visual_rescue",
+            gen_ai_tool_type: "function",
+            verb: "do",
+            adapter_route: "browser-do",
+            site: ($site | select(. != "") // null),
+            selector_kind: "css", selector_value: $sel,
+            duration_ms: 0, argv_bytes: 0, stdout_bytes: 0, stderr_bytes: 0,
+            rc: 0,
+            outcome: "success",
+            failure_mode: null,
+            rescued: true,
+            fingerprint_from_selector: $sel,
+            fingerprint_to_selector: $sel
+          }' 2>/dev/null || printf '')"
+        [ -n "${_vr_event}" ] && stats_emit_event "${_vr_event}" 2>/dev/null || true
+      fi
+    fi
+  fi
+
   if [ "${rescued}" != "true" ]; then
     # Fingerprint rescue didn't apply or didn't succeed — original fail_count
     # path runs (Phase 11 1-iii D1 self-heal still escalates to LLM after 4 fails).

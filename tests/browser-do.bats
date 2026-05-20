@@ -886,3 +886,120 @@ EOF
   printf '%s' "${last}" | jq -e '.skipped_known == 1' >/dev/null \
     || fail "summary should report skipped_known:1; got ${last}"
 }
+
+# ---------- Phase 14 Path 3: visual-rescue hook seam --------------------
+
+_make_visual_hook() {
+  # $1 = "yes" | "no" | "exit-nonzero"
+  local mode="$1"
+  local script_path="${BATS_TEST_TMPDIR:-/tmp}/visual-hook-${BATS_TEST_NUMBER:-x}.sh"
+  case "${mode}" in
+    yes)          printf '#!/usr/bin/env bash\necho yes\nexit 0\n' > "${script_path}" ;;
+    no)           printf '#!/usr/bin/env bash\necho no\nexit 0\n'  > "${script_path}" ;;
+    exit-nonzero) printf '#!/usr/bin/env bash\necho whoops >&2\nexit 7\n' > "${script_path}" ;;
+    *)            fail "unknown visual-hook mode: ${mode}" ;;
+  esac
+  chmod +x "${script_path}"
+  printf '%s' "${script_path}"
+}
+
+@test "browser-do Path 3: hook=yes after dispatch fail → rescue → exit 0 + visual_rescue event" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  override="$(_make_mock_dispatcher 11)"
+  hook="$(_make_visual_hook yes)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISION_FALLBACK=1 \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD="${hook}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  assert_status 0
+  # stdout should include the {_kind:"visual_rescue"} streaming line.
+  echo "${output}" | jq -rs 'map(select(._kind == "visual_rescue")) | length' \
+    | grep -qE '^[1-9]' \
+    || fail "expected at least one _kind:visual_rescue line; got: ${output}"
+  # stats.jsonl should contain a browser-do.visual_rescue event with rescued:true.
+  stats_log="${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  [ -f "${stats_log}" ] \
+    || fail "stats.jsonl missing; expected visual_rescue event emitted"
+  jq -e 'select(.gen_ai_tool_name == "browser-do.visual_rescue") | .rescued == true' \
+    "${stats_log}" >/dev/null \
+    || fail "no browser-do.visual_rescue event with rescued:true in $(cat "${stats_log}")"
+}
+
+@test "browser-do Path 3: hook=no → falls through → exit 11 + fail_count++ (no visual_rescue event)" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+  override="$(_make_mock_dispatcher 11)"
+  hook="$(_make_visual_hook no)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISION_FALLBACK=1 \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD="${hook}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  assert_status 11
+  jq -e '.interactions[0].fail_count == 1' "${arch_path}" >/dev/null \
+    || fail "expected fail_count:1 (hook said no); got $(jq -c '.interactions[0]' "${arch_path}")"
+  # No visual_rescue event should land in stats.
+  stats_log="${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  if [ -f "${stats_log}" ]; then
+    if jq -e 'select(.gen_ai_tool_name == "browser-do.visual_rescue")' \
+         "${stats_log}" >/dev/null 2>&1; then
+      fail "visual_rescue event should NOT be emitted when hook says no"
+    fi
+  fi
+}
+
+@test "browser-do Path 3: BROWSER_SKILL_VISION_FALLBACK=0 (default) → hook never invoked" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+  override="$(_make_mock_dispatcher 11)"
+  # Hook would print "yes" but env gate is off.
+  hook="$(_make_visual_hook yes)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD="${hook}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  # Without env, fall through to fail_count++.
+  assert_status 11
+  jq -e '.interactions[0].fail_count == 1' "${arch_path}" >/dev/null \
+    || fail "expected fail_count:1 (vision fallback disabled); got $(jq -c '.interactions[0]' "${arch_path}")"
+}
+
+@test "browser-do Path 3: hook exit non-zero → treated as 'no' → falls through" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+  override="$(_make_mock_dispatcher 11)"
+  hook="$(_make_visual_hook exit-nonzero)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISION_FALLBACK=1 \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD="${hook}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  assert_status 11
+  jq -e '.interactions[0].fail_count == 1' "${arch_path}" >/dev/null \
+    || fail "expected fail_count:1 (hook exit non-zero treated as no); got $(jq -c '.interactions[0]' "${arch_path}")"
+}
+
+@test "browser-do Path 3: hook missing/non-executable → tier silently skipped" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+  override="$(_make_mock_dispatcher 11)"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISION_FALLBACK=1 \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD=/nonexistent/path/to/hook.sh \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  assert_status 11
+  jq -e '.interactions[0].fail_count == 1' "${arch_path}" >/dev/null \
+    || fail "expected fail_count:1 (hook missing); got $(jq -c '.interactions[0]' "${arch_path}")"
+}
