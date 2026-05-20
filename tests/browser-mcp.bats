@@ -256,6 +256,49 @@ EOF
   unset FOO_RANDOM_SECRET PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
 }
 
+@test "mcp-server A1: discovery loop reads mcp-tools.json + exposes new verb when added" {
+  # Proof that auto-discovery is the live source of truth — add a tmp JSON
+  # with browser_inspect, point the server at it via env override,
+  # verify tools/list includes inspect.
+  tmp_json="$(mktemp).json"
+  jq '. + {"inspect": {"description":"test-only","required":[]}}' \
+    "${LIB_DIR}/node/mcp-tools.json" > "${tmp_json}"
+  BROWSER_SKILL_MCP_TOOLS_JSON="${tmp_json}" \
+    result="$(printf '%s\n%s\n' \
+      '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+      '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+      | BROWSER_SKILL_MCP_TOOLS_JSON="${tmp_json}" node "${MCP_BIN}" 2>/dev/null)"
+  rm -f "${tmp_json}"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.tools | map(.name) | index("browser_inspect") != null' >/dev/null \
+    || fail "auto-discovery didn't expose new verb 'browser_inspect'; got: ${call_resp}"
+  # Also: tool enum for browser_inspect should be derived from adapters that
+  # declare 'inspect' (chrome-devtools-mcp). Proves capability discovery
+  # actually ran (not legacy fallback).
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.tools[] | select(.name == "browser_inspect") | .inputSchema.properties.tool.enum | index("chrome-devtools-mcp") != null' >/dev/null \
+    || fail "tool enum should include chrome-devtools-mcp (only adapter that declares inspect); got: ${call_resp}"
+}
+
+@test "mcp-server A1: verb NOT in mcp-tools.json is NOT exposed (allowlist gate)" {
+  # browser-audit.sh exists + chrome-devtools-mcp.sh declares 'audit' verb in
+  # tool_capabilities. But mcp-tools.json does NOT have an entry. → tools/list
+  # MUST NOT include browser_audit. This is the security boundary for new
+  # adapter verbs (no accidental exposure).
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp names
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  names="$(printf '%s' "${call_resp}" | jq -c '.result.tools | map(.name) | sort')"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.tools | map(.name) | (index("browser_audit") == null) and (index("browser_eval") == null)' >/dev/null \
+    || fail "allowlist gate broken — audit/eval should NOT appear; got: ${names}"
+}
+
 @test "mcp-server: MIDSCENE_MODEL_* envvar passes through to child (whitelist allows local-VLM config)" {
   export MIDSCENE_MODEL_BASE_URL="http://127.0.0.1:8080/v1"
   export PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli"

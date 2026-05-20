@@ -26,18 +26,186 @@
 // See ENV_WHITELIST_PREFIXES + ENV_WHITELIST_EXACT below.
 
 import readline from 'node:readline';
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_DIR = join(HERE, '..', '..');
+const ADAPTERS_DIR = join(HERE, '..', 'tool');
+// BROWSER_SKILL_MCP_TOOLS_JSON env override lets tests point at a tmp JSON
+// to verify auto-discovery picks up additions/removals.
+const MCP_TOOLS_JSON = process.env.BROWSER_SKILL_MCP_TOOLS_JSON
+  || join(HERE, 'mcp-tools.json');
 const MCP_PROTOCOL_VERSION = '2024-11-05';
 
-// Tool registry. Each entry maps an MCP tool to a bash verb script + an arg
-// translator. Schema is JSON Schema draft-07 so clients can validate before
-// calling.
-const TOOLS = [
+// --- Auto-discovery (Phase 14+ A1) ---
+//
+// Tool definitions are AUTO-DERIVED at server startup by combining:
+//   1. mcp-tools.json — allowlist + per-verb metadata (description, required,
+//      oneOf, schemaExtras, excludeFlags). Adding a verb to MCP = 1 JSON entry.
+//   2. scripts/lib/tool/<adapter>.sh::tool_capabilities() — flag discovery.
+//      Run once per adapter at startup; flags union → schema properties.
+//
+// Result: the TOOLS array below is the OLD hand-maintained version (kept as
+// fallback if discovery fails for any reason). buildToolsAutoDiscovered()
+// runs at module load and OVERWRITES TOOLS with the discovered set when it
+// succeeds. Adding a verb to an adapter + an entry in mcp-tools.json now
+// exposes it via MCP without editing this file.
+
+function readAdapterCapabilities(adapterFile) {
+  // Source the adapter in a subshell + invoke tool_capabilities; parse JSON.
+  // The adapter ABI guarantees tool_capabilities() returns valid JSON; if it
+  // doesn't, skip the adapter (logged to stderr) so one bad adapter doesn't
+  // sink discovery.
+  try {
+    const out = execSync(
+      `bash -c 'source "${adapterFile}" >/dev/null 2>&1 && tool_capabilities'`,
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    ).toString();
+    return JSON.parse(out);
+  } catch (e) {
+    process.stderr.write(`mcp-server: capability read failed for ${adapterFile}: ${e.message}\n`);
+    return null;
+  }
+}
+
+function discoverFlagsByVerb() {
+  // Returns: { <verb>: { flags: Set<string>, adapters: string[] } }
+  const byVerb = {};
+  let adapterFiles;
+  try {
+    adapterFiles = readdirSync(ADAPTERS_DIR).filter((f) => f.endsWith('.sh'));
+  } catch {
+    return byVerb;
+  }
+  for (const file of adapterFiles) {
+    const adapterName = file.replace(/\.sh$/, '');
+    const caps = readAdapterCapabilities(join(ADAPTERS_DIR, file));
+    if (!caps || !caps.verbs) continue;
+    for (const [verb, def] of Object.entries(caps.verbs)) {
+      if (!byVerb[verb]) byVerb[verb] = { flags: new Set(), adapters: [] };
+      for (const flag of def.flags || []) {
+        byVerb[verb].flags.add(flag.replace(/^--/, ''));
+      }
+      byVerb[verb].adapters.push(adapterName);
+    }
+  }
+  return byVerb;
+}
+
+function loadToolsJson() {
+  try {
+    const raw = readFileSync(MCP_TOOLS_JSON, 'utf8');
+    const parsed = JSON.parse(raw);
+    // Strip _doc and _schema sentinel keys; what remains is the verb allowlist.
+    const out = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      if (k.startsWith('_')) continue;
+      out[k] = v;
+    }
+    return out;
+  } catch (e) {
+    process.stderr.write(`mcp-server: mcp-tools.json read failed: ${e.message}\n`);
+    return null;
+  }
+}
+
+function buildToolsAutoDiscovered() {
+  const verbMeta = loadToolsJson();
+  if (!verbMeta) return null;
+  const discovered = discoverFlagsByVerb();
+  const tools = [];
+
+  for (const [verb, meta] of Object.entries(verbMeta)) {
+    const verbScript = `browser-${verb}.sh`;
+    const scriptPath = join(SCRIPTS_DIR, verbScript);
+    if (!existsSync(scriptPath)) {
+      process.stderr.write(`mcp-server: skipping ${verb} (no ${verbScript})\n`);
+      continue;
+    }
+    const discInfo = discovered[verb] || { flags: new Set(), adapters: [] };
+    const excludeFlags = new Set(meta.excludeFlags || []);
+    const schemaExtras = meta.schemaExtras || {};
+
+    // Build properties: union of (adapter flags - excluded) + globals (site, tool).
+    const properties = {};
+    for (const flag of discInfo.flags) {
+      if (excludeFlags.has(flag)) continue;
+      properties[flag] = schemaExtras[flag] || { type: 'string' };
+    }
+    // Globals: site (always), tool (always — enum derived from adapters that
+    // support this verb).
+    properties.site = schemaExtras.site || { type: 'string' };
+    if (!('tool' in properties)) {
+      properties.tool = {
+        type: 'string',
+        description: 'Adapter override',
+        enum: discInfo.adapters.length
+          ? discInfo.adapters
+          : ['playwright-cli', 'playwright-lib', 'chrome-devtools-mcp', 'obscura'],
+      };
+    }
+
+    const inputSchema = {
+      type: 'object',
+      properties,
+      additionalProperties: false,
+    };
+    if (meta.required) inputSchema.required = meta.required;
+    if (meta.oneOf)    inputSchema.oneOf    = meta.oneOf;
+
+    tools.push({
+      name: `browser_${verb}`,
+      description: meta.description,
+      inputSchema,
+      verbScript,
+      argMap: makeArgMap(meta),
+    });
+  }
+
+  return tools.length > 0 ? tools : null;
+}
+
+function makeArgMap(meta) {
+  const required = meta.required || [];
+  // Generic argMap: emit required flags first (so `text` always lands as
+  // `--text VAL`, deterministic ordering), then optional flags, then site/tool
+  // last for human-readability of stub-log argv.
+  return (args) => {
+    const out = [];
+    // Required first.
+    for (const key of required) {
+      if (args[key] === undefined || args[key] === null) continue;
+      _emitArg(out, key, args[key]);
+    }
+    // Optional next (anything not in required + not site/tool).
+    const skip = new Set([...required, 'site', 'tool']);
+    for (const [k, v] of Object.entries(args)) {
+      if (skip.has(k)) continue;
+      if (v === undefined || v === null) continue;
+      _emitArg(out, k, v);
+    }
+    // Globals last.
+    if (args.site) out.push('--site', args.site);
+    if (args.tool) out.push('--tool', args.tool);
+    return out;
+  };
+}
+
+function _emitArg(out, key, value) {
+  if (typeof value === 'boolean') {
+    if (value) out.push(`--${key}`);
+    return;
+  }
+  out.push(`--${key}`, String(value));
+}
+
+// Legacy static TOOLS — kept as fallback if auto-discovery fails (e.g.
+// mcp-tools.json missing in a stripped-down install). On boot, we try
+// auto-discovery first; on success, this constant is OVERWRITTEN below.
+let TOOLS = [
   {
     name: 'browser_open',
     description:
@@ -225,6 +393,14 @@ function filteredEnv() {
   return out;
 }
 
+// Auto-discovery replaces the legacy hand-maintained TOOLS array when
+// mcp-tools.json is present + at least one verb resolves. Falls back to
+// the static array on any failure (defensive: a stripped-down install
+// missing mcp-tools.json or with broken adapter capabilities still works).
+const _discovered = buildToolsAutoDiscovered();
+if (_discovered && _discovered.length > 0) {
+  TOOLS = _discovered;
+}
 const TOOLS_BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
 // --- Protocol I/O ---

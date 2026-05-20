@@ -1,0 +1,68 @@
+{
+  "_doc": "MCP tool allowlist + metadata. The mcp-server.mjs auto-discovers FLAGS from each adapter's tool_capabilities() at startup, but only exposes verbs explicitly declared here. Adding a new verb to MCP = 1 entry here + ensure adapter capabilities declare it; NO mcp-server.mjs edits.",
+  "_schema": {
+    "<verb>": {
+      "description": "1-3 sentence human-readable explanation (what MCP clients see in tools/list)",
+      "required": "optional array of required input property names (e.g. ['url'])",
+      "oneOf": "optional array of {required: [...]} objects for mutually-exclusive arg groups",
+      "schemaExtras": "optional per-property schema overrides (descriptions, enums, formats); merged onto auto-derived {type:'string'}",
+      "globalProps": "optional list of global props to add beyond auto-derived flags (defaults: ['site','tool']); set to ['site'] to skip the tool override prop",
+      "excludeFlags": "optional list of bash-verb flag NAMES (without --) to NOT expose via MCP (AP-7: secrets, --raw, --dry-run, --secret-stdin)",
+      "scriptArgFlags": "optional explicit ordering hint for argMap output"
+    }
+  },
+
+  "open": {
+    "description": "Open a URL via the routed browser adapter. Returns a summary JSON line with verb, tool, status, url, duration_ms. Auto-derives a post-condition check (url-include) so adapter-lies/redirect-to-login surface as oblivious_success in stats.jsonl.",
+    "required": ["url"],
+    "schemaExtras": {
+      "url": { "type": "string", "description": "URL to navigate to" },
+      "site": { "type": "string", "description": "Registered site name (see browser-add-site)" }
+    }
+  },
+
+  "snapshot": {
+    "description": "Capture an eN-indexed accessibility snapshot. Heavy YAML (> 2 KB) is persisted under captures/snapshots/ and returned via snapshot_path + n_refs in the summary; small payloads stay inline. With capture=true the full body is also archived under captures/NNN/.",
+    "schemaExtras": {
+      "capture": { "type": "boolean", "description": "Persist under captures/NNN/ (Phase 7)" }
+    }
+  },
+
+  "click": {
+    "description": "Click an element by eN ref (preferred — stable across the session until the page mutates) or by CSS selector. Provide exactly one of ref or selector.",
+    "oneOf": [
+      { "required": ["ref"] },
+      { "required": ["selector"] }
+    ],
+    "schemaExtras": {
+      "ref":      { "type": "string", "description": "eN ref from a prior browser_snapshot call" },
+      "selector": { "type": "string", "description": "CSS selector (fallback when ref unavailable)" }
+    }
+  },
+
+  "fill": {
+    "description": "Fill an input by eN ref or CSS selector with the given text. NOTE: this tool deliberately does NOT expose a 'secret' field — MCP has no stdin channel and putting secrets in tool arguments would land them in the request transcript. For secret values use scripts/browser-fill.sh directly with --secret-stdin (AP-7).",
+    "required": ["text"],
+    "oneOf": [
+      { "required": ["ref"] },
+      { "required": ["selector"] }
+    ],
+    "excludeFlags": ["secret-stdin"],
+    "schemaExtras": {
+      "text": { "type": "string", "description": "Plain-text value to type (NEVER pass secrets here)" }
+    }
+  },
+
+  "extract": {
+    "description": "Extract data via CSS selector or evaluated JS. selector returns concatenated text content of matched nodes; eval returns the JS expression result. --scrape multi-URL mode is intentionally NOT exposed via MCP (use scripts/browser-extract.sh --scrape directly).",
+    "oneOf": [
+      { "required": ["selector"] },
+      { "required": ["eval"] }
+    ],
+    "excludeFlags": ["scrape", "stealth", "concurrency"],
+    "schemaExtras": {
+      "selector": { "type": "string", "description": "CSS selector to extract text from" },
+      "eval":     { "type": "string", "description": "JS expression evaluated in page context" }
+    }
+  }
+}
