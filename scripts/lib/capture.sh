@@ -50,8 +50,15 @@ _capture_iso_to_epoch() {
 }
 
 # _capture_now_epoch — current epoch seconds.
+# Honors BROWSER_SKILL_CAPTURE_NOW_EPOCH (test-only seam) so age-threshold
+# tests can anchor to a fixed wall-clock and survive calendar drift. Without
+# the override the prod code path remains a single `date +%s` fork.
 _capture_now_epoch() {
-  date +%s
+  if [ -n "${BROWSER_SKILL_CAPTURE_NOW_EPOCH:-}" ]; then
+    printf '%s\n' "${BROWSER_SKILL_CAPTURE_NOW_EPOCH}"
+  else
+    date +%s
+  fi
 }
 
 # _capture_read_config — emits {retention_count, retention_days, warn_at_pct}

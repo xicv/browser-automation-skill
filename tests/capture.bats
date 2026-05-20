@@ -8,10 +8,37 @@ setup() {
   setup_temp_home
   init_paths
   source "${LIB_DIR}/capture.sh"
+  # Anchor wall-clock for age-threshold tests. Fixture timestamps in this file
+  # are written relative to 2026-05-09T12:00:00Z (epoch 1778328000). Without
+  # this override, the suite rots: any test using retention_days=N fails once
+  # real-world calendar drifts past the seeded fixture date by more than N.
+  export BROWSER_SKILL_CAPTURE_NOW_EPOCH=1778328000
 }
-teardown() { teardown_temp_home; }
+teardown() {
+  unset BROWSER_SKILL_CAPTURE_NOW_EPOCH
+  teardown_temp_home
+}
 
 # ---------- capture_init_dir ----------
+
+@test "_capture_now_epoch: returns BROWSER_SKILL_CAPTURE_NOW_EPOCH when set" {
+  BROWSER_SKILL_CAPTURE_NOW_EPOCH=1234567890 result="$(_capture_now_epoch)"
+  [ "${result}" = "1234567890" ] \
+    || fail "expected 1234567890 from env override, got '${result}'"
+}
+
+@test "_capture_now_epoch: falls back to date +%s when override unset" {
+  unset BROWSER_SKILL_CAPTURE_NOW_EPOCH
+  local now
+  now="$(_capture_now_epoch)"
+  [[ "${now}" =~ ^[0-9]+$ ]] \
+    || fail "expected integer epoch, got '${now}'"
+  # Sanity floor: must be later than 2026-05-01 (epoch 1777680000).
+  [ "${now}" -gt 1777680000 ] \
+    || fail "epoch too small (${now}); date +%s broken?"
+  # Restore the suite anchor for subsequent tests in this file.
+  export BROWSER_SKILL_CAPTURE_NOW_EPOCH=1778328000
+}
 
 @test "capture_init_dir: creates captures dir with mode 0700 if missing" {
   [ ! -d "${CAPTURES_DIR}" ] || fail "precondition violated: dir already exists"
