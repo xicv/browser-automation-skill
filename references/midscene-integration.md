@@ -224,29 +224,33 @@ Three commits landed before this design doc:
 | `67fd4a1` MCP Stage 1 | Our verbs are now MCP-callable. Midscene's MCP server can call our `browser_snapshot` to get a cheap text ref before deciding whether vision grounding is needed. |
 | `149a7d1` capture-flake fix | Full suite back to 1028/1028; future Path-3 work can ship behind RED-GREEN bats without an existing failure masking new regressions. |
 
-## Acceptance: local stack smoke test (status: pending)
+## Acceptance: local-stack smoke test (status: measured 2026-05-20)
 
-Design-session environment (recorded 2026-05-20):
+Environment:
 
 - Hardware: Apple M3 Pro, 36 GB unified memory, macOS 25.5 (Darwin)
-- llama.cpp: brew bottle 9200 (3e12fbdea), ARM64 native — `brew install llama.cpp` complete
-- Model: `Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M` — download in flight via `-hf`, lands at `~/.cache/huggingface/hub/models--Qwen--Qwen3-VL-4B-Instruct-GGUF/blobs/*`
-- Endpoint target: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI-compatible)
+- llama.cpp: brew bottle 9200 (`3e12fbdea`), ARM64 native (`/opt/homebrew/bin/llama-server`)
+- Model: `Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M` (4.02B params, 175K ctx slot, 2.49 GB resident; auto-downloaded with mmproj to `~/.cache/huggingface/hub/models--Qwen--Qwen3-VL-4B-Instruct-GGUF/`, total 2.8 GB on disk)
+- Endpoint: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI-compatible)
+- Launch: `llama-server -hf Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M --host 127.0.0.1 --port 8080`
 
-Smoke-test command (after server is up):
+| Smoke | Prompt | Latency | Prompt tok/s | Predicted tok/s | Result |
+|---|---|---:|---:|---:|---|
+| **1. Text (cold)** | "Say hi in exactly one word." | 5.16 s | 5.55 | 1.05 | `"Hello"` ✓ |
+| **2. Vision (solid red 100×100 PNG)** | "What is the dominant color? One word." | 15.09 s | 2.55 | 4.56 | `"Blue"` ✗ misclassified |
+| **3. Vision (solid green 100×100 PNG)** | same | 15.56 s | 1.76 | 2.78 | `"Green"` ✓ |
+| **4. Text (warm)** | "Reply in exactly two words." | 1.88 s | 12.64 | 7.80 | `"Understood."` ✓ |
 
-```bash
-curl -s http://127.0.0.1:8080/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen3-VL-4B-Instruct",
-    "messages": [{"role": "user", "content": "say hi in one word"}]
-  }' | jq '.choices[0].message.content'
-```
+**Implications for the integration paths above:**
 
-A vision-grounded smoke test (sending a 320×240 PNG of a button and
-asking for click coordinates) is the real acceptance gate; landing that
-result + measured latency is a follow-up commit to this file.
+- **Pipeline works end-to-end.** OpenAI-compatible chat completions ✓, image_url base64 ingestion ✓, mmproj auto-loaded ✓.
+- **Vision accuracy at 4B q4_K_M is borderline** (1/2 primary-color identifications wrong on identical-protocol calls). For **Path 3 (cache-rescue visual confirmation)** this would generate false-negatives → DON'T wire 4B-q4_K_M into the cache hot path. Either:
+  - **Qwen3-VL-8B q4_K_M** (~6.5 GB) — recommended by midscene
+  - **Qwen3-VL-4B q8_0** (~4.3 GB) — higher fidelity at smaller size
+  - **UI-TARS-1.5-7B** (~4 GB) — explicitly post-trained on UI grounding
+- **Warm-vs-cold text latency: 2.7× speedup** (5.16 s → 1.88 s) at 7.8 tok/s predicted. The llama-server prompt cache (8192 MiB cap, enabled by default) earns its keep.
+- **Vision call cost: ~15 s per image at 4B.** This is the budget Path 3 has to beat: if a cloud LLM round-trip via Claude would have cost ~$0.001 + ~1 s, the local 15 s is only winning when the operation is high-volume *or* offline.
+- **`Failed to load image or audio file` error** appears if the `data:image/png;base64,…` URL is malformed (e.g. embedded newlines in base64) — strip newlines with `tr -d '\n'` before constructing the data URL.
 
 ## What NOT to do
 
