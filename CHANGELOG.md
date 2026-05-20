@@ -11,6 +11,78 @@ Every entry has a tag in `[brackets]`:
 - `[internal]` lint, tests, CI — no user-visible change
 - `[docs]` README / SKILL.md / references / examples
 
+## [v0.71.0-phase-14-vlm-cache-rescue] - 2026-05-21
+
+**Phase 14 ships the full local-VLM cache-rescue chain.** Production-ready v1.3. 21 commits, +130 bats tests (1086 total). Browser cache self-improves end-to-end: OBSERVE (Phase 12 telemetry) → REPAIR (Phase 13 fingerprint rescue + Path 3 visual rescue) → PRUNE (this phase's `browser-stats prune`).
+
+### Headlines
+
+- **5-tier cache defense chain.** cached selector → Phase-13 fingerprint rescue → Path 3 local-VLM probe → cloud LLM → user fixup. Three of four tiers cost zero cloud tokens.
+- **Local VLM auto-managed.** `browser-vlm install-env` adds env vars to `~/.zshrc`; lazy-start on first probe; idle-stop watchdog kills llama-server after 10 min no use. Zero ongoing manual ops.
+- **MCP server published.** `scripts/lib/node/mcp-server.mjs` exposes 5 verbs (open/snapshot/click/fill/extract) over JSON-RPC NDJSON for external agents (midscene, Stagehand, agent-browser, Claude Code, Continue, Cline). Env-whitelisted secrets boundary; AP-7 preserved.
+- **MCP TOOLS auto-derived** from adapter `tool_capabilities()` + `mcp-tools.json` allowlist. Adding a verb to MCP = 1 JSON entry; no JS code changes.
+- **VLM bench command** discovers which model best unblocks Path 3 (`bash scripts/browser-vlm.sh bench [models…]`).
+- **Stats-driven cache pruning** auto-detects polluted archetypes via `oblivious_success` signal. Doctor advisory + `browser-stats prune --apply`.
+- **`browser-do propose` activated on `open` tail** — URL patterns auto-cluster after 3+ similar opens against any registered site. The shipped-but-idle cache engine now compounds zero-token actions.
+
+### MCP server (Stage 1 + Stage 2 + auto-derive)
+
+- [feat] **`scripts/lib/node/mcp-server.mjs`** — JSON-RPC 2.0 NDJSON server over stdio, protocol `2024-11-05`. 5 tools: browser_open, browser_snapshot, browser_click, browser_fill, browser_extract.
+- [feat] **Env-var whitelist passthrough.** `BROWSER_SKILL_*` / `BROWSER_STATS_*` / `CLAUDE_*` / `MIDSCENE_MODEL_*` / `PLAYWRIGHT_*` / `CHROME_DEVTOOLS_*` / `OBSCURA_*` / `STUB_*` / `FIXTURES_*` / `MCP_*` prefixes inherit; everything else is filtered (AP-7).
+- [security] **`browser_fill` schema has no `secret` field + `additionalProperties: false`.** Tested + codified. MCP has no stdin channel; secrets via direct `scripts/browser-fill.sh --secret-stdin` only.
+- [feat] **TOOLS auto-discovery** from each adapter's `tool_capabilities()` + `scripts/lib/node/mcp-tools.json` allowlist. Closes ARCHITECTURE.md §10 OCP drift; future adapter verbs become MCP-exposable via JSON-only edits.
+- [feat] **`scripts/browser-mcp.sh serve`** entry point; `references/browser-mcp-cheatsheet.md` documents wiring.
+
+### Local VLM stack (auto-managed)
+
+- [feat] **`scripts/browser-vlm.sh`** — lifecycle wrapper for `llama-server` with the session-validated lean config (`--ctx-size 8192 --parallel 1 --threads 4 --threads-batch 6 --cache-ram 512 --n-gpu-layers 99`). 18–36× speedup vs FAT defaults (measured).
+- [feat] **Subcommands**: `start | stop | status | smoke | bench | install-env | uninstall-env`.
+- [feat] **Lazy auto-start in default Path 3 probe** — if VLM unreachable, probe shells to `browser-vlm.sh start` synchronously + polls /health up to 60s.
+- [feat] **Idle-stop watchdog** spawned alongside server; polls `vlm.last-used` mtime every 60s; kills llama-server after `BROWSER_SKILL_VLM_IDLE_TIMEOUT` (default 600s = 10min) no real use. Disable via `=0`.
+- [feat] **`install-env`** persists the two required env vars to `~/.zshrc` (or `--shell-rc PATH`) so Claude Code subprocesses inherit them. Idempotent.
+- [feat] **Doctor advisory** reports VLM reachability (`bash scripts/browser-doctor.sh | grep "local VLM"`).
+- [fix] Port-rebind safety in cmd_start — refuses to spawn if port held; cmd_stop waits for port release (TIME_WAIT race fix).
+- [fix] Model-identity verification post-start — `llama-server -hf` silently falls back to cached quants; bench now detects via `/v1/models` comparison + emits `status:"model-mismatch"`.
+- [fix] Broader UI-grounding matcher — `expected` accepts `|`-delimited terms.
+
+### Path 3 — visual cache rescue (5th tier)
+
+- [feat] **Hook seam in `scripts/browser-do.sh`** between Phase-13 fingerprint-rescue failure and cloud-LLM fallback. Gated by `BROWSER_SKILL_VISION_FALLBACK=1` + `BROWSER_SKILL_VISUAL_RESCUE_CMD=PATH`.
+- [feat] **Canonical default probe** at `scripts/lib/visual-rescue-default.sh` (text-mode v1; reads accessibility tree, asks local LLM yes/no). Vision-mode v2 ships in a future release.
+- [feat] **Smart-skip** when archetype `fail_count ≥ BROWSER_SKILL_VISUAL_RESCUE_MAX_FAIL_COUNT` (default 3). Skips wasting probe latency when cache is fundamentally broken (cloud LLM only path that can re-derive).
+- [feat] **Stats event** `gen_ai_tool_name:"browser-do.visual_rescue"` with `rescued:true` for visual-rescue successes.
+- [docs] **`references/recipes/visual-rescue-hook.md`** — full recipe + reference llama.cpp implementation.
+
+### Stats-driven pruning (close the feedback loop)
+
+- [feat] **`bash scripts/browser-stats.sh prune [--days N=7] [--threshold N=3] [--apply] [--site NAME]`** — finds (site, selector) tuples with persistent `oblivious_success` events. Dry-run emits `_kind:prune_candidate`; `--apply` sets `.disabled=true` on matching archetype interactions.
+- [feat] **Doctor advisory** flags groups with ≥3 `oblivious_success` at same (site, selector). `bash scripts/browser-doctor.sh | grep "cache archetype"`.
+
+### `browser-do` cache activation (B1)
+
+- [feat] **`scripts/browser-open.sh` tail** now invokes `browser-do propose --from-recent --auto-record --threshold 3` opportunistically on successful navigations to registered sites. URL patterns auto-cluster; archetypes auto-populate `~/.browser-skill/memory/<site>/patterns.json`.
+- [feat] **Opt-out**: `BROWSER_SKILL_OPEN_PROPOSE=0`.
+
+### Output / accuracy / telemetry tightening
+
+- [feat] **Snapshot file-ref over inline YAML** (Phase 14 A). Snapshot output > `BROWSER_SKILL_SNAPSHOT_INLINE_BYTES` (default 2048) persists to `${CAPTURES_DIR}/snapshots/<site>--<ts>.yaml` mode 0600 + summary emits `snapshot_path` + `n_refs`. Measured 6× compression on the heaviest verb.
+- [feat] **Open auto-derives `BROWSER_STATS_EXPECT_*`** so URL mismatches trip `oblivious_success` without caller setup. (`browser-fill` gated opt-in via `BROWSER_SKILL_STRICT_POSTCOND=1`.)
+- [feat] **`unknown_failure` classifier fallback** — `stats_classify_failure` returns `unknown_failure` instead of empty when `rc != 0` and no pattern matches. Spec §2.5 self-healing stderr hint emitted.
+- [schema] failure_mode enum bumped 13 → 14 (additive; no migration).
+- [fix] **`tests/capture.bats:285` calendar-drift** — env-seam `BROWSER_SKILL_CAPTURE_NOW_EPOCH` lets age-threshold tests anchor to a fixed wall-clock. Resolves prior CI failure.
+
+### Architecture + documentation
+
+- [docs] **`docs/ARCHITECTURE.md`** (16 sections, ~500 lines) — codebase census, layer map, ABI contracts, extension points, SOLID audit, quarantine boundaries, test discipline, recipe index, invariants. Authoritative reference for extension authors.
+- [docs] **`CONTRIBUTING.md`** at repo root — 2-min orientation pointing at the right recipe/spec per task.
+- [docs] **`references/midscene-integration.md`** (280 lines) — design + llama.cpp local-stack wiring + bench-measured smoke acceptance table.
+- [docs] **`references/recipes/visual-rescue-hook.md`** + **`references/browser-mcp-cheatsheet.md`**.
+
+### Tests + lint
+
+- Full bats: **1086/1086 green** (was 1018 at Phase 13 close).
+- shellcheck silent on all touched files.
+
 ## [Unreleased]
 
 ### Tier 3 papercut bundle — doctor `recent_urls` surface + `fill --selector` short-timeout
