@@ -32,6 +32,38 @@ chmod +x "${BROWSER_SKILL_VISUAL_RESCUE_CMD}"
 If either is unset (or the hook isn't executable), the tier is skipped
 silently and behaviour matches today's baseline.
 
+### Fast start — use the bundled default probe
+
+A ready-to-use canonical probe ships at `scripts/lib/visual-rescue-default.sh`
+(text-mode v1 — see "Modes" below). Wire it directly:
+
+```bash
+export BROWSER_SKILL_VISION_FALLBACK=1
+export BROWSER_SKILL_VISUAL_RESCUE_CMD="$(realpath scripts/lib/visual-rescue-default.sh)"
+# Optional — defaults to http://127.0.0.1:8080 (matches `bash scripts/browser-vlm.sh start`)
+# export BROWSER_SKILL_VLM_PORT=8080
+```
+
+That gets Path 3 live with zero custom code. Confirm wiring via doctor:
+
+```bash
+bash scripts/browser-doctor.sh | grep "local VLM"
+# ok: local VLM reachable @ http://127.0.0.1:8080 …
+```
+
+## Modes
+
+**v1 — text-mode (the bundled default).** Reads the accessibility-tree YAML
+snapshot, sends `(intent, selector, snapshot-text)` to the local LLM, asks
+yes/no. Cheap (~200ms total), works against any OpenAI-compatible endpoint
+(local llama-server, vLLM, ollama, etc — not just VLMs).
+
+**v2 — vision-mode (planned).** Crops a screenshot of the cached element's
+bbox, sends image to a VLM, asks yes/no. Stronger signal for visual-only UIs
+(canvas elements, custom-painted widgets), but needs screenshot-from-live-
+session infrastructure that isn't shipped yet. Roll your own per the example
+below until v2 lands.
+
 ## Hook contract
 
 The hook is invoked with **three positional args**:
