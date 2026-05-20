@@ -196,6 +196,62 @@ EOF
   assert_output_contains "still bound"
 }
 
+@test "browser-vlm install-env: appends marked block to a fresh shell-rc" {
+  rc_file="$(mktemp)"
+  : > "${rc_file}"
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" install-env --shell-rc "${rc_file}"
+  assert_status 0
+  grep -qF "browser-skill VLM auto-management (Path 3)" "${rc_file}" \
+    || fail "marker line missing in ${rc_file}"
+  grep -qE '^export BROWSER_SKILL_VISION_FALLBACK=1$' "${rc_file}" \
+    || fail "VISION_FALLBACK export missing in ${rc_file}"
+  grep -qE 'export BROWSER_SKILL_VISUAL_RESCUE_CMD=.*visual-rescue-default\.sh' "${rc_file}" \
+    || fail "VISUAL_RESCUE_CMD export missing in ${rc_file}"
+  rm -f "${rc_file}"
+}
+
+@test "browser-vlm install-env: idempotent (second run is no-op)" {
+  rc_file="$(mktemp)"
+  : > "${rc_file}"
+  bash "${SCRIPTS_DIR}/browser-vlm.sh" install-env --shell-rc "${rc_file}" >/dev/null
+  before_lines=$(wc -l < "${rc_file}")
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" install-env --shell-rc "${rc_file}"
+  assert_status 0
+  assert_output_contains "already installed"
+  after_lines=$(wc -l < "${rc_file}")
+  [ "${before_lines}" = "${after_lines}" ] \
+    || fail "shell rc grew on re-run; before=${before_lines} after=${after_lines}"
+  rm -f "${rc_file}"
+}
+
+@test "browser-vlm uninstall-env: removes the env block + leaves other lines intact" {
+  rc_file="$(mktemp)"
+  cat > "${rc_file}" <<'EOF'
+# user's own export
+export EXISTING_VAR=keep-me
+EOF
+  bash "${SCRIPTS_DIR}/browser-vlm.sh" install-env --shell-rc "${rc_file}" >/dev/null
+  grep -qF "browser-skill VLM auto-management" "${rc_file}" \
+    || fail "install didn't add block"
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" uninstall-env --shell-rc "${rc_file}"
+  assert_status 0
+  if grep -qF "browser-skill VLM auto-management" "${rc_file}"; then
+    fail "uninstall didn't remove the block; file contains:\n$(cat "${rc_file}")"
+  fi
+  grep -qE '^export EXISTING_VAR=keep-me$' "${rc_file}" \
+    || fail "user's existing export was lost during uninstall"
+  rm -f "${rc_file}"
+}
+
+@test "browser-vlm uninstall-env: no-op when no block present" {
+  rc_file="$(mktemp)"
+  echo "# clean file" > "${rc_file}"
+  run bash "${SCRIPTS_DIR}/browser-vlm.sh" uninstall-env --shell-rc "${rc_file}"
+  assert_status 0
+  assert_output_contains "no browser-skill env block found"
+  rm -f "${rc_file}"
+}
+
 @test "browser-vlm bench: regression — bench-model status is 'ok'|'partial'|'fail' (NOT embedded JSON)" {
   # The earlier cmd_bench bug captured _run_smoke_battery's stdout (which IS
   # the smoke NDJSON) into the status field, producing multi-line garbage.

@@ -988,6 +988,92 @@ _make_visual_hook() {
     || fail "expected fail_count:1 (hook exit non-zero treated as no); got $(jq -c '.interactions[0]' "${arch_path}")"
 }
 
+@test "browser-do Path 3 (smart-skip): fail_count >= 3 bypasses VLM probe → cloud LLM" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+  tmp="$(mktemp)"
+  jq '.interactions[0].fail_count = 3' "${arch_path}" > "${tmp}" && mv "${tmp}" "${arch_path}"
+  override="$(_make_mock_dispatcher 11)"
+  hook_sentinel="$(mktemp)"
+  hook="$(mktemp)"
+  cat > "${hook}" <<EOF
+#!/usr/bin/env bash
+echo INVOKED > "${hook_sentinel}"
+echo yes
+exit 0
+EOF
+  chmod +x "${hook}"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISION_FALLBACK=1 \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD="${hook}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  if [ -s "${hook_sentinel}" ]; then
+    fail "smart-skip violated: hook was invoked even with fail_count=3"
+  fi
+  assert_status 11
+  jq -e '.interactions[0].fail_count == 4' "${arch_path}" >/dev/null \
+    || fail "expected fail_count to bump to 4 (no rescue); got $(jq -c '.interactions[0]' "${arch_path}")"
+  rm -f "${hook}" "${hook_sentinel}"
+}
+
+@test "browser-do Path 3 (smart-skip): fail_count < threshold STILL invokes hook" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  override="$(_make_mock_dispatcher 11)"
+  hook_sentinel="$(mktemp)"
+  hook="$(mktemp)"
+  cat > "${hook}" <<EOF
+#!/usr/bin/env bash
+echo INVOKED > "${hook_sentinel}"
+echo yes
+exit 0
+EOF
+  chmod +x "${hook}"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISION_FALLBACK=1 \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD="${hook}" \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  [ -s "${hook_sentinel}" ] \
+    || fail "hook should have been invoked at fail_count=0; sentinel empty"
+  assert_status 0
+  rm -f "${hook}" "${hook_sentinel}"
+}
+
+@test "browser-do Path 3 (smart-skip): BROWSER_SKILL_VISUAL_RESCUE_MAX_FAIL_COUNT=1 → bypass at fail_count=1" {
+  _register_site app
+  _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app/archetypes/devices-id.json"
+  tmp="$(mktemp)"
+  jq '.interactions[0].fail_count = 1' "${arch_path}" > "${tmp}" && mv "${tmp}" "${arch_path}"
+  override="$(_make_mock_dispatcher 11)"
+  hook_sentinel="$(mktemp)"
+  hook="$(mktemp)"
+  cat > "${hook}" <<EOF
+#!/usr/bin/env bash
+echo INVOKED > "${hook_sentinel}"
+echo yes
+exit 0
+EOF
+  chmod +x "${hook}"
+  BROWSER_DO_DISPATCH_OVERRIDE="${override}" \
+  BROWSER_SKILL_VISION_FALLBACK=1 \
+  BROWSER_SKILL_VISUAL_RESCUE_CMD="${hook}" \
+  BROWSER_SKILL_VISUAL_RESCUE_MAX_FAIL_COUNT=1 \
+    run bash "${SCRIPTS_DIR}/browser-do.sh" \
+      --site app --verb click --intent "click thing" \
+      --url 'https://app.example.com/devices/123'
+  if [ -s "${hook_sentinel}" ]; then
+    fail "smart-skip with MAX=1 should bypass at fail_count=1"
+  fi
+  assert_status 11
+  rm -f "${hook}" "${hook_sentinel}"
+}
+
 @test "browser-do Path 3: hook missing/non-executable → tier silently skipped" {
   _register_site app
   _seed_cache app devices-id '/devices/:id' "click thing" "button.thing"

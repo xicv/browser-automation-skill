@@ -51,10 +51,35 @@ vlm_timeout="${BROWSER_SKILL_VLM_RESCUE_TIMEOUT:-30}"
 snap_cap="${BROWSER_SKILL_RESCUE_SNAPSHOT_BYTES:-2048}"
 endpoint="http://${vlm_host}:${vlm_port}/v1/chat/completions"
 
-# Gate 1: reachability. Silent skip if VLM not running.
+# Gate 1: reachability. With lazy auto-start (default ON), the probe will
+# try to spawn llama-server via browser-vlm.sh if it's down, and poll
+# /health up to BROWSER_SKILL_LAZY_START_TIMEOUT seconds (default 60).
+# Disable lazy-start by setting BROWSER_SKILL_LAZY_START=0 (the probe then
+# fails fast like v1).
 if ! curl -sfm 2 "http://${vlm_host}:${vlm_port}/health" >/dev/null 2>&1; then
-  echo "no"
-  exit 1
+  if [ "${BROWSER_SKILL_LAZY_START:-1}" = "1" ]; then
+    SCRIPTS_DIR_FOR_VLM="${BROWSER_SKILL_SCRIPTS_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+    vlm_script="${SCRIPTS_DIR_FOR_VLM}/browser-vlm.sh"
+    if [ -f "${vlm_script}" ]; then
+      # Start in background — browser-vlm.sh handles nohup + pidfile.
+      bash "${vlm_script}" start >/dev/null 2>&1 || true
+      # Poll until /health responds OR timeout.
+      timeout_s="${BROWSER_SKILL_LAZY_START_TIMEOUT:-60}"
+      waited=0
+      while [ "${waited}" -lt "${timeout_s}" ]; do
+        if curl -sfm 2 "http://${vlm_host}:${vlm_port}/health" >/dev/null 2>&1; then
+          break
+        fi
+        sleep 2
+        waited=$((waited + 2))
+      done
+    fi
+  fi
+  # Final reachability check — if still down, give up gracefully.
+  if ! curl -sfm 2 "http://${vlm_host}:${vlm_port}/health" >/dev/null 2>&1; then
+    echo "no"
+    exit 1
+  fi
 fi
 
 # Gate 2: locate browser-snapshot.sh. Default to the skill's own scripts dir
@@ -106,6 +131,15 @@ resp="$(curl -sS -m "${vlm_timeout}" "${endpoint}" \
 completion="$(printf '%s' "${resp}" | jq -r '.choices[0].message.content // ""' 2>/dev/null)"
 
 case "${completion,,}" in
-  *yes*) echo "yes"; exit 0 ;;
-  *)     echo "no";  exit 0 ;;
+  *yes*) echo "yes"; ;;
+  *)     echo "no"; ;;
 esac
+
+# Phase 14+: touch a tracker file so the idle-stop watchdog (browser-vlm.sh
+# start spawns one) can tell when the VLM was last actually used. Without
+# this, /health pings from doctor + manual status checks would keep the
+# server alive forever.
+BROWSER_SKILL_HOME="${BROWSER_SKILL_HOME:-${HOME}/.browser-skill}"
+mkdir -p "${BROWSER_SKILL_HOME}" 2>/dev/null || true
+: > "${BROWSER_SKILL_HOME}/vlm.last-used" 2>/dev/null || true
+exit 0

@@ -53,6 +53,10 @@ VLM_NGL="${BROWSER_SKILL_VLM_NGL:-99}"
 BROWSER_SKILL_HOME="${BROWSER_SKILL_HOME:-${HOME}/.browser-skill}"
 VLM_PID_FILE="${BROWSER_SKILL_HOME}/vlm.pid"
 VLM_LOG_FILE="${BROWSER_SKILL_HOME}/vlm.log"
+VLM_WATCHDOG_PID_FILE="${BROWSER_SKILL_HOME}/vlm-watchdog.pid"
+VLM_LAST_USED_FILE="${BROWSER_SKILL_HOME}/vlm.last-used"
+VLM_IDLE_TIMEOUT_S="${BROWSER_SKILL_VLM_IDLE_TIMEOUT:-600}"   # 10 min default
+VLM_WATCHDOG_POLL_S="${BROWSER_SKILL_VLM_WATCHDOG_POLL:-60}"  # 1 min default
 
 _ensure_home() {
   mkdir -p "${BROWSER_SKILL_HOME}" 2>/dev/null || die "${EXIT_GENERIC_ERROR}" \
@@ -162,9 +166,59 @@ cmd_start() {
   ok "vlm starting (pid ${pid}) — first launch downloads ~3.5 GB to ~/.cache/huggingface/"
   ok "log:  tail -f ${VLM_LOG_FILE}"
   ok "ping: curl http://${VLM_HOST}:${VLM_PORT}/health    (returns {\"status\":\"ok\"} when ready)"
+
+  # Phase 14+ smart-stop: spawn an idle-stop watchdog companion. Polls
+  # ${VLM_LAST_USED_FILE} mtime every BROWSER_SKILL_VLM_WATCHDOG_POLL seconds;
+  # if older than BROWSER_SKILL_VLM_IDLE_TIMEOUT, calls cmd_stop. Without
+  # this, llama-server would hold ~4 GB resident forever after first use.
+  # The default-rescue probe (scripts/lib/visual-rescue-default.sh) touches
+  # the last-used file on every invocation, so the watchdog only counts
+  # REAL usage (not /health pings).
+  # Disable via BROWSER_SKILL_VLM_IDLE_TIMEOUT=0 (never stop).
+  if [ "${VLM_IDLE_TIMEOUT_S}" -gt 0 ]; then
+    : > "${VLM_LAST_USED_FILE}"
+    chmod 600 "${VLM_LAST_USED_FILE}" 2>/dev/null || true
+    nohup bash -c "
+      set -u
+      while true; do
+        sleep ${VLM_WATCHDOG_POLL_S}
+        # Server gone → watchdog exits.
+        if [ ! -f '${VLM_PID_FILE}' ]; then break; fi
+        srv_pid=\$(cat '${VLM_PID_FILE}' 2>/dev/null || true)
+        [ -n \"\${srv_pid}\" ] || break
+        kill -0 \"\${srv_pid}\" 2>/dev/null || break
+        # Idle check via last-used mtime.
+        if [ -f '${VLM_LAST_USED_FILE}' ]; then
+          now_s=\$(date +%s)
+          last_s=\$(stat -f %m '${VLM_LAST_USED_FILE}' 2>/dev/null \
+                   || stat -c %Y '${VLM_LAST_USED_FILE}' 2>/dev/null \
+                   || echo \"\${now_s}\")
+          age=\$((now_s - last_s))
+          if [ \"\${age}\" -ge ${VLM_IDLE_TIMEOUT_S} ]; then
+            kill \"\${srv_pid}\" 2>/dev/null || true
+            rm -f '${VLM_PID_FILE}' '${VLM_LAST_USED_FILE}' 2>/dev/null || true
+            break
+          fi
+        fi
+      done
+      rm -f '${VLM_WATCHDOG_PID_FILE}' 2>/dev/null || true
+    " >> "${VLM_LOG_FILE}" 2>&1 &
+    watchdog_pid=$!
+    printf '%s\n' "${watchdog_pid}" > "${VLM_WATCHDOG_PID_FILE}"
+    chmod 600 "${VLM_WATCHDOG_PID_FILE}" 2>/dev/null || true
+    ok "watchdog (pid ${watchdog_pid}) — idle-stop after ${VLM_IDLE_TIMEOUT_S}s no use"
+  fi
 }
 
 cmd_stop() {
+  # Kill watchdog first so it doesn't see the server vanish and panic.
+  if [ -f "${VLM_WATCHDOG_PID_FILE}" ]; then
+    wd_pid=$(cat "${VLM_WATCHDOG_PID_FILE}" 2>/dev/null || true)
+    if [ -n "${wd_pid}" ] && kill -0 "${wd_pid}" 2>/dev/null; then
+      kill "${wd_pid}" 2>/dev/null || true
+    fi
+    rm -f "${VLM_WATCHDOG_PID_FILE}" 2>/dev/null || true
+  fi
   if existing="$(_read_pid)" && _pid_alive "${existing}"; then
     kill "${existing}" 2>/dev/null || true
     # Give it 2s to exit cleanly; SIGKILL if still alive.
@@ -180,7 +234,7 @@ cmd_stop() {
   else
     ok "vlm not running (no-op)"
   fi
-  rm -f "${VLM_PID_FILE}" 2>/dev/null || true
+  rm -f "${VLM_PID_FILE}" "${VLM_LAST_USED_FILE}" 2>/dev/null || true
   # Port-release wait — bench-fix companion. PID dying doesn't always release
   # the port instantly on macOS (TIME_WAIT). 5s is enough for SO_REUSEADDR
   # paths; if still bound, warn but don't fail (caller may have spawned a
@@ -529,12 +583,91 @@ BENCHUSAGE
   [ "${bench_fail}" -eq 0 ] || return 1
 }
 
+# --- install-env / uninstall-env (Phase 14+ auto-management) -----------
+# Append two env exports (BROWSER_SKILL_VISION_FALLBACK=1 +
+# BROWSER_SKILL_VISUAL_RESCUE_CMD=<bundled probe path>) to the user's shell
+# init so Claude Code subprocesses inherit them. Idempotent — re-running is
+# a no-op if the marked block already exists.
+VLM_ENV_MARKER_BEGIN="# >>> browser-skill VLM auto-management (Path 3) >>>"
+VLM_ENV_MARKER_END="# <<< browser-skill VLM auto-management <<<"
+
+cmd_install_env() {
+  local target="${BROWSER_SKILL_INSTALL_SHELL_RC:-${HOME}/.zshrc}"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --shell-rc) target="$2"; shift 2 ;;
+      --help|-h)
+        cat <<'IEUSAGE'
+browser-vlm install-env [--shell-rc PATH]
+
+Append the two env exports to your shell init so Claude Code subprocesses
+inherit them. After running, open a new shell (or `source` the rc) to
+activate. Idempotent — running twice is a no-op.
+
+Defaults to ~/.zshrc. Override with --shell-rc /path/to/.bashrc (etc).
+IEUSAGE
+        return 0 ;;
+      *) die "${EXIT_USAGE_ERROR}" "install-env: unknown flag '${1}'" ;;
+    esac
+  done
+  local probe_path
+  probe_path="$(cd "${SCRIPT_DIR}/lib" 2>/dev/null && pwd)/visual-rescue-default.sh"
+  [ -f "${probe_path}" ] \
+    || die "${EXIT_PREFLIGHT_FAILED}" "bundled probe missing at ${probe_path}"
+  if [ -f "${target}" ] && grep -qF "${VLM_ENV_MARKER_BEGIN}" "${target}" 2>/dev/null; then
+    ok "browser-skill env already installed in ${target} (no-op)"
+    return 0
+  fi
+  {
+    printf '\n%s\n' "${VLM_ENV_MARKER_BEGIN}"
+    printf '# Auto-added by `browser-vlm install-env`. Edit via `browser-vlm uninstall-env`.\n'
+    printf 'export BROWSER_SKILL_VISION_FALLBACK=1\n'
+    printf 'export BROWSER_SKILL_VISUAL_RESCUE_CMD=%q\n' "${probe_path}"
+    printf '%s\n' "${VLM_ENV_MARKER_END}"
+  } >> "${target}"
+  ok "added browser-skill env exports to ${target}"
+  ok "activate: 'source ${target}' or open a new shell"
+}
+
+cmd_uninstall_env() {
+  local target="${BROWSER_SKILL_INSTALL_SHELL_RC:-${HOME}/.zshrc}"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --shell-rc) target="$2"; shift 2 ;;
+      --help|-h)
+        cat <<'UEUSAGE'
+browser-vlm uninstall-env [--shell-rc PATH]
+
+Remove the env-export block previously added by `install-env`. Idempotent
+— running on a clean rc is a no-op.
+UEUSAGE
+        return 0 ;;
+      *) die "${EXIT_USAGE_ERROR}" "uninstall-env: unknown flag '${1}'" ;;
+    esac
+  done
+  if [ ! -f "${target}" ] || ! grep -qF "${VLM_ENV_MARKER_BEGIN}" "${target}" 2>/dev/null; then
+    ok "no browser-skill env block found in ${target} (no-op)"
+    return 0
+  fi
+  local tmp
+  tmp="$(mktemp "${target}.uninstall.XXXXXX")"
+  awk -v b="${VLM_ENV_MARKER_BEGIN}" -v e="${VLM_ENV_MARKER_END}" '
+    index($0, b) { skip = 1; next }
+    skip && index($0, e) { skip = 0; next }
+    !skip
+  ' "${target}" > "${tmp}"
+  mv "${tmp}" "${target}"
+  ok "removed browser-skill env block from ${target}"
+}
+
 case "${1:-}" in
-  start)   shift; cmd_start "$@" ;;
-  stop)    shift; cmd_stop ;;
-  status)  shift; cmd_status ;;
-  smoke)   shift; cmd_smoke ;;
-  bench)   shift; cmd_bench "$@" ;;
+  start)         shift; cmd_start "$@" ;;
+  stop)          shift; cmd_stop ;;
+  status)        shift; cmd_status ;;
+  smoke)         shift; cmd_smoke ;;
+  bench)         shift; cmd_bench "$@" ;;
+  install-env)   shift; cmd_install_env "$@" ;;
+  uninstall-env) shift; cmd_uninstall_env "$@" ;;
   --help|-h|help|"")
     cat <<'USAGE'
 browser-vlm — local llama-server lifecycle wrapper (lean config)
@@ -545,6 +678,8 @@ Usage:
   bash scripts/browser-vlm.sh status               # ping /health
   bash scripts/browser-vlm.sh smoke                # 4-smoke battery (text+vision)
   bash scripts/browser-vlm.sh bench [MODEL...]     # bench multiple models
+  bash scripts/browser-vlm.sh install-env          # persist env exports to ~/.zshrc
+  bash scripts/browser-vlm.sh uninstall-env        # remove the env block
   bash scripts/browser-vlm.sh --help               # this message
 
 Lean defaults (override via BROWSER_SKILL_VLM_*; see top of script):

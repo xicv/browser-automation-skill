@@ -540,10 +540,30 @@ elif [ "${dispatch_rc}" -eq "${EXIT_EMPTY_RESULT}" ] || [ "${dispatch_rc}" -eq "
      && [ "${BROWSER_SKILL_VISION_FALLBACK:-0}" = "1" ] \
      && [ -n "${BROWSER_SKILL_VISUAL_RESCUE_CMD:-}" ] \
      && [ -x "${BROWSER_SKILL_VISUAL_RESCUE_CMD}" ]; then
+    # Smart-skip: don't fire Path 3 when the archetype has too many recent
+    # failures. After N consecutive misses the cache is likely fundamentally
+    # broken (selector → wrong-class element, page redesigned, etc.) and
+    # asking a local VLM "is it still right?" is wasted ~200ms — cloud LLM
+    # is the only thing that can re-derive a working selector. Default
+    # threshold 3; override via BROWSER_SKILL_VISUAL_RESCUE_MAX_FAIL_COUNT.
+    _vr_max_fc="${BROWSER_SKILL_VISUAL_RESCUE_MAX_FAIL_COUNT:-3}"
+    _vr_fc=0
+    _vr_arch_file="${BROWSER_SKILL_HOME}/memory/${site}/archetypes/${archetype_id}.json"
+    if [ -f "${_vr_arch_file}" ]; then
+      _vr_fc="$(jq -r --arg i "${arg_intent}" \
+        '(.interactions[]? | select(.intent == $i) | .fail_count) // 0' \
+        "${_vr_arch_file}" 2>/dev/null | head -1)"
+      _vr_fc="${_vr_fc:-0}"
+    fi
     visual_rc=0
-    visual_out="$("${BROWSER_SKILL_VISUAL_RESCUE_CMD}" \
-                  "${site}" "${arg_intent}" "${selector}" 2>/dev/null)" \
-                || visual_rc=$?
+    visual_out=""
+    if [ "${_vr_fc}" -ge "${_vr_max_fc}" ]; then
+      visual_out="skip-too-many-fails"
+    else
+      visual_out="$("${BROWSER_SKILL_VISUAL_RESCUE_CMD}" \
+                    "${site}" "${arg_intent}" "${selector}" 2>/dev/null)" \
+                  || visual_rc=$?
+    fi
     if [ "${visual_rc}" -eq 0 ] && [ "${visual_out}" = "yes" ]; then
       rescued=true
       dispatch_rc=0  # treat as success — element is still semantically present
