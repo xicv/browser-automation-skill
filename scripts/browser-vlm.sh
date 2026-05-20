@@ -241,10 +241,59 @@ EOF
   else SMOKE_FAIL=$((SMOKE_FAIL + 1)); fi
 }
 
-# Run the 4-smoke battery against the current ${VLM_HOST}:${VLM_PORT}. Resets
+_run_vision_fixture_smoke() {
+  # Path-3-relevant: read a pre-rendered PNG fixture (e.g. a button shape) and
+  # ask the model to identify it. Hits when the completion contains EXPECTED
+  # (case-insensitive). The synthetic-color smokes are kept as
+  # vision-pipeline-works sanity checks; this smoke is the real grounding test.
+  local label="$1" png_path="$2" expected="$3" prompt="$4"
+  local t0 t1 lat resp completion png_b64
+  local endpoint
+  endpoint="$(_smoke_endpoint)"
+  if [ ! -f "${png_path}" ]; then
+    printf '{"smoke":"%s","type":"vision-fixture","status":"fixture-missing","path":"%s"}\n' \
+      "${label}" "${png_path}"
+    SMOKE_FAIL=$((SMOKE_FAIL + 1))
+    return 0
+  fi
+  png_b64="$(base64 -i "${png_path}" | tr -d '\n')"
+  t0=$(python3 -c "import time;print(time.time())")
+  resp="$(curl -sS -m 60 "${endpoint}" -H 'Content-Type: application/json' \
+    -d "$(jq -n \
+      --arg img "data:image/png;base64,${png_b64}" \
+      --arg prompt "${prompt}" '
+      {model:"q",max_tokens:30,messages:[{role:"user",content:[
+        {type:"text",text:$prompt},
+        {type:"image_url",image_url:{url:$img}}
+      ]}]}')" 2>/dev/null)"
+  t1=$(python3 -c "import time;print(time.time())")
+  lat=$(python3 -c "print(round($t1 - $t0, 2))")
+  completion="$(printf '%s' "${resp}" | jq -r '.choices[0].message.content // .error.message' 2>/dev/null)"
+  local hit="false"
+  case "${completion,,}" in *"${expected,,}"*) hit="true" ;; esac
+  printf '{"smoke":"%s","type":"vision-fixture","latency_s":%s,"completion":"%s","expected":"%s","hit":%s}\n' \
+    "${label}" "${lat}" "${completion//\"/\\\"}" "${expected}" "${hit}"
+  if [ "${hit}" = "true" ]; then SMOKE_PASS=$((SMOKE_PASS + 1));
+  else SMOKE_FAIL=$((SMOKE_FAIL + 1)); fi
+}
+
+# Run the smoke battery against the current ${VLM_HOST}:${VLM_PORT}. Resets
 # SMOKE_PASS / SMOKE_FAIL before running. Returns 0 if all smokes passed, 1
 # otherwise.
-_run_4_smoke_battery() {
+#
+# Battery composition (5 smokes; the last is the Path-3 grounding test):
+#   text_cold + text_warm       — text completion + warmup speedup
+#   vision_red + vision_green   — synthetic-color pipeline sanity (NOT a Path-3
+#                                  test — pure RGB is out-of-distribution; both
+#                                  pass means vision wiring works, both
+#                                  failing means model is colorblind on
+#                                  synthetic stimuli, not necessarily blind on
+#                                  rendered UI)
+#   vision_button               — rendered-button-shape PNG fixture; THIS is
+#                                  the Path-3 unblock signal. Hits when the
+#                                  model identifies a button or recognises the
+#                                  blue rectangle as a UI element.
+_run_smoke_battery() {
   SMOKE_PASS=0; SMOKE_FAIL=0
   _run_text_smoke "text_cold" "Say hi in exactly one word."
   _run_text_smoke "text_warm" "Reply in exactly two words."
@@ -252,20 +301,24 @@ _run_4_smoke_battery() {
     _run_vision_smoke "vision_red"   "224,16,16" "red"
     _run_vision_smoke "vision_green" "0,192,32"  "green"
   else
-    warn "python3 missing — skipping vision smokes"
+    warn "python3 missing — skipping synthetic-color vision smokes"
   fi
+  local button_fixture
+  button_fixture="${BENCH_FIXTURE_BUTTON:-${SCRIPT_DIR}/../tests/fixtures/vlm-bench/button-shape.png}"
+  _run_vision_fixture_smoke "vision_button" "${button_fixture}" "button" \
+    "Describe what you see in this image in one or two words."
   [ "${SMOKE_FAIL}" -eq 0 ]
 }
 
 cmd_smoke() {
-  # Requires the server to be up. Runs the 4 smokes from
-  # references/midscene-integration.md and emits one JSON summary per smoke,
+  # Requires the server to be up. Runs the 5-smoke battery from
+  # references/midscene-integration.md and emits one JSON line per smoke,
   # then a final aggregate line — same shape contract as our verb scripts.
   if ! curl -sfm 3 "http://${VLM_HOST}:${VLM_PORT}/health" >/dev/null 2>&1; then
     die "${EXIT_PREFLIGHT_FAILED}" \
       "vlm not reachable at http://${VLM_HOST}:${VLM_PORT} — run 'browser-vlm start' first"
   fi
-  _run_4_smoke_battery
+  _run_smoke_battery
   local rc=$?
   printf '{"summary":"vlm-smoke","pass":%d,"fail":%d,"endpoint":"http://%s:%s"}\n' \
     "${SMOKE_PASS}" "${SMOKE_FAIL}" "${VLM_HOST}" "${VLM_PORT}"
@@ -361,13 +414,18 @@ BENCHUSAGE
       continue
     fi
 
-    # Capture smokes for this model.
-    local model_log
-    model_log="$(_run_4_smoke_battery 2>/dev/null && printf '%s\n' "ok" || printf '%s\n' "fail")"
-    # The 4-smoke output is already in stdout from _run_text_smoke / _run_vision_smoke;
-    # we just need the final per-model summary.
+    # Run smokes for this model. CRITICAL: do NOT command-substitute the
+    # battery call — its stdout IS the smoke NDJSON, and we want those lines
+    # streamed live + SMOKE_PASS/SMOKE_FAIL incrementing in the parent shell
+    # (subshell would lose both). Capture the rc via the if/else branch.
+    local model_status
+    if _run_smoke_battery; then
+      model_status="ok"
+    else
+      model_status="partial"   # smokes ran but some missed
+    fi
     printf '{"event":"bench-model","model":"%s","status":"%s","pass":%d,"fail":%d}\n' \
-      "${model}" "${model_log}" "${SMOKE_PASS}" "${SMOKE_FAIL}"
+      "${model}" "${model_status}" "${SMOKE_PASS}" "${SMOKE_FAIL}"
     if [ "${SMOKE_FAIL}" -eq 0 ]; then
       bench_pass=$((bench_pass + 1))
     else

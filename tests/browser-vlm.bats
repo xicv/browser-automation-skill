@@ -162,3 +162,69 @@ teardown() {
   assert_status "${EXIT_USAGE_ERROR}"
   assert_output_contains "unknown flag"
 }
+
+@test "browser-vlm bench: regression — bench-model status is 'ok'|'partial'|'fail' (NOT embedded JSON)" {
+  # The earlier cmd_bench bug captured _run_smoke_battery's stdout (which IS
+  # the smoke NDJSON) into the status field, producing multi-line garbage.
+  # Run against a tiny mock llama-server so we exercise the real code path.
+  port=$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')
+  python3 -u - <<EOF &
+import http.server, socketserver, json, threading, time
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers()
+            self.wfile.write(json.dumps({"status":"ok"}).encode())
+        else:
+            self.send_response(404); self.end_headers()
+    def do_POST(self):
+        body_len = int(self.headers.get("Content-Length",0))
+        self.rfile.read(body_len)
+        self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers()
+        self.wfile.write(json.dumps({
+            "choices":[{"message":{"content":"hi"}}],
+            "timings":{"prompt_per_second":50,"predicted_per_second":40}
+        }).encode())
+    def log_message(self,*a): pass
+srv = socketserver.TCPServer(("127.0.0.1", ${port}), H)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+time.sleep(30)
+srv.shutdown()
+EOF
+  fake_pid=$!
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -sfm 1 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then break; fi
+    sleep 0.2
+  done
+  # Need a real (no-op) llama-server binary on PATH for cmd_start to bypass
+  # the EXIT_TOOL_MISSING guard. We use /bin/true wrapped — it'll spawn,
+  # write to log, and "succeed". The bench's /health poll then talks to
+  # the mock server above instead.
+  no_op_stub="$(mktemp)"
+  printf '#!/usr/bin/env bash\nsleep 30\n' > "${no_op_stub}"
+  chmod +x "${no_op_stub}"
+  # Override the launch so bench doesn't actually load a real model.
+  BROWSER_SKILL_VLM_PORT="${port}" \
+  BROWSER_SKILL_VLM_HOST="127.0.0.1" \
+  LLAMA_SERVER_BIN="${no_op_stub}" \
+    run bash "${SCRIPTS_DIR}/browser-vlm.sh" bench --max-wait-s 6 "MockVendor/MockModel:Q1"
+  kill "${fake_pid}" 2>/dev/null || true
+  wait "${fake_pid}" 2>/dev/null || true
+  rm -f "${no_op_stub}"
+  # The bench may exit 1 because some smokes don't "hit" the mocked completion,
+  # but the per-model line MUST be parseable JSON and status MUST be one of
+  # ok / partial / fail / timeout.
+  local model_line
+  model_line="$(printf '%s\n' "${lines[@]}" | grep -E '"event":"bench-model"' | head -1)"
+  [ -n "${model_line}" ] || fail "no bench-model event emitted; output: ${output}"
+  # Must be one line of valid JSON.
+  printf '%s' "${model_line}" | jq -e '.event == "bench-model"' >/dev/null \
+    || fail "bench-model line is not single-line valid JSON: ${model_line}"
+  # Status MUST be one of the known enum values, NOT embedded JSON garbage.
+  local status_field
+  status_field="$(printf '%s' "${model_line}" | jq -r '.status')"
+  case "${status_field}" in
+    ok|partial|fail|timeout) : ;;
+    *) fail "status must be ok|partial|fail|timeout; got '${status_field}'" ;;
+  esac
+}
