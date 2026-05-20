@@ -86,3 +86,58 @@ teardown() {
   [ ! -f "${log_path}" ] \
     || fail "recent_urls.jsonl created on --dry-run (should be skipped); contents: $(cat "${log_path}")"
 }
+
+# ---------- Phase 14 (Bundle #2): auto-derive post-condition for open ----------
+
+@test "browser-open: auto-derives post_condition_hit=true when adapter URL contains input URL" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+    run bash "${SCRIPTS_DIR}/browser-open.sh" --url https://example.com
+  assert_status 0
+  local event
+  event="$(tail -1 "${BROWSER_SKILL_HOME}/memory/stats.jsonl")"
+  printf '%s' "${event}" | jq -e '.post_condition_hit == true' >/dev/null \
+    || fail "expected post_condition_hit=true (auto-derived); event: ${event}"
+  printf '%s' "${event}" | jq -e '.post_condition_target_type == "url"' >/dev/null \
+    || fail "expected target_type=url; event: ${event}"
+  printf '%s' "${event}" | jq -e '.failure_mode == null' >/dev/null \
+    || fail "happy path should have no failure_mode; event: ${event}"
+}
+
+@test "browser-open: oblivious_success fires when adapter URL does NOT contain input URL" {
+  # Inline stub: claim success but return a different URL (simulated redirect-to-login).
+  local stub
+  stub="$(mktemp "${TMPDIR:-/tmp}/playwright-mismatch.XXXXXX")"
+  cat > "${stub}" <<'EOF'
+#!/usr/bin/env bash
+printf '{"event":"navigate","url":"https://example.com/login","status":200}\n'
+EOF
+  chmod +x "${stub}"
+  PLAYWRIGHT_CLI_BIN="${stub}" \
+    run bash "${SCRIPTS_DIR}/browser-open.sh" --url https://wanted.example.org/dashboard
+  rm -f "${stub}"
+  assert_status 0
+  local event
+  event="$(tail -1 "${BROWSER_SKILL_HOME}/memory/stats.jsonl")"
+  printf '%s' "${event}" | jq -e '.post_condition_hit == false' >/dev/null \
+    || fail "expected post_condition_hit=false; event: ${event}"
+  printf '%s' "${event}" | jq -e '.failure_mode == "oblivious_success"' >/dev/null \
+    || fail "expected failure_mode=oblivious_success; event: ${event}"
+  printf '%s' "${event}" | jq -e '.outcome == "partial"' >/dev/null \
+    || fail "expected outcome=partial; event: ${event}"
+}
+
+@test "browser-open: caller-set BROWSER_STATS_EXPECT_VALUE takes precedence over auto-derive" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  BROWSER_STATS_EXPECT_VALUE="/admin" \
+    run bash "${SCRIPTS_DIR}/browser-open.sh" --url https://example.com
+  # adapter_out contains "example.com" not "/admin" → expect mismatch
+  assert_status 0
+  local event
+  event="$(tail -1 "${BROWSER_SKILL_HOME}/memory/stats.jsonl")"
+  printf '%s' "${event}" | jq -e '.post_condition_expected == "/admin"' >/dev/null \
+    || fail "expected caller-set value preserved; event: ${event}"
+  printf '%s' "${event}" | jq -e '.failure_mode == "oblivious_success"' >/dev/null \
+    || fail "expected oblivious_success due to /admin not in url; event: ${event}"
+}

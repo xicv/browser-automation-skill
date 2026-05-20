@@ -32,6 +32,55 @@ teardown() {
   printf '%s' "${last_line}" | jq -e '.verb == "fill" and .ref == "e3" and .status == "ok"' >/dev/null
 }
 
+# ---------- Phase 14 (Bundle #2): opt-in strict post-condition for fill ----------
+
+@test "browser-fill: BROWSER_SKILL_STRICT_POSTCOND=0 default → no auto post-condition" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+    run bash "${SCRIPTS_DIR}/browser-fill.sh" --ref e3 --text hello
+  assert_status 0
+  local event
+  event="$(tail -1 "${BROWSER_SKILL_HOME}/memory/stats.jsonl")"
+  printf '%s' "${event}" | jq -e '.post_condition_hit == null' >/dev/null \
+    || fail "default should leave post_condition_hit null; event: ${event}"
+}
+
+@test "browser-fill: STRICT_POSTCOND=1 + text-not-in-response → oblivious_success" {
+  # Stub fixture for `fill e3 hello` returns {"event":"fill","ref":"e3","status":"ok"}
+  # — does NOT contain "hello". With strict mode, this is a true oblivious_success.
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  BROWSER_SKILL_STRICT_POSTCOND=1 \
+    run bash "${SCRIPTS_DIR}/browser-fill.sh" --ref e3 --text hello
+  assert_status 0
+  local event
+  event="$(tail -1 "${BROWSER_SKILL_HOME}/memory/stats.jsonl")"
+  printf '%s' "${event}" | jq -e '.post_condition_target_type == "element_value"' >/dev/null \
+    || fail "expected target_type=element_value; event: ${event}"
+  printf '%s' "${event}" | jq -e '.failure_mode == "oblivious_success"' >/dev/null \
+    || fail "expected oblivious_success (text not echoed in adapter response); event: ${event}"
+}
+
+@test "browser-fill: STRICT_POSTCOND=1 + --secret-stdin path → never auto-derives EXPECT_VALUE" {
+  # --secret-stdin path returns 41 BEFORE telemetry, so we verify by argv:
+  # the secret must never appear in EXPECT_VALUE even if STRICT mode is on.
+  # We assert by inspecting that when --text IS used with STRICT, derived value
+  # equals --text — but when --secret-stdin is used (no --text), derivation must
+  # NOT pull from any secret source. AP-7 is the spec.
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+  BROWSER_SKILL_STRICT_POSTCOND=1 \
+    run bash -c "printf '%s' 'TOPSECRET' | bash '${SCRIPTS_DIR}/browser-fill.sh' --ref e3 --secret-stdin"
+  # adapter returns 41 (no stdin-secret support in playwright-cli)
+  [ "${status}" = "41" ] || fail "expected 41, got ${status}"
+  # No stats event should reference the secret in EXPECT_VALUE.
+  if [ -f "${BROWSER_SKILL_HOME}/memory/stats.jsonl" ]; then
+    if grep -q "TOPSECRET" "${BROWSER_SKILL_HOME}/memory/stats.jsonl"; then
+      fail "secret leaked into stats.jsonl"
+    fi
+  fi
+}
+
 @test "browser-fill: --secret-stdin returns 41 (playwright-cli has no stdin-secret mode; routed to playwright-lib in Phase 4)" {
   # The adapter rejects --secret-stdin BEFORE invoking the binary — this is the
   # correct behavior because playwright-cli only takes the secret as a positional

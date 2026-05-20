@@ -91,9 +91,46 @@ adapter_out="$(invoke_with_retry snapshot "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 
+# Phase 14 (Bundle #1): heavy snapshots → file ref per spec §3.2 ("refs_inline
+# only when total length ≤ 2 KB. Above that threshold, fall back to
+# snapshot_path"). Real telemetry (35 events) showed avg 1570B / max 4567B
+# snapshot output — borderline-to-bloat. File-ref cuts repeat-snapshot cost on
+# the same page from re-paying-the-tokens to one-Read-then-cache.
+# Overrides:
+#   BROWSER_SKILL_SNAPSHOT_INLINE_BYTES  threshold (default 2048)
+#   BROWSER_SKILL_SNAPSHOT_TEASER_BYTES  truncated-body cap when over (default 512)
+snapshot_threshold="${BROWSER_SKILL_SNAPSHOT_INLINE_BYTES:-2048}"
+teaser_cap="${BROWSER_SKILL_SNAPSHOT_TEASER_BYTES:-512}"
+snapshot_path=""
+n_refs=0
+adapter_out_bytes=${#adapter_out}
+if [ "${adapter_rc}" -eq 0 ] \
+   && [ "${adapter_out_bytes}" -gt "${snapshot_threshold}" ]; then
+  snapshot_site="${ARG_SITE:-anon}"
+  if snapshot_path="$(capture_path snapshots "${snapshot_site}" yaml 2>/dev/null)"; then
+    if printf '%s' "${adapter_out}" > "${snapshot_path}" 2>/dev/null; then
+      chmod 600 "${snapshot_path}" 2>/dev/null || true
+      n_refs="$(printf '%s' "${adapter_out}" \
+                | grep -oE '\[ref=e[0-9]+\]' | wc -l | tr -d ' ')"
+      teaser_head="$(printf '%s' "${adapter_out}" | head -c "${teaser_cap}")"
+      adapter_out="${teaser_head}
+... (truncated; full snapshot at ${snapshot_path}; ${n_refs} refs)"
+    else
+      # File write failed — revert to inline so we never lose the snapshot.
+      warn "snapshot: failed to write ${snapshot_path}; falling back to inline"
+      snapshot_path=""
+    fi
+  else
+    warn "snapshot: capture_path rejected site='${snapshot_site}'; inline fallback"
+    snapshot_path=""
+  fi
+fi
+
 # Phase 12 part 1: per-action telemetry. Snapshots have no natural post-cond
 # observed value beyond the snapshot body; observed=adapter_out supports
-# element_value matchers (rare but supported).
+# element_value matchers (rare but supported). After Phase 14, adapter_out is
+# already the teaser when redirected — telemetry naturally records the
+# compressed payload (no second jsonl bloat).
 BROWSER_STATS_OBSERVED="${adapter_out}" \
   stats_run_adapter_emit \
     "snapshot" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
@@ -102,9 +139,14 @@ BROWSER_STATS_OBSERVED="${adapter_out}" \
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 
 # Persist adapter stdout to snapshot.json before finalizing meta.json (so the
-# inventory + total_bytes reflect the artifact).
+# inventory + total_bytes reflect the artifact). When snapshot_path was set
+# above, write the FULL body (from the file we already created) so --capture
+# still gets the unredacted YAML.
 if [ "${do_capture}" = "1" ]; then
-  if [ -n "${adapter_out}" ]; then
+  if [ -n "${snapshot_path}" ] && [ -f "${snapshot_path}" ]; then
+    cp "${snapshot_path}" "${CAPTURE_DIR}/snapshot.json"
+    chmod 600 "${CAPTURE_DIR}/snapshot.json"
+  elif [ -n "${adapter_out}" ]; then
     printf '%s\n' "${adapter_out}" > "${CAPTURE_DIR}/snapshot.json"
     chmod 600 "${CAPTURE_DIR}/snapshot.json"
   fi
@@ -115,17 +157,20 @@ if [ "${do_capture}" = "1" ]; then
   fi
 fi
 
-if [ "${adapter_rc}" -eq 0 ]; then
-  if [ "${do_capture}" = "1" ]; then
-    emit_summary verb=snapshot tool="${tool_name}" why="${why}" status=ok capture_id="${CAPTURE_ID}"
-  else
-    emit_summary verb=snapshot tool="${tool_name}" why="${why}" status=ok
-  fi
-  exit 0
+# Build summary kv list (snapshot_path + n_refs only when redirected).
+summary_extra=()
+if [ -n "${snapshot_path}" ]; then
+  summary_extra+=("snapshot_path=${snapshot_path}" "n_refs=${n_refs}")
 fi
 if [ "${do_capture}" = "1" ]; then
-  emit_summary verb=snapshot tool="${tool_name}" why="${why}" status=error capture_id="${CAPTURE_ID}"
-else
-  emit_summary verb=snapshot tool="${tool_name}" why="${why}" status=error
+  summary_extra+=("capture_id=${CAPTURE_ID}")
 fi
+
+if [ "${adapter_rc}" -eq 0 ]; then
+  emit_summary verb=snapshot tool="${tool_name}" why="${why}" status=ok \
+    "${summary_extra[@]}"
+  exit 0
+fi
+emit_summary verb=snapshot tool="${tool_name}" why="${why}" status=error \
+  "${summary_extra[@]}"
 exit "${adapter_rc}"

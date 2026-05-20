@@ -50,8 +50,11 @@ readonly STATS_SCHEMA_VERSION=1
 
 # Failure-mode enum (synced with WAREX + Agent-E + WebVoyager taxonomies).
 # Update references/stats-schema.json::failure_mode.enum in lockstep.
+# Phase 14 (Bundle #3) added `unknown_failure` as the catch-all so rc!=0 events
+# never silently drop out of the histogram. Real telemetry (35-event sample)
+# had 100% of rc!=0 events with failure_mode=null — invisible to `stats tune`.
 # shellcheck disable=SC2034  # documentation constant; consumers grep this for the canonical list
-readonly STATS_FAILURE_MODES="element_not_found element_ambiguous wrong_element_acted stale_ref action_timeout navigation_mismatch js_not_ready network_error captcha_blocked auth_required popup_intercept extraction_mismatch oblivious_success"
+readonly STATS_FAILURE_MODES="element_not_found element_ambiguous wrong_element_acted stale_ref action_timeout navigation_mismatch js_not_ready network_error captcha_blocked auth_required popup_intercept extraction_mismatch oblivious_success unknown_failure"
 
 # stats_init_dir — idempotent mkdir + chmod for ${BROWSER_SKILL_HOME}/memory/.
 # Same lazy-create pattern as memory_init_dir in lib/memory.sh; duplicated here
@@ -102,9 +105,11 @@ stats_now_iso_ms() {
 # Echo one failure_mode enum value (or empty when outcome is success).
 # Heuristic — looks for adapter-specific markers in stdout/stderr.
 # RC == 0 → empty (no failure).
-# Otherwise pattern-match exit codes + error text. Conservative: when nothing
-# matches, echo "" so the event records failure_mode=null and the human can
-# look at error_message instead.
+# Otherwise pattern-match exit codes + error text. Phase 14 (Bundle #3): when
+# no pattern matches but rc!=0, fall back to `unknown_failure` (was empty).
+# Empty silently dropped events from the histogram so `stats tune` couldn't
+# surface them. The `unknown_failure` bucket is the explicit "we know it failed
+# but couldn't classify" signal — actionable for adding new patterns later.
 stats_classify_failure() {
   local rc="$1" out="$2" err="$3"
   [ "${rc}" = "0" ] && return 0
@@ -144,7 +149,9 @@ stats_classify_failure() {
     *"script error"*|*"ReferenceError"*|*"TypeError"*)
       printf 'js_not_ready\n'; return 0 ;;
   esac
-  # No match — empty (caller stores failure_mode=null).
+  # No pattern matched but rc!=0 — explicit catch-all so the event surfaces in
+  # `stats tune` histograms instead of being silently dropped as null.
+  printf 'unknown_failure\n'
   return 0
 }
 
@@ -270,6 +277,13 @@ stats_run_adapter_emit() {
 
   stats_extract_selector_meta "$@"
 
+  # Phase 14 (Bundle #3): span_id generated up-front so the unknown_failure
+  # self-healing hint can quote the exact event the operator will grep for.
+  local span_id trace_id ts
+  span_id="$(stats_random_id)"
+  trace_id="${BROWSER_SKILL_TRACE_ID:-${span_id}}"
+  ts="$(stats_now_iso_ms)"
+
   local failure_mode outcome
   if [ "${rc}" = "0" ]; then
     outcome="success"
@@ -277,6 +291,13 @@ stats_run_adapter_emit() {
   else
     outcome="fail"
     failure_mode="$(stats_classify_failure "${rc}" "${stdout}" "${stderr}")"
+    # Phase 14 (Bundle #3): self-healing hint per spec §2.5 when classifier
+    # bucketed the failure as unknown. Tells operator exactly where to look
+    # to extend the pattern table — span_id lets them grep stats.jsonl for
+    # the full event including argv/stderr.
+    if [ "${failure_mode}" = "unknown_failure" ]; then
+      warn "${verb} exited rc=${rc}; no diagnosable signal — span_id=${span_id} in memory/stats.jsonl"
+    fi
   fi
 
   STATS_POSTCOND_HIT=""
@@ -294,10 +315,9 @@ stats_run_adapter_emit() {
     fi
   fi
 
-  local span_id trace_id ts site
-  span_id="$(stats_random_id)"
-  trace_id="${BROWSER_SKILL_TRACE_ID:-${span_id}}"
-  ts="$(stats_now_iso_ms)"
+  local site
+  # span_id, trace_id, ts already populated above so the unknown_failure hint
+  # can reference span_id without forward-declaring vars.
   site="${ARG_SITE:-}"
   if [ -z "${site}" ] && command -v current_get >/dev/null 2>&1; then
     site="$(current_get 2>/dev/null || true)"

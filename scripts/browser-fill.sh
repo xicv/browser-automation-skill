@@ -111,13 +111,26 @@ adapter_out="$(invoke_with_retry fill "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 
-# Phase 12 part 1: per-action telemetry. CRITICAL — when --secret-stdin was
-# used, do NOT pass --text content in stats argv. The helper extracts only
-# selector metadata, not the typed text, so secrets stay out of the JSONL.
-BROWSER_STATS_OBSERVED="${adapter_out}" \
-  stats_run_adapter_emit \
-    "fill" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
-    -- "${verb_argv[@]}" || true
+# Phase 12 part 1 + Phase 14 (Bundle #2): per-action telemetry. CRITICAL — when
+# --secret-stdin was used, NEVER auto-derive EXPECT_VALUE from the secret
+# (would leak the secret into stats.jsonl per AP-7). Auto-derive only fires when
+# (a) --text was used (no secrets) AND (b) BROWSER_SKILL_STRICT_POSTCOND=1
+# opts in. Opt-in default: many fill adapters don't echo the typed value back,
+# so a blanket auto-check would generate false oblivious_success events.
+# Future: compose with a follow-up snapshot to read the actual element value.
+if [ "${BROWSER_SKILL_STRICT_POSTCOND:-0}" = "1" ] \
+   && [ "${use_stdin}" = "0" ] && [ -n "${text}" ] \
+   && [ "${adapter_rc}" -eq 0 ]; then
+  : "${BROWSER_STATS_EXPECT_TYPE:=element_value}"
+  : "${BROWSER_STATS_EXPECT_MATCH:=include}"
+  : "${BROWSER_STATS_EXPECT_VALUE:=${text}}"
+fi
+: "${BROWSER_STATS_OBSERVED:=${adapter_out}}"
+export BROWSER_STATS_EXPECT_TYPE BROWSER_STATS_EXPECT_MATCH BROWSER_STATS_EXPECT_VALUE BROWSER_STATS_OBSERVED
+
+stats_run_adapter_emit \
+  "fill" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
+  -- "${verb_argv[@]}" || true
 
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 

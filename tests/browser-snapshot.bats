@@ -100,3 +100,96 @@ teardown() {
   [ -f "${BROWSER_SKILL_HOME}/captures/001/meta.json" ] || fail "meta.json not finalized after error"
   jq -e '.status == "error"' "${BROWSER_SKILL_HOME}/captures/001/meta.json" >/dev/null
 }
+
+# ---------- Phase 14 (Bundle #1): heavy snapshots → file ref (spec §3.2) ----------
+
+# Stub binary that prints ~3 KB of YAML — simulates a real-world snapshot.
+fat_snapshot_stub() {
+  local stub
+  stub="$(mktemp "${TMPDIR:-/tmp}/playwright-fat.XXXXXX")"
+  cat > "${stub}" <<'EOF'
+#!/usr/bin/env bash
+{
+  printf '### Page\n- Page URL: http://localhost:8090/test\n- Page Title: Big Page\n'
+  printf '### Snapshot\n```yaml\n'
+  for i in $(seq 1 60); do
+    printf -- '- generic [ref=e%d]: lorem ipsum dolor sit amet consectetur adipiscing elit\n' "${i}"
+  done
+  printf '```\n'
+}
+EOF
+  chmod +x "${stub}"
+  printf '%s\n' "${stub}"
+}
+
+@test "browser-snapshot: large output (> threshold) writes snapshot_path + n_refs in summary" {
+  local stub
+  stub="$(fat_snapshot_stub)"
+  run env BROWSER_SKILL_SNAPSHOT_INLINE_BYTES=1024 \
+        PLAYWRIGHT_CLI_BIN="${stub}" \
+    bash "${SCRIPTS_DIR}/browser-snapshot.sh"
+  local rc="${status}"
+  rm -f "${stub}"
+  [ "${rc}" -eq 0 ] || fail "expected status 0, got ${rc} — output: ${output}"
+  local last_line
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e '.snapshot_path | type == "string"' >/dev/null \
+    || fail "missing snapshot_path: ${last_line}"
+  printf '%s' "${last_line}" | jq -e '.n_refs >= 60' >/dev/null \
+    || fail "n_refs not counted: ${last_line}"
+  local path
+  path="$(printf '%s' "${last_line}" | jq -r '.snapshot_path')"
+  [ -f "${path}" ] || fail "snapshot_path file not written: ${path}"
+  local file_size
+  file_size="$(wc -c < "${path}" | tr -d ' ')"
+  [ "${file_size}" -gt 1024 ] || fail "file too small (${file_size}B); expected > 1024"
+}
+
+@test "browser-snapshot: small output (<= threshold) stays inline (no snapshot_path key)" {
+  PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+  PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+    run bash "${SCRIPTS_DIR}/browser-snapshot.sh"
+  assert_status 0
+  local last_line
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last_line}" | jq -e 'has("snapshot_path") | not' >/dev/null \
+    || fail "small output should NOT have snapshot_path: ${last_line}"
+}
+
+@test "browser-snapshot: large output truncates stdout body to <= teaser cap" {
+  local stub teaser_cap=512
+  stub="$(fat_snapshot_stub)"
+  run env BROWSER_SKILL_SNAPSHOT_INLINE_BYTES=1024 \
+        BROWSER_SKILL_SNAPSHOT_TEASER_BYTES="${teaser_cap}" \
+        PLAYWRIGHT_CLI_BIN="${stub}" \
+    bash "${SCRIPTS_DIR}/browser-snapshot.sh"
+  local rc="${status}"
+  rm -f "${stub}"
+  [ "${rc}" -eq 0 ] || fail "status ${rc} — ${output}"
+  # Reconstruct non-summary stdout body byte count (everything before the last JSON line).
+  local body_bytes=0 i
+  local nlines="${#lines[@]}"
+  for (( i = 0; i < nlines - 1; i++ )); do
+    body_bytes=$(( body_bytes + ${#lines[i]} + 1 ))
+  done
+  # teaser_cap + footer (~120B for "... full snapshot at <path>; N refs)").
+  local upper_bound=$(( teaser_cap + 256 ))
+  [ "${body_bytes}" -le "${upper_bound}" ] \
+    || fail "expected stdout body <= ${upper_bound}B, got ${body_bytes}B"
+}
+
+@test "browser-snapshot: large-output file mode is 0600 (per spec §6)" {
+  local stub
+  stub="$(fat_snapshot_stub)"
+  run env BROWSER_SKILL_SNAPSHOT_INLINE_BYTES=1024 \
+        PLAYWRIGHT_CLI_BIN="${stub}" \
+    bash "${SCRIPTS_DIR}/browser-snapshot.sh"
+  local rc="${status}"
+  rm -f "${stub}"
+  [ "${rc}" -eq 0 ] || fail "status ${rc}"
+  local last_line path perms
+  last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  path="$(printf '%s' "${last_line}" | jq -r '.snapshot_path')"
+  perms="$(stat -c '%a' "${path}" 2>/dev/null || stat -f '%Lp' "${path}" 2>/dev/null)"
+  [ "${perms}" = "600" ] || fail "expected file mode 600, got ${perms}"
+}

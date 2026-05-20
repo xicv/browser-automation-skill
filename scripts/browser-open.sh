@@ -80,12 +80,25 @@ adapter_out="$(invoke_with_retry open "${verb_argv[@]}")"
 adapter_rc=$?
 set -e
 
-# Phase 12 part 1: per-action telemetry. observed=URL so post-condition checks
-# on URL substrings work when BROWSER_STATS_EXPECT_* env vars are set by caller.
-BROWSER_STATS_OBSERVED="${url}" \
-  stats_run_adapter_emit \
-    "open" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
-    -- "${verb_argv[@]}" || true
+# Phase 12 part 1 + Phase 14 (Bundle #2): per-action telemetry with auto-derived
+# post-condition. The adapter's stdout for `open` typically echoes the navigated
+# URL (e.g. `{"event":"navigate","url":"…","status":200}`); using that as
+# OBSERVED lets us detect redirect-to-login / app-router rewrites that current
+# self-reported success would silently miss (the cheatsheet's killer
+# "oblivious_success" signal). Caller-set env wins via `:=` parameter expansion.
+if [ "${adapter_rc}" -eq 0 ] && [ -n "${adapter_out}" ]; then
+  : "${BROWSER_STATS_EXPECT_TYPE:=url}"
+  : "${BROWSER_STATS_EXPECT_MATCH:=include}"
+  : "${BROWSER_STATS_EXPECT_VALUE:=${url}}"
+  : "${BROWSER_STATS_OBSERVED:=${adapter_out}}"
+else
+  : "${BROWSER_STATS_OBSERVED:=${url}}"
+fi
+export BROWSER_STATS_EXPECT_TYPE BROWSER_STATS_EXPECT_MATCH BROWSER_STATS_EXPECT_VALUE BROWSER_STATS_OBSERVED
+
+stats_run_adapter_emit \
+  "open" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
+  -- "${verb_argv[@]}" || true
 
 [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
 

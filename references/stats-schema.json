@@ -51,8 +51,9 @@
         "stale_ref", "action_timeout", "navigation_mismatch",
         "js_not_ready", "network_error", "captcha_blocked",
         "auth_required", "popup_intercept", "extraction_mismatch",
-        "oblivious_success"
-      ]
+        "oblivious_success", "unknown_failure"
+      ],
+      "description": "Phase 14 (Bundle #3) added unknown_failure as the catch-all so rc!=0 events with no classifier match surface in stats tune histograms instead of being dropped as null."
     },
 
     "model":               {"type": ["string", "null"], "description": "From $CLAUDE_MODEL env. Null when invoked outside Claude Code."},

@@ -78,6 +78,76 @@ teardown() {
   [ "${result}" = "network_error" ]
 }
 
+# --- Phase 14 (Bundle #3): unknown_failure fallback ----------------------
+
+@test "stats_classify_failure: rc!=0 with no markers falls back to unknown_failure" {
+  source "${LIB_DIR}/common.sh"
+  source "${LIB_DIR}/stats.sh"
+  result="$(stats_classify_failure 1 "" "")"
+  [ "${result}" = "unknown_failure" ] \
+    || fail "expected unknown_failure, got '${result}'"
+}
+
+@test "stats_classify_failure: rc!=0 with stdout-only generic error falls back to unknown_failure" {
+  source "${LIB_DIR}/common.sh"
+  source "${LIB_DIR}/stats.sh"
+  result="$(stats_classify_failure 1 "something weird happened" "")"
+  [ "${result}" = "unknown_failure" ] \
+    || fail "expected unknown_failure for unrecognised text, got '${result}'"
+}
+
+@test "stats_classify_failure: known exit code still wins over unknown_failure" {
+  source "${LIB_DIR}/common.sh"
+  source "${LIB_DIR}/stats.sh"
+  result="$(stats_classify_failure 43 "" "")"
+  [ "${result}" = "action_timeout" ] || fail "rc=43 should classify; got '${result}'"
+}
+
+@test "stats_classify_failure: known stderr pattern still wins over unknown_failure" {
+  source "${LIB_DIR}/common.sh"
+  source "${LIB_DIR}/stats.sh"
+  result="$(stats_classify_failure 1 "" "captcha required")"
+  [ "${result}" = "captcha_blocked" ] || fail "pattern match should win; got '${result}'"
+}
+
+@test "stats_run_adapter_emit: rc=1 with no markers writes failure_mode=unknown_failure" {
+  source "${LIB_DIR}/common.sh"
+  source "${LIB_DIR}/output.sh"
+  source "${LIB_DIR}/stats.sh"
+  init_paths
+  local t0
+  t0="$(now_ms)"
+  stats_run_adapter_emit "extract" "chrome-devtools-mcp" "${t0}" 1 "" "" -- --selector .x
+  local event
+  event="$(tail -1 "${BROWSER_SKILL_HOME}/memory/stats.jsonl")"
+  printf '%s' "${event}" | jq -e '.failure_mode == "unknown_failure"' >/dev/null \
+    || fail "expected failure_mode=unknown_failure; event: ${event}"
+  printf '%s' "${event}" | jq -e '.outcome == "fail"' >/dev/null \
+    || fail "outcome should remain fail; event: ${event}"
+}
+
+@test "stats_run_adapter_emit: rc=1 unknown_failure emits self-healing hint on stderr" {
+  source "${LIB_DIR}/common.sh"
+  source "${LIB_DIR}/output.sh"
+  source "${LIB_DIR}/stats.sh"
+  init_paths
+  local t0
+  t0="$(now_ms)"
+  # Capture stderr only.
+  run --separate-stderr bash -c "
+    source '${LIB_DIR}/common.sh'
+    source '${LIB_DIR}/output.sh'
+    source '${LIB_DIR}/stats.sh'
+    init_paths
+    stats_run_adapter_emit 'extract' 'chrome-devtools-mcp' \"\$(now_ms)\" 1 '' '' -- --selector .x
+  "
+  # bats 1.13's $stderr holds the captured error stream.
+  case "${stderr:-}" in
+    *"no diagnosable signal"*) : ;;
+    *) fail "expected self-healing hint on stderr; got: ${stderr:-(empty)}" ;;
+  esac
+}
+
 # --- Unit: stats_postcond_check -----------------------------------------
 
 @test "stats_postcond_check: exact match hits" {
