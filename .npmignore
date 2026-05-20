@@ -1,0 +1,29 @@
+# .npmignore — belt-and-suspenders alongside package.json `files` whitelist.
+# `files` is the authority for what ships; this file blocks anything that
+# might slip through globs (e.g., stray captures or local dev artefacts).
+
+# Local browser-skill state (should never exist in repo, but be safe)
+.browser-skill/
+captures/
+sessions/
+**/.browser-skill/
+
+# Test + docs (excluded from published tarball; available on GitHub)
+tests/
+docs/
+.github/
+.githooks/
+.claude/
+
+# Dev metadata
+.git/
+.gitignore
+CHANGELOG.md
+CONTRIBUTING.md
+
+# Editor / OS noise
+.DS_Store
+*.log
+*.swp
+*.tmp
+node_modules/

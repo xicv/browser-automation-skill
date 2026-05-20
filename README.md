@@ -1,6 +1,10 @@
 # browser-automation-skill
 
-A [Claude Code](https://claude.com/claude-code) skill for driving real browsers from an LLM. **44 verbs + a per-action audit surface** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a 5-tier cache defense chain (cached selector → fingerprint rescue → local-VLM rescue → cloud LLM → user fixup) that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
+[![npm version](https://img.shields.io/npm/v/browser-automation-skill.svg)](https://www.npmjs.com/package/browser-automation-skill)
+[![license](https://img.shields.io/npm/l/browser-automation-skill.svg)](LICENSE)
+[![node](https://img.shields.io/node/v/browser-automation-skill.svg)](package.json)
+
+A [Claude Code](https://claude.com/claude-code) skill **and MCP server** for driving real browsers from an LLM. **44 verbs + a per-action audit surface** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a 5-tier cache defense chain (cached selector → fingerprint rescue → local-VLM rescue → cloud LLM → user fixup) that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
 
 > **Status:** Phases 1–14 ✅ ALL COMPLETE. **Phase 14 (local-VLM cache rescue + auto-managed VLM stack + MCP server) ✅ shipped** — `scripts/browser-vlm.sh` wraps `llama-server` with idle-stop watchdog + lazy-start; `scripts/lib/visual-rescue-default.sh` is the canonical Path 3 probe (gated by `BROWSER_SKILL_VISION_FALLBACK=1`); `scripts/lib/node/mcp-server.mjs` publishes 5 verbs (open/snapshot/click/fill/extract) over JSON-RPC NDJSON for external agents (auto-discovers TOOLS from adapter capabilities + `mcp-tools.json` allowlist); `browser-stats prune` closes the telemetry feedback loop by auto-detecting cache-pollution from `oblivious_success` clusters. **Production-ready v1.3.** Full bats: 1086/1086 green. Architecture map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). New contributors: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 >
@@ -45,7 +49,41 @@ A [Claude Code](https://claude.com/claude-code) skill for driving real browsers 
 
 ## Install
 
-### Personal (one machine, all your projects)
+You can use this project two ways: as an **MCP server** (works with any MCP-aware client — Claude Code, Continue, Cline, midscene, Stagehand, agent-browser) or as a full **Claude Code skill** (gives you all 44 bash verbs + the cache + audit surface).
+
+### Option A — MCP server only (via npm; any MCP client)
+
+Zero-install via `npx`:
+
+```bash
+# One-off smoke test
+printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | npx -y browser-automation-skill@latest serve
+```
+
+**Wire into Claude Code (user-scope — every project on the machine):**
+
+```bash
+claude mcp add browser-skill --scope user -- npx -y browser-automation-skill@latest serve
+claude mcp list   # → browser-skill: ... ✓ Connected
+```
+
+5 tools become available: `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`. Pin a version (`@0.71.0`) for reproducibility, or omit `@latest` to track the registry tip.
+
+**Other MCP clients (Continue / Cline / midscene / Stagehand):** add a stdio entry pointing at `npx -y browser-automation-skill@latest serve`. Protocol: MCP 2024-11-05, NDJSON over stdio.
+
+Optional global install (skip the `npx` warmup):
+
+```bash
+npm i -g browser-automation-skill
+browser-automation-skill serve   # same as npx form
+```
+
+> **Note:** the MCP surface is intentionally a curated subset (5 verbs). For the full 44-verb CLI + cache + flow runner + telemetry, install as a skill (Option B).
+
+### Option B — Full Claude Code skill (one machine, all your projects)
 
 ```bash
 git clone https://github.com/xicv/browser-automation-skill ~/Projects/browser-automation-skill

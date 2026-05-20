@@ -1,0 +1,54 @@
+{
+  "name": "browser-automation-skill",
+  "version": "0.71.0",
+  "description": "MCP server + bash CLI that drives a real browser from Claude Code by routing across chrome-devtools-mcp, playwright-cli, playwright-lib, and obscura adapters. 42 verbs covering site/session/credential management, snapshot+ref interaction, capture pipelines, declarative flows, and a per-archetype memory cache.",
+  "keywords": [
+    "claude-code",
+    "mcp",
+    "model-context-protocol",
+    "browser-automation",
+    "playwright",
+    "chrome-devtools-mcp",
+    "anthropic",
+    "skill",
+    "agent"
+  ],
+  "homepage": "https://github.com/xicv/browser-automation-skill#readme",
+  "bugs": {
+    "url": "https://github.com/xicv/browser-automation-skill/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xicv/browser-automation-skill.git"
+  },
+  "license": "MIT",
+  "author": "Nick Cao <nick.cao@avcrm.com>",
+  "type": "module",
+  "bin": {
+    "browser-automation-skill": "bin/cli.mjs",
+    "browser-mcp": "bin/cli.mjs"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "references/",
+    "SKILL.md",
+    "SECURITY.md",
+    "install.sh",
+    "uninstall.sh",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "scripts": {
+    "mcp": "bash scripts/browser-mcp.sh serve",
+    "test:smoke": "printf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}' '{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\",\"params\":{}}' | bash scripts/browser-mcp.sh serve",
+    "prepublishOnly": "npm run test:smoke >/dev/null && echo 'smoke OK'"
+  }
+}
