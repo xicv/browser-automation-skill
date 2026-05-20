@@ -111,6 +111,21 @@ if [ "${adapter_rc}" -eq 0 ]; then
   _open_site="${ARG_SITE:-$(current_get 2>/dev/null || true)}"
   if [ -n "${_open_site}" ]; then
     memory_record_recent_url "${_open_site}" "${url}" "open" 2>/dev/null || true
+    # Phase 14 B1: opportunistic URL-pattern clustering. Now that recent_urls
+    # has a fresh entry, ask browser-do propose to (a) cluster recent URLs by
+    # templated path, (b) emit patterns that meet threshold ≥3, (c) write
+    # any new patterns to memory/<site>/patterns.json. Compounds zero-token
+    # clicks for repeat actions — the `browser-do` cache engine has been
+    # shipped since Phase 11 but was idle because nothing triggered propose.
+    # Gated by env so existing flows that don't want this overhead can opt out:
+    #   BROWSER_SKILL_OPEN_PROPOSE=0  → skip (default: 1 / on)
+    # Cost: ~50ms (jq + node url-pattern-cluster.mjs). Best-effort: failure
+    # emits its own warn in browser-do; never taints open's exit code.
+    if [ "${BROWSER_SKILL_OPEN_PROPOSE:-1}" = "1" ]; then
+      bash "${SCRIPT_DIR}/browser-do.sh" propose \
+        --site "${_open_site}" --from-recent --auto-record --threshold 3 \
+        >/dev/null 2>&1 || true
+    fi
   fi
   emit_summary verb=open tool="${tool_name}" why="${why}" status=ok url="${url}"
   exit 0

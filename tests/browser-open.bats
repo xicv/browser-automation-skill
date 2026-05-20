@@ -127,6 +127,59 @@ EOF
     || fail "expected outcome=partial; event: ${event}"
 }
 
+_b1_inject_devices_fixtures() {
+  # Drop temporary fixtures for `open https://example.com/devices/N` (N=1..3)
+  # into the playwright-cli fixtures dir so the test exercises the
+  # rc=0 → memory_record_recent_url → propose chain. Cleanup via the
+  # returned shas in teardown.
+  fixtures_dir="$1"
+  for n in 1 2 3; do
+    sha=$(printf 'open\0https://example.com/devices/%s\0' "$n" | shasum -a 256 | awk '{print $1}')
+    printf '{"event":"navigate","url":"https://example.com/devices/%s","status":200}\n' "$n" \
+      > "${fixtures_dir}/${sha}.json"
+    echo "${sha}"
+  done
+}
+_b1_cleanup_devices_fixtures() {
+  fixtures_dir="$1"; shift
+  for sha in "$@"; do
+    rm -f "${fixtures_dir}/${sha}.json"
+  done
+}
+
+@test "browser-open B1: opportunistic propose populates patterns.json after 3+ similar URLs" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name myapp --url 'https://example.com' >/dev/null
+  mapfile -t shas < <(_b1_inject_devices_fixtures "${FIXTURES_DIR}/playwright-cli")
+  for n in 1 2 3; do
+    PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+      bash "${SCRIPTS_DIR}/browser-open.sh" --site myapp \
+        --url "https://example.com/devices/${n}" >/dev/null 2>&1
+  done
+  _b1_cleanup_devices_fixtures "${FIXTURES_DIR}/playwright-cli" "${shas[@]}"
+  patterns_path="${BROWSER_SKILL_HOME}/memory/myapp/patterns.json"
+  [ -f "${patterns_path}" ] \
+    || fail "patterns.json should be written by opportunistic propose; recent_urls: $(cat "${BROWSER_SKILL_HOME}/memory/recent_urls.jsonl" 2>/dev/null)"
+  jq -e '.patterns | length >= 1' "${patterns_path}" >/dev/null \
+    || fail "expected ≥1 pattern in patterns.json; got $(cat "${patterns_path}")"
+}
+
+@test "browser-open B1: BROWSER_SKILL_OPEN_PROPOSE=0 opts out of opportunistic propose" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name myapp --url 'https://example.com' >/dev/null
+  mapfile -t shas < <(_b1_inject_devices_fixtures "${FIXTURES_DIR}/playwright-cli")
+  for n in 1 2 3; do
+    BROWSER_SKILL_OPEN_PROPOSE=0 \
+    PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
+    PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
+      bash "${SCRIPTS_DIR}/browser-open.sh" --site myapp \
+        --url "https://example.com/devices/${n}" >/dev/null 2>&1
+  done
+  _b1_cleanup_devices_fixtures "${FIXTURES_DIR}/playwright-cli" "${shas[@]}"
+  patterns_path="${BROWSER_SKILL_HOME}/memory/myapp/patterns.json"
+  [ ! -f "${patterns_path}" ] \
+    || fail "patterns.json should NOT be written when OPEN_PROPOSE=0; got $(cat "${patterns_path}")"
+}
+
 @test "browser-open: caller-set BROWSER_STATS_EXPECT_VALUE takes precedence over auto-derive" {
   PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli" \
   PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
