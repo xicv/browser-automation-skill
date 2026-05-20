@@ -287,3 +287,129 @@ teardown() {
   [ "${status}" -eq "${EXIT_USAGE_ERROR}" ]
   printf '%s' "${output}" | grep -q "verdict must be"
 }
+
+# ---------- Phase 14+ stats prune (cache-quality feedback loop) ----------
+
+# Seed N oblivious_success events at the same (site, selector) into stats.jsonl
+# so prune has work to do. Each event uses a fresh span_id.
+_seed_oblivious_events() {
+  local site="$1" selector="$2" count="$3"
+  local file="${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  mkdir -p "$(dirname "${file}")"
+  chmod 700 "${BROWSER_SKILL_HOME}/memory"
+  local i
+  for i in $(seq 1 "${count}"); do
+    local sid
+    sid="$(printf '%016x' "$((RANDOM * RANDOM + i))")"
+    jq -nc \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+      --arg span_id "${sid}" \
+      --arg site "${site}" \
+      --arg sel "${selector}" '
+      {schema_version:1, ts:$ts, span_id:$span_id, trace_id:$span_id,
+       parent_span_id:null, session_id:null,
+       gen_ai_operation_name:"execute_tool",
+       gen_ai_tool_name:"playwright-cli.click",
+       gen_ai_tool_type:"function",
+       verb:"click", adapter_route:"playwright-cli",
+       site:$site, selector_kind:"css", selector_value:$sel,
+       duration_ms:50, argv_bytes:20, stdout_bytes:0, stderr_bytes:0,
+       rc:0, outcome:"partial",
+       failure_mode:"oblivious_success",
+       post_condition_target_type:"url", post_condition_matcher:"include",
+       post_condition_expected:"/dashboard",
+       post_condition_observed:"https://example.com/login",
+       post_condition_hit:false}' >> "${file}"
+  done
+  chmod 600 "${file}"
+}
+
+# Seed an archetype with one interaction matching the given selector.
+_seed_archetype_for_prune() {
+  local site="$1" archetype_id="$2" intent="$3" selector="$4"
+  local dir="${BROWSER_SKILL_HOME}/memory/${site}/archetypes"
+  mkdir -p "${dir}"
+  chmod 700 "${dir}"
+  jq -n --arg id "${archetype_id}" --arg intent "${intent}" --arg sel "${selector}" '
+    {archetype_id:$id, url_pattern:"/dashboard",
+     interactions:[
+       {intent:$intent, selector:$sel, verb:"click",
+        fail_count:0, disabled:false}
+     ]}' > "${dir}/${archetype_id}.json"
+  chmod 600 "${dir}/${archetype_id}.json"
+  # patterns.json so archetype resolves.
+  jq -n --arg id "${archetype_id}" '
+    {patterns:[{url_pattern:"/dashboard", archetype_id:$id}], version:1}' \
+    > "${BROWSER_SKILL_HOME}/memory/${site}/patterns.json"
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/${site}/patterns.json"
+}
+
+@test "browser-stats prune: dry-run lists candidates above threshold" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  _seed_oblivious_events app1 "button.delete" 4
+  _seed_archetype_for_prune app1 dashboard "click delete" "button.delete"
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" prune
+  [ "${status}" -eq 0 ] || fail "prune exit=${status}; output:\n${output}"
+  local cand_line
+  cand_line="$(printf '%s\n' "${lines[@]}" \
+    | jq -c 'select(._kind == "prune_candidate")' | head -1)"
+  [ -n "${cand_line}" ] \
+    || fail "no prune_candidate line emitted; output:\n${output}"
+  printf '%s' "${cand_line}" | jq -e '.site == "app1"' >/dev/null
+  printf '%s' "${cand_line}" | jq -e '.selector == "button.delete"' >/dev/null
+  printf '%s' "${cand_line}" | jq -e '.oblivious_success_count >= 3' >/dev/null
+  printf '%s' "${cand_line}" | jq -e '.archetype_id == "dashboard"' >/dev/null
+  # Summary line.
+  local summary
+  summary="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${summary}" | jq -e '.verb == "stats" and .why == "prune" and .candidates >= 1 and .applied == 0' >/dev/null \
+    || fail "summary wrong: ${summary}"
+}
+
+@test "browser-stats prune --apply: sets .disabled=true on matching interaction" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  _seed_oblivious_events app2 "input.email" 5
+  _seed_archetype_for_prune app2 login "fill email" "input.email"
+  arch_path="${BROWSER_SKILL_HOME}/memory/app2/archetypes/login.json"
+  jq -e '.interactions[0].disabled == false' "${arch_path}" >/dev/null \
+    || fail "precondition: disabled should be false"
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" prune --apply
+  [ "${status}" -eq 0 ] || fail "prune --apply exit=${status}; output:\n${output}"
+  jq -e '.interactions[0].disabled == true' "${arch_path}" >/dev/null \
+    || fail "disabled should be true after --apply; got $(jq -c '.interactions[0]' "${arch_path}")"
+  # Applied event emitted.
+  local applied_line
+  applied_line="$(printf '%s\n' "${lines[@]}" \
+    | jq -c 'select(._kind == "prune_applied")' | head -1)"
+  [ -n "${applied_line}" ] \
+    || fail "no prune_applied line emitted; output:\n${output}"
+}
+
+@test "browser-stats prune: --threshold above actual count → zero candidates" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  _seed_oblivious_events app3 "button.x" 2
+  _seed_archetype_for_prune app3 page "click x" "button.x"
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" prune --threshold 10
+  [ "${status}" -eq 0 ]
+  if printf '%s\n' "${lines[@]}" | jq -e 'select(._kind == "prune_candidate")' >/dev/null 2>&1; then
+    fail "expected zero candidates at threshold=10; got: ${output}"
+  fi
+  local summary
+  summary="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${summary}" | jq -e '.candidates == 0' >/dev/null
+}
+
+@test "browser-stats prune: --site filter narrows to one site" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  _seed_oblivious_events alpha "button.a" 4
+  _seed_oblivious_events beta  "button.b" 4
+  _seed_archetype_for_prune alpha pg "click a" "button.a"
+  _seed_archetype_for_prune beta  pg "click b" "button.b"
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" prune --site alpha
+  [ "${status}" -eq 0 ]
+  local sites
+  sites="$(printf '%s\n' "${lines[@]}" \
+    | jq -r 'select(._kind == "prune_candidate") | .site' | sort -u)"
+  [ "${sites}" = "alpha" ] \
+    || fail "--site filter leaked beyond alpha; got '${sites}'"
+}

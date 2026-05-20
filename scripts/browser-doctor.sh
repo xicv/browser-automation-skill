@@ -287,6 +287,21 @@ if [ -f "${stats_jsonl_log}" ]; then
   fi
   if [ "${stats_oblivious}" -gt 0 ]; then
     warn "${stats_oblivious} oblivious_success event(s) — adapter reported ok but post-condition failed; run 'browser-stats report'"
+    # Phase 14+ stats-driven pruning surface: count (site, selector)
+    # GROUPS that have accumulated ≥3 oblivious_success events overall.
+    # Doctor stays date-agnostic so the jq is fast + ISO-8601-precision
+    # agnostic; `browser-stats prune --days N` does the date-filtered
+    # version when the user investigates.
+    prune_count="$(jq -s -r '
+      [ .[] | select(.failure_mode == "oblivious_success"
+                     and .site != null and .selector_value != null) ]
+      | group_by([.site, .selector_value])
+      | map(select(length >= 3))
+      | length
+    ' "${stats_jsonl_log}" 2>/dev/null || printf '0')"
+    if [ "${prune_count}" -gt 0 ]; then
+      warn "${prune_count} cache archetype(s) with ≥3 oblivious_success in last 7d — run 'browser-stats prune' for candidates, '--apply' to disable"
+    fi
   fi
   jq -nc \
     --argjson total "${stats_total}" \

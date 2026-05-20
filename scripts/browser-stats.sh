@@ -401,15 +401,122 @@ stats_tune() {
   emit_summary verb=stats tool=none why=tune status=ok days="${days}"
 }
 
+# stats_prune — close the telemetry feedback loop (Phase 14+).
+#
+# Find (site, selector) tuples with ≥THRESHOLD oblivious_success events in
+# the last --days days. Each such tuple = "cache lied" repeatedly: adapter
+# said ok but post-condition failed. The interaction's cached selector is
+# semantically broken (pointing at the wrong element, or page redesigned in
+# a way Phase-13 + Path 3 can't rescue).
+#
+# Modes:
+#   default (advisory): list candidates as NDJSON _kind:prune_candidate
+#                       lines; summary reports count. No mutation.
+#   --apply           : mark each candidate interaction .disabled=true in
+#                       its archetype JSON; emits _kind:prune_applied. The
+#                       disabled marker is the same one Phase 11 self-heal
+#                       sets after 4 plain failures; cache lookups skip
+#                       disabled interactions, so the cloud-LLM path takes
+#                       over on the next call.
+#
+# Why pruning matters: without this, cache pollution accumulates silently
+# over time. Phase 12 telemetry (oblivious_success) was the read side;
+# this is the write side that closes the loop.
+stats_prune() {
+  require_sqlite3
+  stats_rebuild >/dev/null 2>&1 || true
+  local days=7 threshold=3 apply=0 site_filter=""
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --days)      days="$2"; shift 2 ;;
+      --threshold) threshold="$2"; shift 2 ;;
+      --apply)     apply=1; shift ;;
+      --site)      site_filter="$2"; shift 2 ;;
+      -h|--help)
+        cat <<'PRUNEUSAGE' >&2
+browser-stats prune [--days N] [--threshold N] [--apply] [--site NAME]
+
+Find cache archetype interactions where the cached selector has caused
+≥THRESHOLD oblivious_success events in the last --days days (default
+--days 7, --threshold 3). Adapter said ok but post-condition failed
+— a strong "cache is wrong" signal that Phase-13 + Path 3 couldn't
+heal. Dry-run by default: emits _kind:prune_candidate lines. With
+--apply, marks each matching interaction .disabled=true in its
+archetype JSON (lookups skip disabled → cloud-LLM path runs instead).
+PRUNEUSAGE
+        return 0
+        ;;
+      *) die "${EXIT_USAGE_ERROR}" "prune: unknown flag '$1'" ;;
+    esac
+  done
+  local where="WHERE failure_mode='oblivious_success' AND ts >= datetime('now', '-${days} days') AND site IS NOT NULL AND selector_value IS NOT NULL"
+  [ -n "${site_filter}" ] && where="${where} AND site='${site_filter}'"
+
+  local candidates
+  candidates="$(sqlite3 -separator $'\t' "${STATS_DB}" "
+    SELECT site, selector_value, COUNT(*) AS n
+    FROM stats_events ${where}
+    GROUP BY site, selector_value
+    HAVING n >= ${threshold}
+    ORDER BY n DESC;" 2>/dev/null)"
+
+  local candidate_count=0 applied_count=0
+  while IFS=$'\t' read -r site sel n; do
+    [ -z "${site}" ] && continue
+    [ -z "${sel}" ] && continue
+    local arch_dir="${BROWSER_SKILL_HOME}/memory/${site}/archetypes"
+    [ -d "${arch_dir}" ] || continue
+    local arch_file
+    for arch_file in "${arch_dir}"/*.json; do
+      [ -f "${arch_file}" ] || continue
+      local arch_id intent
+      arch_id="$(basename "${arch_file}" .json)"
+      intent="$(jq -r --arg sel "${sel}" \
+        '.interactions[]? | select(.selector == $sel) | .intent' \
+        "${arch_file}" 2>/dev/null | head -1)"
+      if [ -n "${intent}" ]; then
+        candidate_count=$((candidate_count + 1))
+        jq -nc \
+          --arg site "${site}" --arg sel "${sel}" \
+          --arg arch_id "${arch_id}" --arg intent "${intent}" \
+          --argjson n "${n}" \
+          '{_kind:"prune_candidate", site:$site, selector:$sel,
+            oblivious_success_count:$n, archetype_id:$arch_id, intent:$intent}'
+        if [ "${apply}" = "1" ]; then
+          local tmp
+          tmp="$(mktemp)"
+          jq --arg sel "${sel}" \
+            '(.interactions[] | select(.selector == $sel)).disabled = true' \
+            "${arch_file}" > "${tmp}" \
+            && mv "${tmp}" "${arch_file}" \
+            && chmod 600 "${arch_file}" \
+            && applied_count=$((applied_count + 1))
+          jq -nc \
+            --arg site "${site}" --arg sel "${sel}" \
+            --arg arch_id "${arch_id}" --arg intent "${intent}" \
+            '{_kind:"prune_applied", site:$site, selector:$sel,
+              archetype_id:$arch_id, intent:$intent}'
+        fi
+        break
+      fi
+    done
+  done <<< "${candidates}"
+
+  emit_summary verb=stats tool=none why=prune status=ok \
+    days="${days}" threshold="${threshold}" \
+    candidates="${candidate_count}" applied="${applied_count}"
+}
+
 case "${subcmd}" in
   rebuild) stats_rebuild "$@" ;;
   report)  stats_report  "$@" ;;
   mark)    stats_mark    "$@" ;;
   tune)    stats_tune    "$@" ;;
+  prune)   stats_prune   "$@" ;;
   event)
     # Internal use — adapters normally call lib/stats.sh helpers directly.
     # Exposed via CLI for debugging and for tests.
     die "${EXIT_USAGE_ERROR}" "browser-stats event: reserved for in-process callers (use lib/stats.sh::stats_run_adapter_emit)"
     ;;
-  *) die "${EXIT_USAGE_ERROR}" "browser-stats: unknown subcommand '${subcmd}' (expected: rebuild|report|mark|tune)" ;;
+  *) die "${EXIT_USAGE_ERROR}" "browser-stats: unknown subcommand '${subcmd}' (expected: rebuild|report|mark|tune|prune)" ;;
 esac

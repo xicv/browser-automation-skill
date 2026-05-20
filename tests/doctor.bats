@@ -380,3 +380,38 @@ EOF
   echo "${output}" | grep -E '"check":"local_vlm".*"reachable":true' >/dev/null \
     || fail "expected {check:local_vlm,reachable:true} JSON line; got:\n${output}"
 }
+
+# ---------- Phase 14+ doctor surface for stats-driven prune ----------
+
+@test "doctor: emits 'cache archetype(s) with ≥3 oblivious_success' warn when above threshold" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 700 "${BROWSER_SKILL_HOME}" "${BROWSER_SKILL_HOME}/memory"
+  # Seed 4 oblivious_success events for the same (site, selector) all in the
+  # last 7 days. Doctor's prune-count jq scans for groups with ≥3 events.
+  for i in 1 2 3 4; do
+    sid=$(printf '%016x' $((RANDOM * RANDOM + i)))
+    jq -nc \
+      --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+      --arg sid "${sid}" '
+      {schema_version:1, ts:$ts, span_id:$sid, trace_id:$sid,
+       parent_span_id:null, session_id:null,
+       gen_ai_operation_name:"execute_tool",
+       gen_ai_tool_name:"playwright-cli.click",
+       gen_ai_tool_type:"function",
+       verb:"click", adapter_route:"playwright-cli",
+       site:"prod", selector_kind:"css", selector_value:"button.broken",
+       duration_ms:50, argv_bytes:0, stdout_bytes:0, stderr_bytes:0,
+       rc:0, outcome:"partial", failure_mode:"oblivious_success",
+       post_condition_target_type:"url", post_condition_matcher:"include",
+       post_condition_expected:"x", post_condition_observed:"y",
+       post_condition_hit:false}' \
+      >> "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  done
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "cache archetype(s) with ≥3 oblivious_success in last 7d"
+  assert_output_contains "browser-stats prune"
+}
