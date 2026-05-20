@@ -232,25 +232,70 @@ Environment:
 - llama.cpp: brew bottle 9200 (`3e12fbdea`), ARM64 native (`/opt/homebrew/bin/llama-server`)
 - Model: `Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M` (4.02B params, 175K ctx slot, 2.49 GB resident; auto-downloaded with mmproj to `~/.cache/huggingface/hub/models--Qwen--Qwen3-VL-4B-Instruct-GGUF/`, total 2.8 GB on disk)
 - Endpoint: `http://127.0.0.1:8080/v1/chat/completions` (OpenAI-compatible)
-- Launch: `llama-server -hf Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M --host 127.0.0.1 --port 8080`
+- Launch (FAT — defaults; wasteful for single-user): `llama-server -hf Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M --host 127.0.0.1 --port 8080`
+- Launch (**LEAN, recommended** — single-user single-skill on M-series): see "Lean launch" block below
 
-| Smoke | Prompt | Latency | Prompt tok/s | Predicted tok/s | Result |
-|---|---|---:|---:|---:|---|
-| **1. Text (cold)** | "Say hi in exactly one word." | 5.16 s | 5.55 | 1.05 | `"Hello"` ✓ |
-| **2. Vision (solid red 100×100 PNG)** | "What is the dominant color? One word." | 15.09 s | 2.55 | 4.56 | `"Blue"` ✗ misclassified |
-| **3. Vision (solid green 100×100 PNG)** | same | 15.56 s | 1.76 | 2.78 | `"Green"` ✓ |
-| **4. Text (warm)** | "Reply in exactly two words." | 1.88 s | 12.64 | 7.80 | `"Understood."` ✓ |
+### Two measured runs (same hardware, same model)
+
+Each row = same prompt against the same model on the same Mac. FAT run
+takes server defaults (parallel=4, ctx=175616, threads=all-P-cores,
+cache-ram=8192 MiB). LEAN run uses the bounded flags from the next
+section.
+
+| Smoke | FAT lat | LEAN lat | Speedup | FAT prompt / pred tok/s | LEAN prompt / pred tok/s | LEAN completion |
+|---|---:|---:|---:|---:|---:|---|
+| **1. Text (cold)** | 5.16 s | **0.28 s** | **18×** | 5.55 / 1.05 | 74.55 / 51.17 | `"Hello"` ✓ |
+| **2. Vision (red PNG)** | 15.09 s | **0.47 s** | **32×** | 2.55 / 4.56 | 75.97 / 58.17 | `"blue"` ✗ (still wrong — quant-bound) |
+| **3. Vision (green PNG)** | 15.56 s | **0.43 s** | **36×** | 1.76 / 2.78 | 70.74 / 58.25 | `"Green"` ✓ |
+| **4. Text (warm)** | 1.88 s | **0.25 s** | **7.5×** | 12.64 / 7.80 | 91.88 / 41.30 | `"No reply."` ✓ |
+
+Resident RAM (peak `ps -o rss` on the llama-server child): LEAN **3.99 GB** measured. FAT not directly measured but allocates ~4× the KV cache (175616 ctx × 4 slots vs 8192 × 1 slot ≈ 86× theoretical KV-buffer ratio); the prompt-cache cap dropped from 8192 MiB → 512 MiB independently.
+
+### Lean launch (recommended default)
+
+```bash
+llama-server -hf Qwen/Qwen3-VL-4B-Instruct-GGUF:Q4_K_M \
+  --host 127.0.0.1 --port 8080 \
+  --ctx-size 8192 \
+  --parallel 1 \
+  --threads 4 \
+  --threads-batch 6 \
+  --cache-ram 512 \
+  --n-gpu-layers 99
+```
+
+Why each flag:
+
+| Flag | Default | Lean | Why |
+|---|---|---|---|
+| `--ctx-size` | 175616 | 8192 | KV cache scales linear; 8K is enough for any single browser-grounding prompt |
+| `--parallel` | 4 | 1 | each slot reserves its own KV cache; single-user → single slot |
+| `--threads` | all P-cores | 4 | bounds generation-thread CPU footprint; leaves UI/agent responsive |
+| `--threads-batch` | = `--threads` | 6 | lets prompt-eval (compute-bound) use more cores than generation (memory-bound) |
+| `--cache-ram` | 8192 (MiB) | 512 | cap cross-request prompt cache; 512 MiB is enough for a few repeated turns |
+| `--n-gpu-layers` | 99 (macOS default) | 99 | explicit; ensures all transformer layers offload to Metal GPU |
 
 **Implications for the integration paths above:**
 
 - **Pipeline works end-to-end.** OpenAI-compatible chat completions ✓, image_url base64 ingestion ✓, mmproj auto-loaded ✓.
-- **Vision accuracy at 4B q4_K_M is borderline** (1/2 primary-color identifications wrong on identical-protocol calls). For **Path 3 (cache-rescue visual confirmation)** this would generate false-negatives → DON'T wire 4B-q4_K_M into the cache hot path. Either:
+- **Vision accuracy at 4B q4_K_M is borderline** (1/2 primary-color identifications wrong on identical-protocol calls — same outcome in both FAT and LEAN runs, so the misclassification is the QUANTIZATION talking, not config). For **Path 3 (cache-rescue visual confirmation)** this would generate false-negatives → DON'T wire 4B-q4_K_M into the cache hot path. Either:
   - **Qwen3-VL-8B q4_K_M** (~6.5 GB) — recommended by midscene
   - **Qwen3-VL-4B q8_0** (~4.3 GB) — higher fidelity at smaller size
   - **UI-TARS-1.5-7B** (~4 GB) — explicitly post-trained on UI grounding
-- **Warm-vs-cold text latency: 2.7× speedup** (5.16 s → 1.88 s) at 7.8 tok/s predicted. The llama-server prompt cache (8192 MiB cap, enabled by default) earns its keep.
-- **Vision call cost: ~15 s per image at 4B.** This is the budget Path 3 has to beat: if a cloud LLM round-trip via Claude would have cost ~$0.001 + ~1 s, the local 15 s is only winning when the operation is high-volume *or* offline.
+- **LEAN config makes the local stack viable.** FAT vision-call cost was ~15 s; LEAN is ~0.45 s. That changes the Path 3 cost frame: **a cache-rescue visual probe at <500 ms is now competitive with — and often cheaper than — a cloud LLM round-trip** (~1 s + token cost). The model-accuracy gap above is now the only blocker; bump the model and Path 3 becomes the highest-ROI integration.
 - **`Failed to load image or audio file` error** appears if the `data:image/png;base64,…` URL is malformed (e.g. embedded newlines in base64) — strip newlines with `tr -d '\n'` before constructing the data URL.
+
+### Caveat — the FAT-vs-LEAN speedup is partially mmap-warmth, not pure config
+
+The LEAN run executed after the FAT run on the same machine. Model
+weights were already in the macOS filesystem cache (mmap'd from disk),
+so LEAN paid no I/O-warmup cost. A true cold-disk LEAN run would be
+slower than 0.28 s on Smoke 1 — closer to 1–2 s for the initial weight
+read. Subsequent calls within the same process would still hit the
+numbers in the LEAN column. The win that IS purely config:
+- single slot vs four = no KV-cache duplication
+- smaller ctx-size = smaller per-token attention matmul
+- bounded thread count = no thermal throttling on M3 Pro's perf cores
 
 ## What NOT to do
 
