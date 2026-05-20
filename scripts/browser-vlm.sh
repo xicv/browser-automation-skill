@@ -141,8 +141,8 @@ cmd_stop() {
   if existing="$(_read_pid)" && _pid_alive "${existing}"; then
     kill "${existing}" 2>/dev/null || true
     # Give it 2s to exit cleanly; SIGKILL if still alive.
-    local i
-    for i in 1 2 3 4; do
+    local _
+    for _ in 1 2 3 4; do
       _pid_alive "${existing}" || break
       sleep 0.5
     done

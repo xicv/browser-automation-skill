@@ -313,3 +313,70 @@ EOF
   echo "${output}" | grep -E '"check":"recent_urls".*"count":3' >/dev/null \
     || fail "expected {check:recent_urls,count:3} JSON line; got:\n${output}"
 }
+
+# --- Phase 14: local VLM reachability probe (advisory; never fails doctor) ---
+
+@test "doctor: VLM not running → 'local VLM not running' line + JSON reachable:false; still exits 0" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  # Pick a port nothing's listening on so curl fails fast.
+  BROWSER_SKILL_VLM_PORT=59999 \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "local VLM not running"
+  echo "${output}" | grep -E '"check":"local_vlm".*"reachable":false' >/dev/null \
+    || fail "expected {check:local_vlm,reachable:false} JSON line; got:\n${output}"
+}
+
+@test "doctor: VLM endpoint honors BROWSER_SKILL_VLM_HOST + _PORT env overrides" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  BROWSER_SKILL_VLM_HOST=10.99.99.99 BROWSER_SKILL_VLM_PORT=12345 \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "http://10.99.99.99:12345"
+  echo "${output}" | grep -E '"endpoint":"http://10.99.99.99:12345"' >/dev/null \
+    || fail "expected endpoint JSON to reflect env overrides; got:\n${output}"
+}
+
+@test "doctor: VLM reachable → 'reachable @ <endpoint>' line + JSON reachable:true" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  # Spin up a 1-shot Python health responder on an ephemeral port.
+  port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
+  python3 -u - <<EOF &
+import http.server, socketserver, json, threading, time
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/health":
+            body = json.dumps({"status":"ok"}).encode()
+            self.send_response(200); self.send_header("Content-Type","application/json"); self.end_headers(); self.wfile.write(body)
+        else:
+            self.send_response(404); self.end_headers()
+    def log_message(self, *a): pass
+srv = socketserver.TCPServer(("127.0.0.1", ${port}), H)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+time.sleep(3)
+srv.shutdown()
+EOF
+  fake_pid=$!
+  # Wait for port to be listening.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if curl -sfm 1 "http://127.0.0.1:${port}/health" >/dev/null 2>&1; then break; fi
+    sleep 0.2
+  done
+  BROWSER_SKILL_VLM_PORT="${port}" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  kill "${fake_pid}" 2>/dev/null || true
+  wait "${fake_pid}" 2>/dev/null || true
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "local VLM reachable"
+  echo "${output}" | grep -E '"check":"local_vlm".*"reachable":true' >/dev/null \
+    || fail "expected {check:local_vlm,reachable:true} JSON line; got:\n${output}"
+}

@@ -299,6 +299,27 @@ else
   jq -nc '{check:"stats", total:0, success:0, success_pct:null, oblivious_success:0}'
 fi
 
+# --- Phase 14: local VLM reachability (advisory; OPTIONAL stack, never fails doctor) ---
+# Probes the same endpoint scripts/browser-vlm.sh defaults to. Honors the
+# same BROWSER_SKILL_VLM_HOST + BROWSER_SKILL_VLM_PORT env overrides so doctor
+# and the vlm wrapper agree on what "the local VLM" means.
+# Outcomes:
+#   reachable     → ok: "local VLM reachable @ http://HOST:PORT (advisory)"
+#   unreachable   → ok: "local VLM not running (advisory — see browser-vlm.sh start)"
+# Never warns. The VLM is opt-in for Path 3 cache-rescue; absence is normal.
+vlm_host="${BROWSER_SKILL_VLM_HOST:-127.0.0.1}"
+vlm_port="${BROWSER_SKILL_VLM_PORT:-8080}"
+vlm_endpoint="http://${vlm_host}:${vlm_port}"
+vlm_reachable="false"
+if curl -sfm 2 "${vlm_endpoint}/health" >/dev/null 2>&1; then
+  vlm_reachable="true"
+  ok "local VLM reachable @ ${vlm_endpoint} (advisory — Path 3 cache-rescue ready)"
+else
+  ok "local VLM not running @ ${vlm_endpoint} (advisory — start via 'bash scripts/browser-vlm.sh start' if Path 3 wanted)"
+fi
+jq -nc --arg endpoint "${vlm_endpoint}" --argjson reachable "${vlm_reachable}" \
+  '{check:"local_vlm", endpoint:$endpoint, reachable:$reachable}'
+
 duration_ms=$(( $(now_ms) - started_at_ms ))
 
 # Status semantics (§5.3 of extension-model spec).
