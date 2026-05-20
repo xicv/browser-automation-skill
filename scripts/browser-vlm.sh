@@ -302,8 +302,22 @@ _run_vision_fixture_smoke() {
   t1=$(python3 -c "import time;print(time.time())")
   lat=$(python3 -c "print(round($t1 - $t0, 2))")
   completion="$(printf '%s' "${resp}" | jq -r '.choices[0].message.content // .error.message' 2>/dev/null)"
-  local hit="false"
-  case "${completion,,}" in *"${expected,,}"*) hit="true" ;; esac
+  # Broader matcher (bench-fix #5): EXPECTED can be a |-delimited list of
+  # acceptable terms — hit if completion contains ANY (case-insensitive).
+  # Why: open-ended description prompts produce nuanced answers ("Blue
+  # rectangle" is a structurally-correct description of a button-shape
+  # fixture); narrow single-term matching false-fails them. Single-term
+  # expected still works (no | in the string).
+  local hit="false" term
+  local _saved_ifs="${IFS}"
+  IFS='|'
+  for term in ${expected}; do
+    [ -z "${term}" ] && continue
+    case "${completion,,}" in
+      *"${term,,}"*) hit="true"; break ;;
+    esac
+  done
+  IFS="${_saved_ifs}"
   printf '{"smoke":"%s","type":"vision-fixture","latency_s":%s,"completion":"%s","expected":"%s","hit":%s}\n' \
     "${label}" "${lat}" "${completion//\"/\\\"}" "${expected}" "${hit}"
   if [ "${hit}" = "true" ]; then SMOKE_PASS=$((SMOKE_PASS + 1));
@@ -338,7 +352,8 @@ _run_smoke_battery() {
   fi
   local button_fixture
   button_fixture="${BENCH_FIXTURE_BUTTON:-${SCRIPT_DIR}/../tests/fixtures/vlm-bench/button-shape.png}"
-  _run_vision_fixture_smoke "vision_button" "${button_fixture}" "button" \
+  _run_vision_fixture_smoke "vision_button" "${button_fixture}" \
+    "button|rectangle|rounded|shape|blue rectangle|ui element" \
     "Describe what you see in this image in one or two words."
   [ "${SMOKE_FAIL}" -eq 0 ]
 }
@@ -452,6 +467,40 @@ BENCHUSAGE
       bench_fail=$((bench_fail + 1))
       cmd_stop >/dev/null 2>&1 || true
       continue
+    fi
+
+    # Bench-fix #4: model-identity verification. llama-server's -hf flag
+    # silently falls back to whatever's already cached in the HF repo dir
+    # when the requested quant can't be fetched. /health still returns 200.
+    # Without this check, bench reports successful smokes against the wrong
+    # model (we found this by disk-forensicing: 8B-q4 directory didn't exist
+    # but bench still reported 8B-q4 smokes). Query /v1/models, parse the
+    # first entry's id, require the requested repo+quant appear as substring.
+    local loaded_model
+    loaded_model="$(curl -sm 3 "http://${VLM_HOST}:${VLM_PORT}/v1/models" 2>/dev/null \
+                    | jq -r '.data[0].id // ""' 2>/dev/null)"
+    if [ -n "${loaded_model}" ]; then
+      # The requested model spec is "vendor/repo:quant"; the loaded id usually
+      # contains "vendor/repo" and the quant tag.
+      local model_no_slash="${model//\//_}"
+      local loaded_no_slash="${loaded_model//\//_}"
+      case "${loaded_no_slash}" in
+        *"${model_no_slash}"*) : ;;   # exact subset — ok
+        *)
+          # Try the quant tag alone (some servers report only the quant).
+          local quant="${model##*:}"
+          case "${loaded_model}" in
+            *"${quant}"*) : ;;
+            *)
+              printf '{"event":"bench-model","model":"%s","status":"model-mismatch","loaded_as":"%s"}\n' \
+                "${model}" "${loaded_model}"
+              bench_fail=$((bench_fail + 1))
+              cmd_stop >/dev/null 2>&1 || true
+              continue
+              ;;
+          esac
+          ;;
+      esac
     fi
 
     # Run smokes for this model. CRITICAL: do NOT command-substitute the
