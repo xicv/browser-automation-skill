@@ -10,10 +10,20 @@
 // reuse our cache + telemetry + secrets vault without re-implementing them.
 // We become the SHARED MIDDLEWARE other browser agents delegate to.
 //
-// Stage 1 surface (this commit): browser_open + browser_snapshot.
-// Stage 2 surface (followup): browser_click, browser_fill, browser_extract.
+// Stage 1 surface: browser_open + browser_snapshot.
+// Stage 2 surface (Phase 14 bundle): browser_click, browser_fill, browser_extract.
 // Each tool spawns the matching scripts/browser-<verb>.sh and returns the
 // verb's single-line summary JSON as MCP `content[0].text`.
+//
+// Env-var passthrough is WHITELISTED (Path 2). The MCP client's full env is
+// NEVER inherited blindly — only well-known skill / VLM / OS / test prefixes
+// flow through. Two reasons:
+//   1. AP-7 alignment — MCP clients may carry their OWN secrets (API keys for
+//      OpenAI, Anthropic, etc.); passing those into our bash verbs could land
+//      them in stats.jsonl's argv_bytes count or observed-snapshot capture.
+//   2. Determinism — verb behaviour shouldn't depend on whatever stray env
+//      the client process happened to have set.
+// See ENV_WHITELIST_PREFIXES + ENV_WHITELIST_EXACT below.
 
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
@@ -82,7 +92,138 @@ const TOOLS = [
       return out;
     },
   },
+  // Stage 2 — Phase 14 bundle.
+  {
+    name: 'browser_click',
+    description:
+      'Click an element by eN ref (preferred — stable across the session ' +
+      'until the page mutates) or by CSS selector. Provide exactly one of ' +
+      'ref or selector.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref:      { type: 'string', description: 'eN ref from a prior browser_snapshot call' },
+        selector: { type: 'string', description: 'CSS selector (fallback when ref unavailable)' },
+        site:     { type: 'string' },
+        tool:     { type: 'string', enum: ['playwright-cli', 'playwright-lib', 'chrome-devtools-mcp', 'obscura'] },
+      },
+      oneOf: [{ required: ['ref'] }, { required: ['selector'] }],
+      additionalProperties: false,
+    },
+    verbScript: 'browser-click.sh',
+    argMap: (args) => {
+      const out = [];
+      if (args.ref)      out.push('--ref', args.ref);
+      if (args.selector) out.push('--selector', args.selector);
+      if (args.site)     out.push('--site', args.site);
+      if (args.tool)     out.push('--tool', args.tool);
+      return out;
+    },
+  },
+  {
+    name: 'browser_fill',
+    description:
+      'Fill an input by eN ref or CSS selector with the given text. NOTE: ' +
+      'this tool deliberately does NOT expose a "secret" field — MCP has no ' +
+      'stdin channel and putting secrets in tool arguments would land them ' +
+      'in the request transcript. For secret values use scripts/browser-fill.sh ' +
+      'directly with --secret-stdin (AP-7).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ref:      { type: 'string' },
+        selector: { type: 'string' },
+        text:     { type: 'string', description: 'Plain-text value to type (NEVER pass secrets here)' },
+        site:     { type: 'string' },
+        tool:     { type: 'string', enum: ['playwright-cli', 'playwright-lib', 'chrome-devtools-mcp', 'obscura'] },
+      },
+      required: ['text'],
+      oneOf: [{ required: ['ref'] }, { required: ['selector'] }],
+      additionalProperties: false,
+    },
+    verbScript: 'browser-fill.sh',
+    argMap: (args) => {
+      const out = [];
+      if (args.ref)      out.push('--ref', args.ref);
+      if (args.selector) out.push('--selector', args.selector);
+      out.push('--text', args.text);
+      if (args.site)     out.push('--site', args.site);
+      if (args.tool)     out.push('--tool', args.tool);
+      return out;
+    },
+  },
+  {
+    name: 'browser_extract',
+    description:
+      'Extract data via CSS selector or evaluated JS. selector returns ' +
+      'concatenated text content of matched nodes; eval returns the JS ' +
+      'expression result. --scrape multi-URL mode is intentionally NOT ' +
+      'exposed via MCP (use scripts/browser-extract.sh --scrape directly).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector to extract text from' },
+        eval:     { type: 'string', description: 'JS expression evaluated in page context' },
+        site:     { type: 'string' },
+        tool:     { type: 'string', enum: ['playwright-cli', 'playwright-lib', 'chrome-devtools-mcp', 'obscura'] },
+      },
+      oneOf: [{ required: ['selector'] }, { required: ['eval'] }],
+      additionalProperties: false,
+    },
+    verbScript: 'browser-extract.sh',
+    argMap: (args) => {
+      const out = [];
+      if (args.selector) out.push('--selector', args.selector);
+      if (args.eval)     out.push('--eval', args.eval);
+      if (args.site)     out.push('--site', args.site);
+      if (args.tool)     out.push('--tool', args.tool);
+      return out;
+    },
+  },
 ];
+
+// --- Env whitelist (Phase 14 Path 2) ---
+// Only env vars with a whitelisted prefix OR an exact-match name are passed
+// to verb children. Everything else is dropped. This protects skill verbs
+// from being polluted (or having their stats.jsonl polluted) by whatever
+// the MCP client happened to have in its process env.
+const ENV_WHITELIST_PREFIXES = [
+  'BROWSER_SKILL_',        // skill internals (HOME, TRACE_ID, etc.)
+  'BROWSER_STATS_',        // stats post-condition / model injection
+  'CLAUDE_',               // CLAUDE_MODEL, CLAUDE_USAGE_*, CLAUDE_SESSION_ID
+  'MIDSCENE_MODEL_',       // local-VLM endpoint config (Path 2 motivation)
+  'PLAYWRIGHT_',           // PLAYWRIGHT_CLI_BIN + test injection
+  'CHROME_DEVTOOLS_',      // CHROME_DEVTOOLS_MCP_BIN
+  'CHROME_USER_DATA_DIR',  // session loading for cdt-mcp (Phase 5 part 1f)
+  'OBSCURA_',              // obscura adapter knobs
+  'STUB_',                 // STUB_LOG_FILE etc — test injection seam
+  'FIXTURES_',             // CHROME_DEVTOOLS_MCP_FIXTURES_DIR etc — test seam
+  'MCP_',                  // future MCP-specific overrides
+];
+const ENV_WHITELIST_EXACT = new Set([
+  // POSIX / shell essentials. Verb scripts assume these exist.
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'TMPDIR', 'TMP', 'TEMP',
+  'LANG', 'LC_ALL', 'LC_CTYPE', 'TERM', 'SHELL', 'TZ', 'PWD',
+  // Node + npm essentials so spawned bash can still find tooling.
+  'NODE_PATH', 'NPM_CONFIG_PREFIX',
+]);
+
+function filteredEnv() {
+  const out = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (ENV_WHITELIST_EXACT.has(key)) {
+      out[key] = value;
+      continue;
+    }
+    for (const prefix of ENV_WHITELIST_PREFIXES) {
+      if (key.startsWith(prefix)) {
+        out[key] = value;
+        break;
+      }
+    }
+  }
+  return out;
+}
 
 const TOOLS_BY_NAME = Object.fromEntries(TOOLS.map((t) => [t.name, t]));
 
@@ -142,7 +283,7 @@ function handleToolsCall(id, params) {
 
   const scriptPath = join(SCRIPTS_DIR, tool.verbScript);
   const child = spawn('bash', [scriptPath, ...scriptArgs], {
-    env: process.env,
+    env: filteredEnv(),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 

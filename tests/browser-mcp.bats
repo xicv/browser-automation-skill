@@ -26,7 +26,10 @@ teardown() {
     || fail "missing capabilities.tools: ${result}"
 }
 
-@test "mcp-server: tools/list returns browser_open + browser_snapshot with input schemas" {
+@test "mcp-server: tools/list — browser_open schema requires url + has additionalProperties:false" {
+  # Tool-count + tool-name set are tested in the Stage 2 block below; this
+  # test focuses on the input-schema discipline (required keys, no stealth
+  # extras) which is the load-bearing contract for MCP clients.
   result="$(printf '%s\n%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
@@ -34,14 +37,12 @@ teardown() {
   local call_resp
   call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
   [ -n "${call_resp}" ] || fail "no id=2 response in: ${result}"
-  printf '%s' "${call_resp}" | jq -e '.result.tools | length == 2' >/dev/null \
-    || fail "expected 2 tools; got: ${call_resp}"
-  printf '%s' "${call_resp}" \
-    | jq -e '.result.tools | map(.name) | sort == ["browser_open","browser_snapshot"]' >/dev/null \
-    || fail "tool names wrong: ${call_resp}"
   printf '%s' "${call_resp}" \
     | jq -e '.result.tools[] | select(.name == "browser_open") | .inputSchema.required == ["url"]' >/dev/null \
     || fail "browser_open should require url: ${call_resp}"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.tools[] | select(.name == "browser_open") | .inputSchema.additionalProperties == false' >/dev/null \
+    || fail "browser_open should set additionalProperties=false: ${call_resp}"
 }
 
 @test "mcp-server: tools/call browser_snapshot shells to browser-snapshot.sh and returns summary" {
@@ -106,4 +107,175 @@ teardown() {
   run bash "${SCRIPTS_DIR}/browser-mcp.sh" bogus
   assert_status "${EXIT_USAGE_ERROR}"
   assert_output_contains "unknown subcommand"
+}
+
+# ---------- Phase 14 (MCP Stage 2): click + fill + extract ---------------
+
+@test "mcp-server: tools/list returns 5 tools (open + snapshot + click + fill + extract)" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    | node "${MCP_BIN}")"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.tools | length == 5' >/dev/null \
+    || fail "expected 5 tools; got: ${call_resp}"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.tools | map(.name) | sort == ["browser_click","browser_extract","browser_fill","browser_open","browser_snapshot"]' >/dev/null \
+    || fail "tool names wrong: ${call_resp}"
+}
+
+@test "mcp-server: tools/call browser_click forwards --ref to browser-click.sh" {
+  STUB_LOG_FILE="$(mktemp)"
+  export STUB_LOG_FILE
+  export PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli"
+  export PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli"
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_click","arguments":{"ref":"e3"}}}' \
+    | node "${MCP_BIN}")"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.content[0].text | fromjson | .verb == "click" and .status == "ok"' >/dev/null \
+    || fail "click summary not parsed: ${call_resp}"
+  grep -q '^click$' "${STUB_LOG_FILE}" \
+    || fail "stub never saw 'click'; log: $(cat "${STUB_LOG_FILE}")"
+  grep -q '^e3$' "${STUB_LOG_FILE}" \
+    || fail "stub never saw 'e3'; log: $(cat "${STUB_LOG_FILE}")"
+  rm -f "${STUB_LOG_FILE}"
+  unset STUB_LOG_FILE PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
+}
+
+@test "mcp-server: tools/call browser_fill forwards --ref + --text" {
+  STUB_LOG_FILE="$(mktemp)"
+  export STUB_LOG_FILE
+  export PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli"
+  export PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli"
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_fill","arguments":{"ref":"e3","text":"hello"}}}' \
+    | node "${MCP_BIN}")"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.content[0].text | fromjson | .verb == "fill" and .status == "ok"' >/dev/null \
+    || fail "fill summary not parsed: ${call_resp}"
+  grep -q '^fill$'  "${STUB_LOG_FILE}" || fail "stub never saw 'fill'"
+  grep -q '^e3$'    "${STUB_LOG_FILE}" || fail "stub never saw 'e3'"
+  grep -q '^hello$' "${STUB_LOG_FILE}" || fail "stub never saw 'hello'"
+  rm -f "${STUB_LOG_FILE}"
+  unset STUB_LOG_FILE PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
+}
+
+@test "mcp-server: browser_fill REJECTS attempts to pass secrets via MCP (no secret tunnel)" {
+  # MCP has no stdin-stream channel — secrets MUST never travel through tool
+  # arguments. The schema disallows a 'secret' field; passing it should be a
+  # protocol-level error, not a stealth pass-through.
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    | node "${MCP_BIN}")"
+  local fill_schema
+  fill_schema="$(printf '%s' "${result}" | jq -c 'select(.id==2) | .result.tools[] | select(.name == "browser_fill") | .inputSchema')"
+  printf '%s' "${fill_schema}" \
+    | jq -e '.properties | has("secret") | not' >/dev/null \
+    || fail "browser_fill must NOT expose a 'secret' property (AP-7); got: ${fill_schema}"
+  printf '%s' "${fill_schema}" \
+    | jq -e '.additionalProperties == false' >/dev/null \
+    || fail "browser_fill schema must reject unknown props; got: ${fill_schema}"
+}
+
+@test "mcp-server: tools/call browser_extract forwards --selector" {
+  STUB_LOG_FILE="$(mktemp)"
+  export STUB_LOG_FILE
+  export PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli"
+  export PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli"
+  # extract routes to chrome-devtools-mcp by default; force playwright-cli via tool override.
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_extract","arguments":{"selector":".title","tool":"playwright-cli"}}}' \
+    | node "${MCP_BIN}")"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  # playwright-cli adapter returns rc=41 (no extract support) — content should report status=error w/ that signal.
+  printf '%s' "${call_resp}" | jq -e '.result._meta.exitCode | type == "number"' >/dev/null \
+    || fail "missing exitCode meta: ${call_resp}"
+  rm -f "${STUB_LOG_FILE}"
+  unset STUB_LOG_FILE PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
+}
+
+# ---------- Phase 14 (MCP Path 2): env-var whitelist passthrough ---------
+
+@test "mcp-server: PLAYWRIGHT_CLI_BIN passes through to child (whitelist allows)" {
+  # If this fails, our existing snapshot/open/click/fill tests above would
+  # also fail, but the assertion here makes the contract explicit.
+  STUB_LOG_FILE="$(mktemp)"
+  export STUB_LOG_FILE
+  export PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli"
+  export PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli"
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_snapshot","arguments":{}}}' \
+    | node "${MCP_BIN}")"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" | jq -e '.result.content[0].text | fromjson | .status == "ok"' >/dev/null \
+    || fail "child didn't get PLAYWRIGHT_CLI_BIN: ${call_resp}"
+  rm -f "${STUB_LOG_FILE}"
+  unset STUB_LOG_FILE PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
+}
+
+@test "mcp-server: arbitrary env var (FOO_RANDOM_SECRET) is BLOCKED from child (whitelist denies)" {
+  # The MCP server's env whitelist must filter unknown vars — otherwise an MCP
+  # client can leak its own secrets into our verb subprocess env (and thence
+  # into stats.jsonl observed-snapshots if the verb echoes env back).
+  export FOO_RANDOM_SECRET="this-must-never-reach-the-child"
+  export PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli"
+  export PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli"
+  # Custom stub binary that DUMPS its env to a logfile so we can inspect it.
+  local env_dump child_stub
+  env_dump="$(mktemp)"
+  child_stub="$(mktemp)"
+  cat > "${child_stub}" <<EOF
+#!/usr/bin/env bash
+env > "${env_dump}"
+exec "${STUBS_DIR}/playwright-cli" "\$@"
+EOF
+  chmod +x "${child_stub}"
+  export PLAYWRIGHT_CLI_BIN="${child_stub}"
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_snapshot","arguments":{}}}' \
+    | node "${MCP_BIN}")"
+  if grep -q "FOO_RANDOM_SECRET" "${env_dump}" 2>/dev/null; then
+    fail "FOO_RANDOM_SECRET leaked into child env (whitelist failure); env_dump: $(cat "${env_dump}")"
+  fi
+  rm -f "${env_dump}" "${child_stub}"
+  unset FOO_RANDOM_SECRET PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
+}
+
+@test "mcp-server: MIDSCENE_MODEL_* envvar passes through to child (whitelist allows local-VLM config)" {
+  export MIDSCENE_MODEL_BASE_URL="http://127.0.0.1:8080/v1"
+  export PLAYWRIGHT_CLI_BIN="${STUBS_DIR}/playwright-cli"
+  export PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli"
+  local env_dump child_stub
+  env_dump="$(mktemp)"
+  child_stub="$(mktemp)"
+  cat > "${child_stub}" <<EOF
+#!/usr/bin/env bash
+env > "${env_dump}"
+exec "${STUBS_DIR}/playwright-cli" "\$@"
+EOF
+  chmod +x "${child_stub}"
+  export PLAYWRIGHT_CLI_BIN="${child_stub}"
+  printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_snapshot","arguments":{}}}' \
+    | node "${MCP_BIN}" >/dev/null
+  grep -q "MIDSCENE_MODEL_BASE_URL=" "${env_dump}" 2>/dev/null \
+    || fail "MIDSCENE_MODEL_BASE_URL did NOT reach child (whitelist too strict); env_dump: $(cat "${env_dump}")"
+  rm -f "${env_dump}" "${child_stub}"
+  unset MIDSCENE_MODEL_BASE_URL PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
 }

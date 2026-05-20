@@ -17,19 +17,52 @@ into the shared middleware browser agents delegate to.
 - Protocol: MCP 2024-11-05 (matches our existing chrome-devtools-bridge client)
 - Envelope: JSON-RPC 2.0
 
-## Tools exposed (Stage 1)
+## Tools exposed (Stage 1 + Stage 2)
 
 | Tool | Wraps | Required inputs | Optional |
 |---|---|---|---|
-| `browser_open`     | `scripts/browser-open.sh`     | `url`        | `site`, `tool` |
-| `browser_snapshot` | `scripts/browser-snapshot.sh` | _none_       | `site`, `tool`, `capture` |
+| `browser_open`     | `scripts/browser-open.sh`     | `url`              | `site`, `tool` |
+| `browser_snapshot` | `scripts/browser-snapshot.sh` | _none_             | `site`, `tool`, `capture` |
+| `browser_click`    | `scripts/browser-click.sh`    | one of `ref` / `selector` | `site`, `tool` |
+| `browser_fill`     | `scripts/browser-fill.sh`     | `text` + one of `ref` / `selector` | `site`, `tool` |
+| `browser_extract`  | `scripts/browser-extract.sh`  | one of `selector` / `eval` | `site`, `tool` |
 
 Each `tools/call` response carries `content: [{type: "text", text: "<summary JSON>"}]`
 where `<summary JSON>` is the verb's last stdout line (per the token-efficient
 output spec §3.1). `_meta.exitCode` and `_meta.stderr` are surfaced for
 diagnostics.
 
-Stage 2 (followup): `browser_click`, `browser_fill`, `browser_extract`.
+### Secrets discipline (AP-7)
+
+`browser_fill` deliberately has NO `secret` field. MCP has no stdin channel
+and putting secrets in tool arguments lands them in the request transcript.
+For real secret values, call `scripts/browser-fill.sh --secret-stdin`
+directly (the secret is piped via stdin and never reaches argv). Phase 14
+unit-tests this contract: `tests/browser-mcp.bats` asserts the schema does
+not expose any "secret" property and rejects unknown props via
+`additionalProperties: false`.
+
+### Env-var passthrough (whitelist)
+
+The MCP server does NOT inherit the client's full env. Only these prefixes
++ POSIX essentials pass through to spawned bash verbs (see
+`scripts/lib/node/mcp-server.mjs::ENV_WHITELIST_PREFIXES`):
+
+| Prefix | Purpose |
+|---|---|
+| `BROWSER_SKILL_*`     | skill internals (`BROWSER_SKILL_HOME`, trace ID, etc.) |
+| `BROWSER_STATS_*`     | post-condition contract + model-name injection |
+| `CLAUDE_*`            | `CLAUDE_MODEL`, `CLAUDE_USAGE_*`, `CLAUDE_SESSION_ID` |
+| `MIDSCENE_MODEL_*`    | local-VLM endpoint config (one envvar block reaches BOTH our skill AND midscene) |
+| `PLAYWRIGHT_*`        | adapter knobs + test injection |
+| `CHROME_DEVTOOLS_*`   | cdt-mcp adapter knobs |
+| `OBSCURA_*`           | obscura adapter knobs |
+| `STUB_*` / `FIXTURES_*` | test-only seams |
+| `MCP_*`               | reserved for future MCP overrides |
+
+Everything else (e.g. arbitrary `OPENAI_API_KEY` or unknown secrets in the
+client process) is filtered out. This is the AP-7-aligned default — opt-in
+later via expanding the whitelist, not via removing it.
 
 ## Smoke test
 
@@ -76,15 +109,21 @@ two surfaces.
   verbs, which honour AP-7 (no secrets in argv). MCP clients NEVER see
   credentials.
 
-## Limitations (Stage 1)
+## Limitations (Stage 1 + 2)
 
-- Two verbs only (`browser_open`, `browser_snapshot`). The other 40 verbs are
-  reachable only via direct bash.
-- No streaming progress events — Stage 1 is request/response only. MCP
-  supports `notifications/progress`; wiring it is a Stage 3 task.
+- 5 verbs exposed (open + snapshot + click + fill + extract). The other ~37
+  verbs (site / session / credential management, flow runner, capture mgmt,
+  stats, baseline, schema migration) are reachable only via direct bash.
+  Stage 3 candidates: `browser_wait`, `browser_press`, `browser_select`,
+  `browser_assert`.
+- No streaming progress events — request/response only. MCP supports
+  `notifications/progress`; wiring it is a Stage 3 task.
 - No tool-side authorization. Anything that can spawn the server can call any
   verb. The skill's existing per-verb typed-phrase confirmations (e.g.
   `--yes-i-know` on destructive ops) still apply at the bash boundary.
+- `browser_extract` does NOT expose `--scrape` (multi-URL batch mode) — too
+  many args and the output shape changes. Use `scripts/browser-extract.sh`
+  directly for that.
 
 ## Environment
 
