@@ -1,3 +1,5 @@
+bats_require_minimum_version 1.5.0
+
 load helpers
 
 # Tests for Phase 12 — per-action telemetry / browser-stats verb family.

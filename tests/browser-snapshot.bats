@@ -1,3 +1,5 @@
+bats_require_minimum_version 1.5.0
+
 load helpers
 
 setup() {
@@ -92,11 +94,14 @@ teardown() {
 }
 
 @test "browser-snapshot --capture: adapter failure → meta.json status=error (still finalized)" {
-  # Force failure by pointing at a non-existent stub binary.
+  # Force failure by pointing at a non-existent stub binary. The adapter
+  # bubbles up bash's canonical 127 "command not found" exit — assert that
+  # explicitly via `run -127` (silences bats BW01) so a future refactor that
+  # maps missing-binary to a typed exit code (e.g. EXIT_TOOL_MISSING) fails
+  # this test loudly and forces the contract to be re-declared here.
   PLAYWRIGHT_CLI_BIN="/nonexistent/playwright-cli-binary" \
   PLAYWRIGHT_CLI_FIXTURES_DIR="${FIXTURES_DIR}/playwright-cli" \
-    run bash "${SCRIPTS_DIR}/browser-snapshot.sh" --capture
-  [ "${status}" -ne 0 ] || fail "expected non-zero exit when adapter fails"
+    run -127 bash "${SCRIPTS_DIR}/browser-snapshot.sh" --capture
   [ -f "${BROWSER_SKILL_HOME}/captures/001/meta.json" ] || fail "meta.json not finalized after error"
   jq -e '.status == "error"' "${BROWSER_SKILL_HOME}/captures/001/meta.json" >/dev/null
 }
