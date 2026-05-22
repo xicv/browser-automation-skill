@@ -111,7 +111,7 @@ teardown() {
 
 # ---------- Phase 14 (MCP Stage 2): click + fill + extract ---------------
 
-@test "mcp-server: tools/list returns 5 tools (open + snapshot + click + fill + extract)" {
+@test "mcp-server: tools/list returns 6 tools (Phase 12: + browser_list-sites)" {
   result="$(printf '%s\n%s\n' \
     '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
     '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
@@ -119,10 +119,10 @@ teardown() {
   local call_resp
   call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
   printf '%s' "${call_resp}" \
-    | jq -e '.result.tools | length == 5' >/dev/null \
-    || fail "expected 5 tools; got: ${call_resp}"
+    | jq -e '.result.tools | length == 6' >/dev/null \
+    || fail "expected 6 tools; got: ${call_resp}"
   printf '%s' "${call_resp}" \
-    | jq -e '.result.tools | map(.name) | sort == ["browser_click","browser_extract","browser_fill","browser_open","browser_snapshot"]' >/dev/null \
+    | jq -e '.result.tools | map(.name) | sort == ["browser_click","browser_extract","browser_fill","browser_list-sites","browser_open","browser_snapshot"]' >/dev/null \
     || fail "tool names wrong: ${call_resp}"
 }
 
@@ -390,4 +390,62 @@ EOF
   call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
   printf '%s' "${call_resp}" | jq -e '.error.code == -32602' >/dev/null \
     || fail "expected -32602 invalid params; got: ${call_resp}"
+}
+
+# ---------- Phase 12 (TOON output mode amendment, 2026-05-22) ---------------
+# MCP auto-flip rule (amendment §4): for TOON-eligible verbs (§2), the server
+# appends --format=toon to the script invocation unless the client explicitly
+# passed `format:"json"`. This is the load-bearing token-savings path for MCP
+# callers (LLMs) — when this regresses, every MCP session pays the JSON tax.
+
+@test "mcp-server (P12): tools/list now exposes browser_list-sites (new tabular tool)" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" \
+    | jq -e '.result.tools | map(.name) | index("browser_list-sites") != null' >/dev/null \
+    || fail "expected browser_list-sites in tools/list; got: ${call_resp}"
+}
+
+@test "mcp-server (P12): browser_list-sites schema declares 'format' enum [toon, json]" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local schema
+  schema="$(printf '%s' "${result}" \
+    | jq -c 'select(.id==2) | .result.tools[] | select(.name == "browser_list-sites") | .inputSchema')"
+  printf '%s' "${schema}" | jq -e '.properties.format.enum == ["toon", "json"]' >/dev/null \
+    || fail "format enum wrong; got: ${schema}"
+}
+
+@test "mcp-server (P12): tools/call browser_list-sites WITHOUT format arg auto-flips to TOON" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_list-sites","arguments":{}}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp text
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  text="$(printf '%s' "${call_resp}" | jq -r '.result.content[0].text')"
+  # TOON shape: starts with `verb: list-sites` line, not a JSON object.
+  printf '%s\n' "${text}" | head -1 | grep -q '^verb: list-sites$' \
+    || fail "expected TOON 'verb: list-sites' first line; got:\n${text}"
+  printf '%s\n' "${text}" | grep -q '^status: ok$' \
+    || fail "expected 'status: ok' in TOON output; got:\n${text}"
+}
+
+@test "mcp-server (P12): tools/call browser_list-sites with format=json keeps JSON" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_list-sites","arguments":{"format":"json"}}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp text
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  text="$(printf '%s' "${call_resp}" | jq -r '.result.content[0].text')"
+  # JSON form: parseable as JSON.
+  printf '%s' "${text}" | jq -e '.verb == "list-sites" and .status == "ok"' >/dev/null \
+    || fail "expected JSON shape on format=json; got:\n${text}"
 }

@@ -66,5 +66,13 @@
       "selector": { "type": "string", "description": "CSS selector to extract text from" },
       "eval":     { "type": "string", "description": "JS expression evaluated in page context" }
     }
+  },
+
+  "list-sites": {
+    "description": "List registered site profiles (no creds). Returns inline sites[] table. Auto-flips to TOON in MCP (40-60% smaller than JSON; see Phase 12 spec amendment).",
+    "globalProps": ["format"],
+    "schemaExtras": {
+      "format": { "type": "string", "description": "Output envelope: 'toon' (default in MCP, ~40-60% smaller) or 'json'", "enum": ["toon", "json"] }
+    }
   }
 }

@@ -41,14 +41,21 @@ shift
 case "${sub_mode}" in
   list)
     limit=""
+    out_format=""   # Phase 12 amendment: --format=toon|json
     while [ "$#" -gt 0 ]; do
       case "$1" in
-        --limit) limit="$2"; shift 2 ;;
-        --since) shift 2 ;;  # accepted; deferred (out-of-scope filter)
-        *)       die "${EXIT_USAGE_ERROR}" "history list: unknown flag '$1'" ;;
+        --limit)    limit="$2"; shift 2 ;;
+        --since)    shift 2 ;;  # accepted; deferred (out-of-scope filter)
+        --format)   out_format="$2"; shift 2 ;;
+        --format=*) out_format="${1#--format=}"; shift ;;
+        *)          die "${EXIT_USAGE_ERROR}" "history list: unknown flag '$1'" ;;
       esac
     done
     total=0
+    # TOON mode consolidates rows into a single document with captures[] table
+    # (amendment §3); JSON mode keeps the streaming history_row events that
+    # callers already parse. Both modes share the same row source.
+    toon_rows='[]'
     if [ -d "${CAPTURES_DIR}" ]; then
       shopt -s nullglob
       # Sort by capture_id (which is monotonic per Phase 7); newest first.
@@ -65,13 +72,41 @@ case "${sub_mode}" in
         if [ -n "${limit}" ] && [ "${total}" -ge "${limit}" ]; then
           break
         fi
-        # Emit per-capture row event.
-        jq -c --arg event "history_row" \
-          '. + {event: $event}' "${meta}"
+        if [ "${out_format}" = "toon" ]; then
+          # Project to a FLAT tabular subset so TOON emits the table form
+          # (uniform field set across rows). Nested `files[]` etc. are
+          # dropped from the list view — `history show <id>` exposes the
+          # full meta when the caller needs it. This is the trade for the
+          # 40-60% byte savings vs the streaming JSON-row form.
+          toon_rows="$(jq --slurpfile m "${meta}" '
+            . + [{
+              capture_id:       $m[0].capture_id,
+              verb:             $m[0].verb,
+              status:           $m[0].status,
+              started_at:       $m[0].started_at,
+              finished_at:      ($m[0].finished_at // null),
+              flow_name:        ($m[0].flow_name // null),
+              step_count:       ($m[0].step_count // null),
+              successful_steps: ($m[0].successful_steps // null),
+              failed_steps:     ($m[0].failed_steps // null),
+              total_bytes:      ($m[0].total_bytes // null)
+            }]' <<< "${toon_rows}")"
+        else
+          # JSON streaming-row mode (unchanged default behavior).
+          jq -c --arg event "history_row" \
+            '. + {event: $event}' "${meta}"
+        fi
         total=$((total + 1))
       done
     fi
-    emit_summary verb=history tool=none why=list status=ok mode=list total="${total}"
+    if [ "${out_format}" = "toon" ]; then
+      duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
+      jq -cn --argjson r "${toon_rows}" --argjson t "${total}" --argjson d "${duration_ms}" \
+        '{verb:"history",tool:"none",why:"list",status:"ok",mode:"list",total:$t,captures:$r,duration_ms:$d}' \
+        | emit_format toon
+    else
+      emit_summary verb=history tool=none why=list status=ok mode=list total="${total}"
+    fi
     exit 0
     ;;
 

@@ -8,10 +8,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=lib/output.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/output.sh"
 # shellcheck source=lib/site.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/site.sh"
 init_paths
+
+# Phase 12 amendment: --format=toon|json (parent §4 + amendment §1).
+# Parse early so it's classified before we touch any state. Empty default
+# leaves emit_format in passthrough mode (single-line JSON, unchanged).
+out_format="$(parse_output_format "$@")"
 
 started_at_ms="$(now_ms)"
 
@@ -39,4 +47,5 @@ fi
 duration_ms=$(( $(now_ms) - started_at_ms ))
 jq -cn --argjson r "${rows}" --argjson c "${count}" --argjson d "${duration_ms}" \
   '{verb: "list-sites", tool: "none", why: "list", status: "ok",
-    count: $c, sites: $r, duration_ms: $d}'
+    count: $c, sites: $r, duration_ms: $d}' \
+  | emit_format "${out_format}"

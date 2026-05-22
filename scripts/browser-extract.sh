@@ -40,11 +40,24 @@ parse_verb_globals "$@"
 resolve_session_storage_state
 
 selector="" eval_js="" mode_scrape=0 mode_stealth=0 concurrency=""
+# Phase 12 amendment: --format=toon|json (parent spec §4 + amendment §1).
+# Default empty leaves emit_format in passthrough (single-line JSON, unchanged).
+out_format=""
 verb_argv=()
 positional_urls=()
 i=0
 while [ "${i}" -lt "${#REMAINING_ARGV[@]}" ]; do
   case "${REMAINING_ARGV[i]}" in
+    --format)
+      # Phase 12: swallow at the verb boundary; do NOT pass to adapter.
+      out_format="${REMAINING_ARGV[i+1]:-}"
+      [ -n "${out_format}" ] || die "${EXIT_USAGE_ERROR}" "--format requires a value"
+      i=$((i + 2))
+      ;;
+    --format=*)
+      out_format="${REMAINING_ARGV[i]#--format=}"
+      i=$((i + 1))
+      ;;
     --selector)
       selector="${REMAINING_ARGV[i+1]:-}"
       [ -n "${selector}" ] || die "${EXIT_USAGE_ERROR}" "--selector requires a value"
@@ -143,7 +156,12 @@ BROWSER_STATS_OBSERVED="${adapter_out}" \
     "extract" "${tool_name}" "${stats_t0}" "${adapter_rc}" "${adapter_out}" "" \
     -- "${verb_argv[@]}" || true
 
-[ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
+# Phase 12: TOON callers consume a single consolidated document; streaming
+# per-URL events would prepend duplicate data + break the doc-shape guarantee.
+# Suppress streaming when --format=toon is active on a multi-URL mode.
+if [ "${out_format}" != "toon" ] || [ "${mode_scrape}" != "1" ]; then
+  [ -n "${adapter_out}" ] && printf '%s\n' "${adapter_out}"
+fi
 
 if [ "${mode_scrape}" = "1" ]; then
   # Aggregate per-URL events into success/failure counts for the summary line.
@@ -163,9 +181,36 @@ if [ "${mode_scrape}" = "1" ]; then
   else
     overall_status=partial
   fi
-  emit_summary verb=extract tool="${tool_name}" why="${why}" \
-    status="${overall_status}" mode=scrape \
-    total_urls="${total}" successful="${successful}" failed="${failed}"
+  if [ "${out_format}" = "toon" ]; then
+    # Consolidate per-URL events into a TOON results[] table (amendment §3).
+    # Project to uniform columns so the encoder picks table form. The full
+    # streaming events stay available in stats.jsonl for replay/diagnosis.
+    results="$(printf '%s\n' "${adapter_out}" | jq -s '
+      map(select(.event=="scrape_url"))
+      | map({
+          url:    .url,
+          status: (if (.error // false) then "error" else "ok" end),
+          title:  (.title // null),
+          error:  (.error // null)
+        })')"
+    duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
+    # Replace the streaming-line output (already printed above) is unavoidable
+    # in scrape mode; the consolidated TOON document follows. Callers using
+    # --format=toon should only consume the trailing TOON document, not the
+    # per-line events; the events themselves remain valid JSONL for stat tools.
+    jq -cn --arg verb extract --arg tool "${tool_name}" --arg why "${why}" \
+           --arg status "${overall_status}" \
+           --argjson total "${total}" --argjson succ "${successful}" --argjson fail "${failed}" \
+           --argjson r "${results}" --argjson d "${duration_ms}" \
+      '{verb:$verb,tool:$tool,why:$why,status:$status,mode:"scrape",
+        total_urls:$total,successful:$succ,failed:$fail,
+        results:$r,duration_ms:$d}' \
+      | emit_format toon
+  else
+    emit_summary verb=extract tool="${tool_name}" why="${why}" \
+      status="${overall_status}" mode=scrape \
+      total_urls="${total}" successful="${successful}" failed="${failed}"
+  fi
   [ "${overall_status}" = "ok" ] && exit 0
   exit "${adapter_rc}"
 fi

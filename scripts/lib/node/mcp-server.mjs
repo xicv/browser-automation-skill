@@ -171,7 +171,7 @@ function buildToolsAutoDiscovered() {
       description: meta.description,
       inputSchema,
       verbScript,
-      argMap: makeArgMap(meta),
+      argMap: makeArgMap(meta, verb),
       oneOf: meta.oneOf || null,
     });
   }
@@ -179,8 +179,24 @@ function buildToolsAutoDiscovered() {
   return tools.length > 0 ? tools : null;
 }
 
-function makeArgMap(meta) {
+// Phase 12 amendment (2026-05-22): verbs whose summary is dominated by an
+// inline uniform-shape array. The MCP server auto-appends --format=toon for
+// these UNLESS the client explicitly set `format:"json"` in tool args.
+// Mirrors docs/superpowers/specs/2026-05-22-toon-output-amendment.md §2.
+const TOON_ELIGIBLE_VERBS = new Set([
+  'list-sites',
+  'list-sessions',
+  'history',
+  'tab-list',
+  'stats',
+  // 'extract' is eligible only in --scrape mode (excluded from MCP); the
+  // auto-flip stays off for the single-page extract that IS exposed.
+  'doctor',
+]);
+
+function makeArgMap(meta, verb) {
   const required = meta.required || [];
+  const isToonEligible = TOON_ELIGIBLE_VERBS.has(verb);
   // Generic argMap: emit required flags first (so `text` always lands as
   // `--text VAL`, deterministic ordering), then optional flags, then site/tool
   // last for human-readability of stub-log argv.
@@ -191,8 +207,8 @@ function makeArgMap(meta) {
       if (args[key] === undefined || args[key] === null) continue;
       _emitArg(out, key, args[key]);
     }
-    // Optional next (anything not in required + not site/tool).
-    const skip = new Set([...required, 'site', 'tool']);
+    // Optional next (anything not in required + not site/tool/format).
+    const skip = new Set([...required, 'site', 'tool', 'format']);
     for (const [k, v] of Object.entries(args)) {
       if (skip.has(k)) continue;
       if (v === undefined || v === null) continue;
@@ -201,6 +217,12 @@ function makeArgMap(meta) {
     // Globals last.
     if (args.site) out.push('--site', args.site);
     if (args.tool) out.push('--tool', args.tool);
+    // Phase 12 auto-flip rule (amendment §4): if verb is TOON-eligible and
+    // client did NOT specify format, default to toon. Explicit json/toon
+    // honored as-is.
+    let format = args.format;
+    if (!format && isToonEligible) format = 'toon';
+    if (format) out.push('--format', format);
     return out;
   };
 }
@@ -505,18 +527,30 @@ function handleToolsCall(id, params) {
     const lines = stdout.replace(/\n+$/, '').split('\n');
     const lastLine = lines[lines.length - 1] ?? '';
     let summary;
+    let contentText;
     try {
       summary = JSON.parse(lastLine);
+      contentText = JSON.stringify(summary);
     } catch {
-      summary = {
-        status: code === 0 ? 'ok' : 'error',
-        stdout: stdout.slice(0, 2048),
-        stderr: stderr.slice(0, 2048),
-        exitCode: code,
-      };
+      if (code === 0 && stdout.length > 0) {
+        // Phase 12 amendment (2026-05-22): verb emitted non-JSON (e.g. TOON
+        // for tabular verbs). Pass stdout through verbatim as text content;
+        // the LLM is expected to read TOON natively. summary remains a
+        // synthetic ok-status envelope for isError/_meta computation only.
+        summary = { status: 'ok' };
+        contentText = stdout;
+      } else {
+        summary = {
+          status: 'error',
+          stdout: stdout.slice(0, 2048),
+          stderr: stderr.slice(0, 2048),
+          exitCode: code,
+        };
+        contentText = JSON.stringify(summary);
+      }
     }
     reply(id, {
-      content: [{ type: 'text', text: JSON.stringify(summary) }],
+      content: [{ type: 'text', text: contentText }],
       isError: code !== 0 && summary.status !== 'ok',
       _meta: {
         exitCode: code,

@@ -1,4 +1,5 @@
 # tests/site-verbs.bats
+bats_require_minimum_version 1.5.0
 load helpers
 
 setup() {
@@ -118,6 +119,61 @@ teardown() { teardown_temp_home; }
   [ "$(printf '%s' "${last_json}" | jq -r '.sites[0].url')"   = "https://a.test" ]
   [ "$(printf '%s' "${last_json}" | jq -r '.sites[0].label')" = "App A" ]
   [ "$(printf '%s' "${last_json}" | jq -r '.sites[1].name')"  = "b" ]
+}
+
+# --- Phase 12 (TOON output mode amendment, 2026-05-22) ----------------------
+
+@test "list-sites --format=toon: emits TOON instead of JSON, preserves required keys" {
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name a --url https://a.test --label "App A" >/dev/null
+  bash "${SCRIPTS_DIR}/browser-add-site.sh" --name b --url https://b.test --label "App B" >/dev/null
+  run bash "${SCRIPTS_DIR}/browser-list-sites.sh" --format=toon
+  assert_status 0
+  # Spec amendment §3: required keys verb/tool/why/status present at root.
+  printf '%s\n' "${lines[@]}" | grep -q '^verb: list-sites$' \
+    || fail "missing 'verb: list-sites'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^tool: none$' \
+    || fail "missing 'tool: none'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^status: ok$' \
+    || fail "missing 'status: ok'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^count: 2$' \
+    || fail "missing 'count: 2'; out:\n${output}"
+  # Tabular header — toon collapses sites[] into table form.
+  printf '%s\n' "${lines[@]}" | grep -q '^sites\[2\]' \
+    || fail "missing 'sites[2]' table header; out:\n${output}"
+  # Row data present.
+  printf '%s\n' "${lines[@]}" | grep -q 'https://a.test' \
+    || fail "missing site a row; out:\n${output}"
+}
+
+@test "list-sites --format=toon: empty directory still emits valid TOON" {
+  run bash "${SCRIPTS_DIR}/browser-list-sites.sh" --format=toon
+  assert_status 0
+  printf '%s\n' "${lines[@]}" | grep -q '^verb: list-sites$' \
+    || fail "missing 'verb: list-sites'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^count: 0$' \
+    || fail "missing 'count: 0'; out:\n${output}"
+}
+
+@test "list-sites --format=toon: byte-savings >=30% vs JSON default (acceptance bar)" {
+  # Spec amendment §9 acceptance #5. With multiple sites the table-form
+  # advantage compounds; we add 6 to mirror the synthesized benchmark.
+  for i in 1 2 3 4 5 6; do
+    bash "${SCRIPTS_DIR}/browser-add-site.sh" --name "site${i}" --url "https://site${i}.test" --label "Site ${i}" >/dev/null
+  done
+  local json toon json_bytes toon_bytes savings
+  json="$(bash "${SCRIPTS_DIR}/browser-list-sites.sh")"
+  toon="$(bash "${SCRIPTS_DIR}/browser-list-sites.sh" --format=toon)"
+  json_bytes="${#json}"
+  toon_bytes="${#toon}"
+  savings=$(( (json_bytes - toon_bytes) * 100 / json_bytes ))
+  [ "${savings}" -ge 30 ] \
+    || fail "expected >=30% savings; got json=${json_bytes}B, toon=${toon_bytes}B, savings=${savings}%"
+}
+
+@test "list-sites --format=yaml: rejects unknown format with EXIT_USAGE_ERROR" {
+  run -2 bash "${SCRIPTS_DIR}/browser-list-sites.sh" --format=yaml
+  [[ "${output}" == *"unknown"* ]] || [[ "${output}" == *"format"* ]] \
+    || fail "expected error mentioning unknown/format; got:\n${output}"
 }
 
 @test "show-site: prints profile JSON and a JSON summary" {

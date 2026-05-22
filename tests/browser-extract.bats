@@ -1,3 +1,4 @@
+bats_require_minimum_version 1.5.0
 load helpers
 
 # Phase 5 part 1e-i: new browser-extract.sh routes to chrome-devtools-mcp by
@@ -141,6 +142,49 @@ teardown() { teardown_temp_home; }
   assert_output_contains "dry-run"
   last_line="$(printf '%s\n' "${lines[@]}" | tail -1)"
   printf '%s' "${last_line}" | jq -e '.mode == "stealth" and .url == "https://example.com" and .dry_run == true' >/dev/null
+}
+
+# --- Phase 12 (TOON output mode amendment, 2026-05-22) ----------------------
+
+@test "browser-extract --scrape --format=toon: emits consolidated TOON with results table" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura" \
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura" \
+    run bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --scrape --format=toon \
+      --eval document.title https://example.com https://example.org https://example.net
+  assert_status 0
+  # Required keys at TOON root.
+  printf '%s\n' "${lines[@]}" | grep -q '^verb: extract$' \
+    || fail "missing 'verb: extract'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^tool: obscura$' \
+    || fail "missing 'tool: obscura'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^status: ok$' \
+    || fail "missing 'status: ok'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^mode: scrape$' \
+    || fail "missing 'mode: scrape'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^total_urls: 3$' \
+    || fail "missing 'total_urls: 3'; out:\n${output}"
+  # Tabular results table.
+  printf '%s\n' "${lines[@]}" | grep -q '^results\[3\]' \
+    || fail "missing 'results[3]' table header; out:\n${output}"
+  # JSON streaming scrape_url events are CONSOLIDATED out of TOON mode.
+  printf '%s' "${output}" | grep -q '"event":"scrape_url"' \
+    && fail "TOON mode should consolidate; no raw scrape_url events expected; out:\n${output}"
+  return 0
+}
+
+@test "browser-extract --scrape --format=toon: byte-savings >=30% vs JSON streaming" {
+  OBSCURA_BIN="${STUBS_DIR}/obscura"
+  OBSCURA_FIXTURES_DIR="${FIXTURES_DIR}/obscura"
+  export OBSCURA_BIN OBSCURA_FIXTURES_DIR
+  json="$(bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --scrape \
+            --eval document.title https://example.com https://example.org https://example.net)"
+  toon="$(bash "${SCRIPTS_DIR}/browser-extract.sh" --tool obscura --scrape --format=toon \
+            --eval document.title https://example.com https://example.org https://example.net)"
+  json_bytes="${#json}"
+  toon_bytes="${#toon}"
+  savings=$(( (json_bytes - toon_bytes) * 100 / json_bytes ))
+  [ "${savings}" -ge 30 ] \
+    || fail "expected >=30% savings; got json=${json_bytes}B, toon=${toon_bytes}B, savings=${savings}%"
 }
 
 # --- Phase 8 part 2-i: auto-routing (no --tool obscura needed) ---

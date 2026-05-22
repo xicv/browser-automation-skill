@@ -70,7 +70,7 @@ claude mcp add browser-skill --scope user -- npx -y browser-automation-skill@lat
 claude mcp list   # → browser-skill: ... ✓ Connected
 ```
 
-5 tools become available: `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`. Pin a version (`@0.71.1`) for reproducibility, or omit `@latest` to track the registry tip. (v0.71.0 emitted top-level `oneOf` and was rejected by the Anthropic Messages API — use `@latest` or `@0.71.1+`.)
+6 tools become available: `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`, `browser_list-sites`. Pin a version (`@0.72.0`) for reproducibility, or omit `@latest` to track the registry tip. Phase 12 (v0.72.0+) auto-flips MCP tool output to TOON format for tabular verbs (40-65% token savings vs JSON, +0.4pp LLM parse accuracy; spec: `docs/superpowers/specs/2026-05-22-toon-output-amendment.md`).
 
 **Other MCP clients (Continue / Cline / midscene / Stagehand):** add a stdio entry pointing at `npx -y browser-automation-skill@latest serve`. Protocol: MCP 2024-11-05, NDJSON over stdio.
 

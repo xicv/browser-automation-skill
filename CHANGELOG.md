@@ -11,6 +11,50 @@ Every entry has a tag in `[brackets]`:
 - `[internal]` lint, tests, CI — no user-visible change
 - `[docs]` README / SKILL.md / references / examples
 
+## [v0.72.0-phase-12-toon-output-mode] - 2026-05-22
+
+**Phase 12 ships TOON output mode** — Token-Oriented Object Notation, the 2026 SOTA for LLM-friendly tabular tool output. The `--format=toon` flag becomes the 4th orthogonal flag joining `--raw` / `--json` / `--depth` (spec amendment `docs/superpowers/specs/2026-05-22-toon-output-amendment.md`). MCP server auto-flips to TOON for tabular tools so daily MCP users save tokens by default.
+
+### Headlines
+
+- **40-65% real measured byte-savings** on inline-tabular verbs (`list-sites` 41%, `history list` 65%, `extract --scrape` 30%+).
+- **+0.4 percentage points LLM parse accuracy** vs JSON in published benchmarks ([InfoQ Nov 2025](https://www.infoq.com/news/2025/11/toon-reduce-llm-cost-tokens/)) — TOON saves tokens without hurting accuracy.
+- **JSON remains the default.** Bash callers + scripted pipelines are unbroken. Opt-in via `--format=toon` flag or MCP `format` arg.
+- **MCP auto-flip rule (amendment §4):** MCP server defaults to TOON for TOON-eligible verbs unless client explicitly sets `format:"json"`. Daily MCP users get the savings automatically.
+- **`browser_list-sites` now exposed via MCP** as the first new tabular tool (immediate auto-TOON benefit).
+
+### Spec + infrastructure
+
+- [docs] **Spec amendment** `docs/superpowers/specs/2026-05-22-toon-output-amendment.md` locks `--format=toon` as 4th orthogonal flag, defines verb-eligibility gate (uniform array ≥3 rows × ≥2 fields), MCP auto-flip rule, acceptance criteria.
+- [feat] **TOON encoder bridge** `scripts/lib/node/toon-encode.mjs` — thin Node CLI around the vendored `@toon-format/toon` reference impl. JSON on stdin → TOON on stdout. Exit codes: 2 (bad input), 3 (encoder error).
+- [feat] **Vendored `@toon-format/toon` v2.3.0** (MIT) under `scripts/lib/node/vendor/toon.mjs` + LICENSE attribution. Preserves the skill's zero-runtime-deps Node pattern.
+- [feat] **`emit_format` + `parse_output_format` helpers** in `scripts/lib/output.sh`. Verbs that opt into TOON pipe their final JSON through `emit_format "${out_format}"`.
+
+### Verb wiring (3 highest-ROI)
+
+- [feat] **`browser-list-sites --format=toon`** — 41% savings on 6 sites (953 → 557 bytes).
+- [feat] **`browser-history list --format=toon`** — 65% savings on 5 captures (1906 → 655 bytes). Flat-column projection drops nested `files[]` from the list view (full meta still accessible via `history show <id>`).
+- [feat] **`browser-extract --scrape --format=toon`** — consolidates per-URL `scrape_url` events into single TOON `results[]` table; streaming events suppressed in TOON mode (callers consume one document).
+
+### MCP server
+
+- [feat] **`browser_list-sites` exposed as MCP tool.** Auto-flips to TOON when no `format` arg supplied.
+- [feat] **Auto-flip mechanism** in `makeArgMap` — `TOON_ELIGIBLE_VERBS` set (mirrors spec amendment §2: list-sites, list-sessions, history, tab-list, stats, doctor). When verb is eligible AND no explicit format arg, server appends `--format=toon`.
+- [feat] **`format` arg passthrough** — clients can opt-in with `{"format":"toon"}` or opt-out with `{"format":"json"}`. Schema enum `["toon","json"]`.
+- [fix] **`handleToolsCall` no longer force-wraps non-JSON stdout in an envelope.** When stdout is non-JSON + exit 0 (TOON case), the raw text is passed through verbatim as `content[0].text`. Prior behavior incorrectly stringified TOON inside a synthetic JSON envelope.
+
+### Tests
+
+- [internal] **+22 bats** across `tests/toon-encode.bats` (6), `tests/output_format.bats` (7), `tests/site-verbs.bats` (+4), `tests/history.bats` (+3), `tests/browser-extract.bats` (+2), `tests/browser-mcp.bats` (+4 P12 + 1 updated tool-count).
+- [internal] **Byte-savings acceptance bar (amendment §9 #5):** ≥30% savings asserted in 3 verb-level + 1 helper-level test. Regression-gates future encoder/projection changes.
+
+### Notes for users
+
+- **Drop-in for MCP users.** Restart your Claude Code session (or your MCP client). `claude mcp get browser-skill` should now show 6 tools. The new `browser_list-sites` returns TOON by default — that's the 40%-savings path.
+- **Bash CLI is unchanged.** Existing `jq -c | tail -1` pipelines keep working — they were never given `--format=toon`.
+- **Opt-out:** `--format=json` (or MCP `{"format":"json"}`) restores JSON if you need it (e.g. piping to a script that expects JSON).
+- **Out of scope this PR:** TOON-ifying snapshot YAML, exposing `history`/`tab-list`/`stats` via MCP (needs argPrefix machinery for sub-modes); these land in follow-up PRs per amendment §8.
+
 ## [v0.71.1-mcp-anthropic-oneof-fix] - 2026-05-22
 
 **Hot-fix for v0.71.0 MCP server.** Three Stage-2 tools (`browser_click`, `browser_fill`, `browser_extract`) emitted top-level `oneOf` in their `inputSchema`, which the Anthropic Messages API rejects with HTTP 400 (`input_schema does not support oneOf, allOf, or anyOf at the top level`). Because one bad tool poisons the whole `tools[]` payload, ANY Claude Code session that loaded `browser-skill` over MCP could not call any tool from any server. Reproduced from an unrelated mqtt-skill invocation.

@@ -60,6 +60,58 @@ emit_event() {
   summary_json "event=${event}" "$@"
 }
 
+# --- Output-format helpers (Phase 12 amendment, 2026-05-22) -----------------
+# Adds --format=toon as the 4th orthogonal flag (parent §4 + amendment §1).
+# JSON stays the default; toon shells through the vendored encoder.
+
+# parse_output_format ARG...
+# Scan argv for `--format <value>` or `--format=<value>`; echo the value (or
+# empty when absent). Verb scripts call this BEFORE their main arg loop to
+# pre-classify output mode. Returning empty (not "json") lets downstream code
+# treat "passthrough JSON" as the default without an extra branch.
+parse_output_format() {
+  local arg seen_flag=0
+  for arg in "$@"; do
+    if [ "${seen_flag}" = "1" ]; then
+      printf '%s\n' "${arg}"
+      return 0
+    fi
+    case "${arg}" in
+      --format=*) printf '%s\n' "${arg#--format=}"; return 0 ;;
+      --format)   seen_flag=1 ;;
+    esac
+  done
+  printf '\n' | tr -d '\n'   # explicit empty line-suppressed output
+}
+
+_output_toon_bridge_path() {
+  local lib_dir
+  lib_dir="$(dirname "${BASH_SOURCE[0]}")"
+  printf '%s/node/toon-encode.mjs' "${lib_dir}"
+}
+
+# emit_format FORMAT
+# Filter stdin -> stdout through the requested output envelope. FORMAT:
+#   ""|json  passthrough cat (the JSON line stays as-is, single-line)
+#   toon     pipe through vendored @toon-format/toon encoder
+# Verbs that opt into --format=toon should pipe their existing jq-built JSON
+# through this helper at the LAST step (after summary construction). The
+# helper exists so adapters never hand-roll TOON serialization (amendment §3).
+emit_format() {
+  local format="${1:-}"
+  case "${format}" in
+    ""|json)
+      cat
+      ;;
+    toon)
+      node "$(_output_toon_bridge_path)"
+      ;;
+    *)
+      die "${EXIT_USAGE_ERROR}" "emit_format: unknown format '${format}' (expected json|toon)"
+      ;;
+  esac
+}
+
 # capture_path CATEGORY SITE EXT
 # Returns ${CAPTURES_DIR}/<category>/<site>--<ts>.<ext> and mkdir -p's the parent.
 # CATEGORY: snapshots | screenshots | hars | traces | videos | pdfs (spec §6).

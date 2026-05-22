@@ -1,3 +1,4 @@
+bats_require_minimum_version 1.5.0
 load helpers
 
 # Phase 9 part 1-v — history list/show/diff/clear (closes Phase 9 alongside
@@ -46,6 +47,50 @@ _seed_captures() {
   assert_status 0
   rows="$(printf '%s\n' "${lines[@]}" | jq -s 'map(select(.event=="history_row")) | length')"
   [ "${rows}" = "2" ] || fail "expected 2 rows under --limit 2, got ${rows}"
+}
+
+# --- Phase 12 (TOON output mode amendment, 2026-05-22) ----------------------
+
+@test "history list --format=toon: emits consolidated TOON document with captures table" {
+  _seed_captures 3
+  run bash "${SCRIPTS_DIR}/browser-history.sh" list --format=toon
+  assert_status 0
+  # Required-key checks at TOON root.
+  printf '%s\n' "${lines[@]}" | grep -q '^verb: history$' \
+    || fail "missing 'verb: history'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^status: ok$' \
+    || fail "missing 'status: ok'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^total: 3$' \
+    || fail "missing 'total: 3'; out:\n${output}"
+  # Tabular table header for captures[3]. Field set depends on meta.json
+  # shape (capture_id, verb, status, ...); just assert the table form.
+  printf '%s\n' "${lines[@]}" | grep -q '^captures\[3\]' \
+    || fail "missing 'captures[3]' table header; out:\n${output}"
+  # No "event:history_row" streaming lines in TOON mode (single doc only).
+  printf '%s\n' "${lines[@]}" | grep -q 'history_row' \
+    && fail "TOON mode should consolidate; no history_row events expected; out:\n${output}"
+  return 0
+}
+
+@test "history list --format=toon: empty captures dir still emits valid TOON" {
+  run bash "${SCRIPTS_DIR}/browser-history.sh" list --format=toon
+  assert_status 0
+  printf '%s\n' "${lines[@]}" | grep -q '^verb: history$' \
+    || fail "missing 'verb: history'; out:\n${output}"
+  printf '%s\n' "${lines[@]}" | grep -q '^total: 0$' \
+    || fail "missing 'total: 0'; out:\n${output}"
+}
+
+@test "history list --format=toon: byte-savings >=30% vs JSON streaming form" {
+  _seed_captures 5
+  local json toon json_bytes toon_bytes savings
+  json="$(bash "${SCRIPTS_DIR}/browser-history.sh" list)"
+  toon="$(bash "${SCRIPTS_DIR}/browser-history.sh" list --format=toon)"
+  json_bytes="${#json}"
+  toon_bytes="${#toon}"
+  savings=$(( (json_bytes - toon_bytes) * 100 / json_bytes ))
+  [ "${savings}" -ge 30 ] \
+    || fail "expected >=30% savings; got json=${json_bytes}B, toon=${toon_bytes}B, savings=${savings}%"
 }
 
 # --- history show ---
