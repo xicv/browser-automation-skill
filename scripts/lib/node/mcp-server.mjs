@@ -129,11 +129,19 @@ function buildToolsAutoDiscovered() {
     const excludeFlags = new Set(meta.excludeFlags || []);
     const schemaExtras = meta.schemaExtras || {};
 
-    // Build properties: union of (adapter flags - excluded) + globals (site, tool).
+    // Build properties: union of (adapter flags - excluded) + extra schemaExtras
+    // keys (e.g. ref/selector for verbs whose wrappers accept them even though
+    // some adapters don't declare them) + globals (site, tool).
     const properties = {};
     for (const flag of discInfo.flags) {
       if (excludeFlags.has(flag)) continue;
       properties[flag] = schemaExtras[flag] || { type: 'string' };
+    }
+    // Extras not covered by adapter flags (constraint targets, e.g. fill.selector).
+    for (const [extraKey, extraSchema] of Object.entries(schemaExtras)) {
+      if (extraKey === 'site' || extraKey === 'tool') continue;
+      if (excludeFlags.has(extraKey)) continue;
+      if (!(extraKey in properties)) properties[extraKey] = extraSchema;
     }
     // Globals: site (always), tool (always — enum derived from adapters that
     // support this verb).
@@ -154,7 +162,9 @@ function buildToolsAutoDiscovered() {
       additionalProperties: false,
     };
     if (meta.required) inputSchema.required = meta.required;
-    if (meta.oneOf)    inputSchema.oneOf    = meta.oneOf;
+    // NOTE: meta.oneOf is NOT emitted into inputSchema — the Anthropic Messages
+    // API rejects top-level oneOf/anyOf/allOf and would poison the whole
+    // tools[] payload. Constraint is enforced at runtime in handleToolsCall.
 
     tools.push({
       name: `browser_${verb}`,
@@ -162,6 +172,7 @@ function buildToolsAutoDiscovered() {
       inputSchema,
       verbScript,
       argMap: makeArgMap(meta),
+      oneOf: meta.oneOf || null,
     });
   }
 
@@ -275,10 +286,10 @@ let TOOLS = [
         site:     { type: 'string' },
         tool:     { type: 'string', enum: ['playwright-cli', 'playwright-lib', 'chrome-devtools-mcp', 'obscura'] },
       },
-      oneOf: [{ required: ['ref'] }, { required: ['selector'] }],
       additionalProperties: false,
     },
     verbScript: 'browser-click.sh',
+    oneOf: [{ required: ['ref'] }, { required: ['selector'] }],
     argMap: (args) => {
       const out = [];
       if (args.ref)      out.push('--ref', args.ref);
@@ -306,10 +317,10 @@ let TOOLS = [
         tool:     { type: 'string', enum: ['playwright-cli', 'playwright-lib', 'chrome-devtools-mcp', 'obscura'] },
       },
       required: ['text'],
-      oneOf: [{ required: ['ref'] }, { required: ['selector'] }],
       additionalProperties: false,
     },
     verbScript: 'browser-fill.sh',
+    oneOf: [{ required: ['ref'] }, { required: ['selector'] }],
     argMap: (args) => {
       const out = [];
       if (args.ref)      out.push('--ref', args.ref);
@@ -335,10 +346,10 @@ let TOOLS = [
         site:     { type: 'string' },
         tool:     { type: 'string', enum: ['playwright-cli', 'playwright-lib', 'chrome-devtools-mcp', 'obscura'] },
       },
-      oneOf: [{ required: ['selector'] }, { required: ['eval'] }],
       additionalProperties: false,
     },
     verbScript: 'browser-extract.sh',
+    oneOf: [{ required: ['selector'] }, { required: ['eval'] }],
     argMap: (args) => {
       const out = [];
       if (args.selector) out.push('--selector', args.selector);
@@ -440,12 +451,34 @@ function handleToolsList(id) {
   });
 }
 
+// Runtime XOR validator. Anthropic API rejects top-level oneOf in JSON Schema,
+// so mutual-exclusion constraints (e.g. click: ref XOR selector) are stored
+// on the tool struct as `tool.oneOf` and enforced HERE before spawn. Returns
+// null on success, or an error message string on violation.
+function validateOneOf(args, oneOf) {
+  if (!oneOf) return null;
+  const present = (k) => args[k] !== undefined && args[k] !== null && args[k] !== '';
+  const hits = oneOf.filter((g) => (g.required || []).every(present));
+  if (hits.length === 1) return null;
+  const labels = oneOf.map((g) => (g.required || []).join('+')).join(' OR ');
+  if (hits.length === 0) {
+    return `must provide exactly one of: ${labels}`;
+  }
+  return `must provide exactly one of: ${labels} (got multiple)`;
+}
+
 function handleToolsCall(id, params) {
   const name = params?.name;
   const args = params?.arguments ?? {};
   const tool = TOOLS_BY_NAME[name];
   if (!tool) {
     replyError(id, -32602, `Unknown tool: ${name}`);
+    return;
+  }
+
+  const oneOfErr = validateOneOf(args, tool.oneOf);
+  if (oneOfErr) {
+    replyError(id, -32602, `Invalid arguments for ${name}: ${oneOfErr}`);
     return;
   }
 

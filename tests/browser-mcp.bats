@@ -322,3 +322,72 @@ EOF
   rm -f "${env_dump}" "${child_stub}"
   unset MIDSCENE_MODEL_BASE_URL PLAYWRIGHT_CLI_BIN PLAYWRIGHT_CLI_FIXTURES_DIR
 }
+
+# ---------- Anthropic API compatibility: no top-level oneOf/anyOf/allOf ----
+# Anthropic Messages API rejects entire tools[] payload if ANY tool's
+# inputSchema has oneOf/anyOf/allOf/if/then/else at the root. Only
+# type/properties/required/additionalProperties/description are allowed.
+# These tests are the load-bearing contract — one regression here breaks
+# every MCP session that loads browser-skill.
+
+@test "mcp-server: NO tool has top-level oneOf/anyOf/allOf in inputSchema (Anthropic API contract)" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp offenders
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  offenders="$(printf '%s' "${call_resp}" \
+    | jq -c '[.result.tools[] | select(.inputSchema | has("oneOf") or has("anyOf") or has("allOf")) | .name]')"
+  [ "${offenders}" = "[]" ] \
+    || fail "Tools with forbidden root combinators (Anthropic API rejects): ${offenders}"
+}
+
+@test "mcp-server: browser_fill exposes 'selector' property (oneOf used to reference phantom prop)" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local fill_props
+  fill_props="$(printf '%s' "${result}" \
+    | jq -c 'select(.id==2) | .result.tools[] | select(.name == "browser_fill") | .inputSchema.properties | keys')"
+  printf '%s' "${fill_props}" | jq -e 'index("selector") != null' >/dev/null \
+    || fail "browser_fill.properties must include 'selector' (constraint references it); got: ${fill_props}"
+  printf '%s' "${fill_props}" | jq -e 'index("ref") != null' >/dev/null \
+    || fail "browser_fill.properties must include 'ref'; got: ${fill_props}"
+}
+
+@test "mcp-server: tools/call browser_click with NEITHER ref nor selector returns -32602" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_click","arguments":{}}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" | jq -e '.error.code == -32602' >/dev/null \
+    || fail "expected -32602 invalid params; got: ${call_resp}"
+  printf '%s' "${call_resp}" | jq -e '.error.message | test("ref|selector"; "i")' >/dev/null \
+    || fail "error message should mention ref/selector; got: ${call_resp}"
+}
+
+@test "mcp-server: tools/call browser_click with BOTH ref AND selector returns -32602" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_click","arguments":{"ref":"e1","selector":".btn"}}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" | jq -e '.error.code == -32602' >/dev/null \
+    || fail "expected -32602 invalid params; got: ${call_resp}"
+}
+
+@test "mcp-server: tools/call browser_extract with neither selector nor eval returns -32602" {
+  result="$(printf '%s\n%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"browser_extract","arguments":{}}}' \
+    | node "${MCP_BIN}" 2>/dev/null)"
+  local call_resp
+  call_resp="$(printf '%s' "${result}" | jq -c 'select(.id==2)')"
+  printf '%s' "${call_resp}" | jq -e '.error.code == -32602' >/dev/null \
+    || fail "expected -32602 invalid params; got: ${call_resp}"
+}

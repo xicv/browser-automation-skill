@@ -1,6 +1,6 @@
 {
   "name": "browser-automation-skill",
-  "version": "0.71.0",
+  "version": "0.71.1",
   "description": "MCP server + bash CLI that drives a real browser from Claude Code by routing across chrome-devtools-mcp, playwright-cli, playwright-lib, and obscura adapters. 42 verbs covering site/session/credential management, snapshot+ref interaction, capture pipelines, declarative flows, and a per-archetype memory cache.",
   "keywords": [
     "claude-code",

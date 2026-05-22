@@ -70,7 +70,7 @@ claude mcp add browser-skill --scope user -- npx -y browser-automation-skill@lat
 claude mcp list   # → browser-skill: ... ✓ Connected
 ```
 
-5 tools become available: `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`. Pin a version (`@0.71.0`) for reproducibility, or omit `@latest` to track the registry tip.
+5 tools become available: `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`. Pin a version (`@0.71.1`) for reproducibility, or omit `@latest` to track the registry tip. (v0.71.0 emitted top-level `oneOf` and was rejected by the Anthropic Messages API — use `@latest` or `@0.71.1+`.)
 
 **Other MCP clients (Continue / Cline / midscene / Stagehand):** add a stdio entry pointing at `npx -y browser-automation-skill@latest serve`. Protocol: MCP 2024-11-05, NDJSON over stdio.
 

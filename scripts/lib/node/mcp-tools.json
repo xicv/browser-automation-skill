@@ -49,7 +49,9 @@
     ],
     "excludeFlags": ["secret-stdin"],
     "schemaExtras": {
-      "text": { "type": "string", "description": "Plain-text value to type (NEVER pass secrets here)" }
+      "text":     { "type": "string", "description": "Plain-text value to type (NEVER pass secrets here)" },
+      "ref":      { "type": "string", "description": "eN ref from a prior browser_snapshot call" },
+      "selector": { "type": "string", "description": "CSS selector (fallback when ref unavailable) — browser-fill.sh accepts this even though no adapter declares it in tool_capabilities" }
     }
   },
 

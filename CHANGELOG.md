@@ -11,6 +11,22 @@ Every entry has a tag in `[brackets]`:
 - `[internal]` lint, tests, CI — no user-visible change
 - `[docs]` README / SKILL.md / references / examples
 
+## [v0.71.1-mcp-anthropic-oneof-fix] - 2026-05-22
+
+**Hot-fix for v0.71.0 MCP server.** Three Stage-2 tools (`browser_click`, `browser_fill`, `browser_extract`) emitted top-level `oneOf` in their `inputSchema`, which the Anthropic Messages API rejects with HTTP 400 (`input_schema does not support oneOf, allOf, or anyOf at the top level`). Because one bad tool poisons the whole `tools[]` payload, ANY Claude Code session that loaded `browser-skill` over MCP could not call any tool from any server. Reproduced from an unrelated mqtt-skill invocation.
+
+### MCP
+
+- [fix] **No more top-level `oneOf` in `inputSchema`** for `browser_click`, `browser_fill`, `browser_extract`. The mutual-exclusion constraint is now enforced at runtime in `handleToolsCall` (returns JSON-RPC `-32602 Invalid arguments: must provide exactly one of …`) instead of being declared in JSON Schema. Anthropic-spec compliant: only `type/properties/required/additionalProperties/description` appear at the schema root.
+- [fix] **`browser_fill.properties.selector` now declared.** The legacy schema's `oneOf` referenced a `selector` property that wasn't in `properties` because no fill adapter declares `--selector` in `tool_capabilities()` — yet `scripts/browser-fill.sh` accepts it for Phase-11 cache dispatch. `mcp-tools.json` now declares it via `schemaExtras`; auto-discovery picks it up.
+- [internal] `buildToolsAutoDiscovered()` widens property union to include `schemaExtras` keys not present in adapter flags (so constraint targets always have a corresponding property).
+- [internal] +5 bats covering the Anthropic-API contract (`tests/browser-mcp.bats`): no-root-combinators, fill.selector exposed, click XOR runtime rejection (none/both), extract XOR runtime rejection.
+
+### Notes for users
+
+- If you installed v0.71.0 via npm and saw `400 tools.<N>.custom.input_schema: input_schema does not support oneOf …` in Claude Code, this release fixes that. `npx browser-automation-skill@latest` picks it up on next session.
+- No on-disk schema migration; no breaking changes to the bash CLI.
+
 ## [v0.71.0-phase-14-vlm-cache-rescue] - 2026-05-21
 
 **Phase 14 ships the full local-VLM cache-rescue chain.** Production-ready v1.3. 21 commits, +130 bats tests (1086 total). Browser cache self-improves end-to-end: OBSERVE (Phase 12 telemetry) → REPAIR (Phase 13 fingerprint rescue + Path 3 visual rescue) → PRUNE (this phase's `browser-stats prune`).
