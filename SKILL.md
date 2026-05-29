@@ -200,6 +200,30 @@ $ bash scripts/browser-doctor.sh | tail -1 | jq .
     └── archetypes/<id>.json             # mode 0600; cached interactions per archetype
 ```
 
+## Delegation policy (browser-delegate — opt-in, OFF by default)
+
+`browser-delegate` runs a whole multi-step task on a **secondary LLM** (GLM via Webwright), offloading the agent loop off Claude's context. It is **opt-in and `off` by default** — users without Webwright + a GLM key are unaffected.
+
+Per-user preference lives in `$BROWSER_SKILL_HOME/config.json` (`.delegate`):
+
+```bash
+… browser-delegate.sh config get                 # resolved policy + availability
+… browser-delegate.sh config set --mode auto      # off | ask | auto
+… browser-delegate.sh config set --mode ask --min-steps 4 --exclude auth
+```
+
+Modes govern when **Claude** reaches for delegation (the CLI always works when invoked by hand):
+- `off` (default): never auto-use delegation.
+- `ask`: when a task looks suitable, propose delegation and wait for confirmation.
+- `auto`: default to delegation for suitable tasks; fall back automatically otherwise.
+
+**Claude — before choosing a browser approach, run `browser-delegate.sh config get` and honor it:**
+- `available:false` or `mode:"off"` → primitive/cached verbs only.
+- `mode:"ask"` + task *suitable* → propose delegation, await OK.
+- `mode:"auto"` + task *suitable* → delegate.
+- **Suitable** = novel (not a cached/replayable flow) AND multi-step (≳ `min_steps`) AND no-auth (delegate hard-refuses credentialed sites) AND not in `auto_exclude`.
+- Otherwise (single-step, repeatable, or auth) → primitive/cached verbs (`open/click/fill/snapshot/do/replay`).
+
 ## Roadmap
 
 See `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` for

@@ -11,6 +11,9 @@ Every entry has a tag in `[brackets]`:
 - `[internal]` lint, tests, CI — no user-visible change
 - `[docs]` README / SKILL.md / references / examples
 
+- [feat] browser-delegate verb (Phase 15 Path-A, ship-dark, opt-in): delegates a whole multi-step web task to Webwright driven by a secondary LLM (GLM), offloading the agent-loop token cost off Claude Code's context. No-auth only; refuses credentialed sites; privacy-canary gate; emits offloaded_* telemetry to stats.jsonl. Router never auto-selects it.
+- [feat] browser-delegate config sub-mode: per-user opt-in delegation policy in config.json (.delegate.mode = off|ask|auto, default off). `config get`/`config set`; governs when Claude defaults to delegation. SKILL.md documents the decision policy.
+
 ## [v0.72.0-phase-12-toon-output-mode] - 2026-05-22
 
 **Phase 12 ships TOON output mode** — Token-Oriented Object Notation, the 2026 SOTA for LLM-friendly tabular tool output. The `--format=toon` flag becomes the 4th orthogonal flag joining `--raw` / `--json` / `--depth` (spec amendment `docs/superpowers/specs/2026-05-22-toon-output-amendment.md`). MCP server auto-flips to TOON for tabular tools so daily MCP users save tokens by default.
