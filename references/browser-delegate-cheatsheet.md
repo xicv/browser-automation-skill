@@ -52,6 +52,8 @@ trajectory is never printed — it stays under `$BROWSER_SKILL_HOME/delegate/`.
 
 ## Configuration
 
+**First-time setup:** follow `references/webwright-setup.md` (clone → venv → GLM key → smoke test → opt-in).
+
 - Webwright location: `$HOME/tools/Webwright` (override `BROWSER_SKILL_WEBWRIGHT_DIR`).
 - Backend model / endpoint / key: configured inside the Webwright install
   (`src/webwright/config/model_claude.yaml` + global `.env`), not here.

@@ -233,7 +233,7 @@ chmod 700 "${out_dir}" 2>/dev/null || true
 # --- Preflight: backend present (skipped when a test runner override is set) ---
 if [ -z "${runner_override}" ]; then
   if [ ! -d "${ww_dir}" ] || [ ! -f "${ww_dir}/.venv/bin/activate" ]; then
-    die "${EXIT_TOOL_MISSING}" "browser-delegate: Webwright not found at '${ww_dir}'. Install it (git clone + venv + 'pip install -e .' + 'playwright install'), or set BROWSER_SKILL_WEBWRIGHT_DIR. See spec §4a (setup)."
+    die "${EXIT_TOOL_MISSING}" "browser-delegate: Webwright not found at '${ww_dir}'. Setup guide: references/webwright-setup.md (clone + venv + pip install -e . + playwright install + GLM key). Or set BROWSER_SKILL_WEBWRIGHT_DIR to an existing install."
   fi
 fi
 
