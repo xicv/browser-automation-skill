@@ -4,9 +4,9 @@
 [![license](https://img.shields.io/npm/l/browser-automation-skill.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/browser-automation-skill.svg)](package.json)
 
-A [Claude Code](https://claude.com/claude-code) skill **and MCP server** for driving real browsers from an LLM. **44 verbs + a per-action audit surface** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a 5-tier cache defense chain (cached selector → fingerprint rescue → local-VLM rescue → cloud LLM → user fixup) that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
+A [Claude Code](https://claude.com/claude-code) skill, OpenAI Codex plugin, **and MCP server** for driving real browsers from an LLM. **44 verbs + a per-action audit surface** routed across four tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a 5-tier cache defense chain (cached selector → fingerprint rescue → local-VLM rescue → cloud LLM → user fixup) that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
 
-> **Status:** Phases 1–14 ✅ ALL COMPLETE. **Phase 14 (local-VLM cache rescue + auto-managed VLM stack + MCP server) ✅ shipped** — `scripts/browser-vlm.sh` wraps `llama-server` with idle-stop watchdog + lazy-start; `scripts/lib/visual-rescue-default.sh` is the canonical Path 3 probe (gated by `BROWSER_SKILL_VISION_FALLBACK=1`); `scripts/lib/node/mcp-server.mjs` publishes 5 verbs (open/snapshot/click/fill/extract) over JSON-RPC NDJSON for external agents (auto-discovers TOOLS from adapter capabilities + `mcp-tools.json` allowlist); `browser-stats prune` closes the telemetry feedback loop by auto-detecting cache-pollution from `oblivious_success` clusters. **Production-ready v1.3.** Full bats: 1086/1086 green. Architecture map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). New contributors: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+> **Status:** Phases 1–14 ✅ ALL COMPLETE. **Phase 14 (local-VLM cache rescue + auto-managed VLM stack + MCP server) ✅ shipped** — `scripts/browser-vlm.sh` wraps `llama-server` with idle-stop watchdog + lazy-start; `scripts/lib/visual-rescue-default.sh` is the canonical Path 3 probe (gated by `BROWSER_SKILL_VISION_FALLBACK=1`); `scripts/lib/node/mcp-server.mjs` publishes 6 verbs (open/snapshot/click/fill/extract/list-sites) over JSON-RPC NDJSON for external agents (auto-discovers TOOLS from adapter capabilities + `mcp-tools.json` allowlist); `browser-stats prune` closes the telemetry feedback loop by auto-detecting cache-pollution from `oblivious_success` clusters. **Production-ready v1.3.** Full bats: 1086/1086 green. Architecture map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). New contributors: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 >
 > **One-command enable Path 3 cache rescue:** `bash scripts/browser-vlm.sh install-env` (idempotent — appends env exports to `~/.zshrc`; lazy auto-start handles the rest).
 
@@ -19,12 +19,12 @@ A [Claude Code](https://claude.com/claude-code) skill **and MCP server** for dri
 - **Per-archetype memory cache (Phase 11).** `browser-do --intent "click delete" --pattern '/devices/:id'` looks up cached selector for the `(site, archetype, intent)` triple; on hit, dispatches the existing verb at zero LLM tokens; on miss, emits `cache_miss` event. `browser-do record` for explicit write-back. `browser-do propose` auto-clusters URLs into patterns. Self-heal: 4 consecutive failures disable the cached selector; agent re-resolves + re-records to heal.
 - **Per-action telemetry + balance-triangle audit (Phase 12).** Every adapter call (`open`/`click`/`fill`/`snapshot`/`extract`) emits one OTel-shaped JSONL event to `~/.browser-skill/memory/stats.jsonl` (mode 0600). `browser-stats report --pareto` rolls events into a route × verb table: success rate, post-condition hit rate, token-proxy byte counts, p50 duration, $$ cost (when `CLAUDE_USAGE_*` env injected), 14-value failure-mode histogram (Phase-14 added `unknown_failure` catch-all), and **`oblivious_success` detection** (adapter said ok but post-condition assertion failed — the dominant invisible-error class for browser agents). `browser-stats tune` surfaces worst-performing `(verb, route)` candidates for `/autoresearch` handoff. **`browser-stats prune` (Phase 14)** closes the feedback loop: finds (site, selector) tuples with ≥3 `oblivious_success` events; `--apply` disables the matching cache interactions so cloud LLM re-derives. `browser-stats mark <span> success|fail[:reason]` records user overrides. Schema follows OpenInference + OTel GenAI v1.40 naming for forward-compat with Langfuse/Phoenix/Jaeger via OTLP exporter. See [`references/browser-stats-cheatsheet.md`](references/browser-stats-cheatsheet.md).
 - **Local-VLM cache rescue (Phase 14, Path 3).** 5th tier in the cache defense chain — between Phase-13 fingerprint rescue and cloud-LLM fallback. When `BROWSER_SKILL_VISION_FALLBACK=1` + `BROWSER_SKILL_VISUAL_RESCUE_CMD=<path>` set, browser-do invokes an external hook that probes whether the cached element is still semantically present. Bundled canonical probe `scripts/lib/visual-rescue-default.sh` (text-mode v1) reads the accessibility-tree snapshot + asks a local OpenAI-compatible LLM (default `http://127.0.0.1:8080` — matches `bash scripts/browser-vlm.sh start`) yes/no. Smart-skip when `fail_count ≥ 3` (cache likely fundamentally broken; skip the probe). One env var pair via `bash scripts/browser-vlm.sh install-env` enables everything; lazy-start + 10-min idle-stop watchdog manage the llama-server lifecycle. See [`references/recipes/visual-rescue-hook.md`](references/recipes/visual-rescue-hook.md).
-- **MCP server (Phase 14).** `bash scripts/browser-mcp.sh serve` publishes 5 verbs (open / snapshot / click / fill / extract) over JSON-RPC NDJSON for external agents (Claude Code, midscene, agent-browser, Stagehand, Continue, Cline). TOOLS auto-discovered from each adapter's `tool_capabilities()` + `scripts/lib/node/mcp-tools.json` allowlist — adding a verb to MCP is a 1-JSON-entry change. Env-var passthrough is whitelisted (AP-7: client's `OPENAI_API_KEY` and other foreign secrets are filtered; only `BROWSER_SKILL_*` / `MIDSCENE_MODEL_*` / `CLAUDE_*` / `PLAYWRIGHT_*` / etc inherit). `browser_fill` has no `secret` field and `additionalProperties: false` — secrets stay on the bash entry point via `--secret-stdin`. See [`references/browser-mcp-cheatsheet.md`](references/browser-mcp-cheatsheet.md).
+- **MCP server (Phase 14).** `bash scripts/browser-mcp.sh serve` publishes 6 verbs (open / snapshot / click / fill / extract / list-sites) over JSON-RPC NDJSON for external agents (Claude Code, OpenAI Codex, midscene, agent-browser, Stagehand, Continue, Cline). TOOLS auto-discovered from each adapter's `tool_capabilities()` + `scripts/lib/node/mcp-tools.json` allowlist — adding a verb to MCP is a 1-JSON-entry change. Env-var passthrough is whitelisted (AP-7: client's `OPENAI_API_KEY` and other foreign secrets are filtered; only `BROWSER_SKILL_*` / `MIDSCENE_MODEL_*` / `CLAUDE_*` / `PLAYWRIGHT_*` / etc inherit). `browser_fill` has no `secret` field and `additionalProperties: false` — secrets stay on the bash entry point via `--secret-stdin`. See [`references/browser-mcp-cheatsheet.md`](references/browser-mcp-cheatsheet.md).
 
 ## Security at a glance
 
 - Credentials are on disk only at `$HOME/.browser-skill/` (mode 0700 dir, 0600 files).
-- Credentials never appear on argv, in `ps`, in git, or in the Claude transcript (AP-7 stdin-only pattern enforced via `tests/argv_leak.bats`).
+- Credentials never appear on argv, in `ps`, in git, or in the agent transcript (AP-7 stdin-only pattern enforced via `tests/argv_leak.bats`).
 - Cache writes refuse `PASSWORD-CANARY` sentinel (privacy guard in `browser-do record`).
 - `.gitignore` blocks every credential / session / capture / memory pattern from the repo.
 - `.githooks/pre-commit` rejects any staged file or diff that looks like a credential.
@@ -49,7 +49,7 @@ A [Claude Code](https://claude.com/claude-code) skill **and MCP server** for dri
 
 ## Install
 
-You can use this project two ways: as an **MCP server** (works with any MCP-aware client — Claude Code, Continue, Cline, midscene, Stagehand, agent-browser) or as a full **Claude Code skill** (gives you all 44 bash verbs + the cache + audit surface).
+You can use this project three ways: as an **MCP server** (works with MCP-aware clients such as Claude Code, OpenAI Codex, Continue, Cline, midscene, Stagehand, and agent-browser), as a full **Codex plugin** (bundled skill + MCP server), or as a full **Claude Code skill** (all 44 bash verbs + the cache + audit surface).
 
 ### Option A — MCP server only (via npm; any MCP client)
 
@@ -70,6 +70,23 @@ claude mcp add browser-skill --scope user -- npx -y browser-automation-skill@lat
 claude mcp list   # → browser-skill: ... ✓ Connected
 ```
 
+**Wire into OpenAI Codex (shared by Codex CLI and the Codex app/IDE):**
+
+```bash
+codex mcp add browser-skill -- npx -y browser-automation-skill@latest serve
+codex mcp list
+```
+
+Equivalent `~/.codex/config.toml` entry:
+
+```toml
+[mcp_servers.browser-skill]
+command = "npx"
+args = ["-y", "browser-automation-skill@latest", "serve"]
+startup_timeout_sec = 20
+tool_timeout_sec = 60
+```
+
 6 tools become available: `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`, `browser_list-sites`. Pin a version (`@0.72.0`) for reproducibility, or omit `@latest` to track the registry tip. Phase 12 (v0.72.0+) auto-flips MCP tool output to TOON format for tabular verbs (40-65% token savings vs JSON, +0.4pp LLM parse accuracy; spec: `docs/superpowers/specs/2026-05-22-toon-output-amendment.md`).
 
 **Other MCP clients (Continue / Cline / midscene / Stagehand):** add a stdio entry pointing at `npx -y browser-automation-skill@latest serve`. Protocol: MCP 2024-11-05, NDJSON over stdio.
@@ -81,9 +98,29 @@ npm i -g browser-automation-skill
 browser-automation-skill serve   # same as npx form
 ```
 
-> **Note:** the MCP surface is intentionally a curated subset (5 verbs). For the full 44-verb CLI + cache + flow runner + telemetry, install as a skill (Option B).
+> **Note:** the MCP surface is intentionally a curated subset (6 verbs). For the full 44-verb CLI + cache + flow runner + telemetry, install as a skill (Option B or Option C).
 
-### Option B — Full Claude Code skill (one machine, all your projects)
+### Option B — Full Codex plugin (skill + bundled MCP server)
+
+From GitHub:
+
+```bash
+codex plugin marketplace add xicv/browser-automation-skill
+codex plugin add browser-automation-skill@browser-automation-skill
+```
+
+From a local checkout:
+
+```bash
+git clone https://github.com/xicv/browser-automation-skill ~/Projects/browser-automation-skill
+cd ~/Projects/browser-automation-skill
+codex plugin marketplace add .
+codex plugin add browser-automation-skill@browser-automation-skill
+```
+
+This installs the Codex plugin metadata from `plugins/browser-automation-skill/.codex-plugin/plugin.json`, the bundled skill from `plugins/browser-automation-skill/skills/browser-automation-skill/SKILL.md`, and the bundled MCP server from `plugins/browser-automation-skill/.mcp.json`. Codex stores plugin and MCP enablement in `~/.codex/config.toml`, so the CLI and app/IDE see the same setup.
+
+### Option C — Full Claude Code skill (one machine, all your projects)
 
 ```bash
 git clone https://github.com/xicv/browser-automation-skill ~/Projects/browser-automation-skill
@@ -100,6 +137,15 @@ Symlinks `~/.claude/skills/browser-automation-skill` → repo. Creates `~/.brows
 ```
 
 Expected: exit 0; final line is a JSON summary with `"status":"ok"`. Doctor also enumerates installed adapters.
+
+## Verify (in Codex)
+
+```
+/mcp
+/skills
+```
+
+Expected: `/mcp` shows the `browser-skill` MCP server and `/skills` lists `browser-automation-skill` when the plugin is enabled.
 
 ## Quickstart
 
@@ -157,6 +203,9 @@ $ bash scripts/browser-doctor.sh | tail -1 | jq .
 ```
 install.sh              # preflight + state dir + symlink + (opt) hooks
 uninstall.sh            # remove symlink (state preserved)
+.agents/plugins/        # repo marketplace entry for Codex plugin install
+.claude-plugin/         # legacy-compatible marketplace entry Codex can import
+plugins/                # Codex plugin wrapper (manifest, skill, MCP entry)
 SKILL.md                # Claude Code skill manifest (verb table; updated at every phase ship)
 SECURITY.md             # threat model + disclosure
 .gitignore              # blocks credential / session / capture / memory patterns

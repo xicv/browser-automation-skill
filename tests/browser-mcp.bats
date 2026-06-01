@@ -13,7 +13,7 @@ teardown() {
 
 # --- Phase 14 (Proposal 2): MCP server protocol contract ----------------
 
-@test "mcp-server: initialize returns protocolVersion 2024-11-05 + serverInfo" {
+@test "mcp-server: initialize returns protocolVersion 2024-11-05 + serverInfo + instructions" {
   result="$(printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
     | node "${MCP_BIN}")"
   printf '%s' "${result}" | jq -e '.jsonrpc == "2.0" and .id == 1' >/dev/null \
@@ -24,6 +24,8 @@ teardown() {
     || fail "missing serverInfo.name: ${result}"
   printf '%s' "${result}" | jq -e '.result.capabilities.tools | type == "object"' >/dev/null \
     || fail "missing capabilities.tools: ${result}"
+  printf '%s' "${result}" | jq -e '.result.instructions | test("browser_open") and test("secrets")' >/dev/null \
+    || fail "missing MCP server instructions: ${result}"
 }
 
 @test "mcp-server: tools/list — browser_open schema requires url + has additionalProperties:false" {

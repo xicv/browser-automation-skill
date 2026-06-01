@@ -1,0 +1,20 @@
+{
+  "name": "browser-automation-skill",
+  "interface": {
+    "displayName": "Browser Automation Skill"
+  },
+  "plugins": [
+    {
+      "name": "browser-automation-skill",
+      "source": {
+        "source": "local",
+        "path": "./plugins/browser-automation-skill"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

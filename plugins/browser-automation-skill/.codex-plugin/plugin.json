@@ -1,0 +1,41 @@
+{
+  "name": "browser-automation-skill",
+  "version": "0.73.2",
+  "description": "Drive real browsers from OpenAI Codex through a bundled MCP server and Codex skill.",
+  "author": {
+    "name": "Nick Cao",
+    "email": "nick.cao@avcrm.com"
+  },
+  "homepage": "https://github.com/xicv/browser-automation-skill#readme",
+  "repository": "https://github.com/xicv/browser-automation-skill",
+  "license": "MIT",
+  "keywords": [
+    "browser-automation",
+    "mcp",
+    "model-context-protocol",
+    "openai-codex",
+    "claude-code",
+    "playwright",
+    "chrome-devtools-mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Browser Automation Skill",
+    "shortDescription": "Drive real browsers from Codex",
+    "longDescription": "Browser Automation Skill gives Codex a local MCP server for browser navigation, snapshots, clicks, form filling, extraction, site profiles, sessions, credentials, captures, and telemetry. Browser state stays local under ~/.browser-skill/.",
+    "developerName": "Nick Cao",
+    "category": "Engineering",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/xicv/browser-automation-skill",
+    "defaultPrompt": [
+      "Use Browser Automation Skill to open my app and inspect the login page.",
+      "Use Browser Automation Skill to snapshot the current site and click a visible control."
+    ],
+    "brandColor": "#0F766E"
+  }
+}

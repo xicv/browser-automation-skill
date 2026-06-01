@@ -131,10 +131,13 @@ load helpers
 
 @test "README.md: has install + first-flow sections" {
   grep -q '^## Install' "${REPO_ROOT}/README.md"
-  # README has two install options: A = MCP-only via npm, B = full skill via git clone.
-  # Both must be documented so users see the right entry-point for their use case.
+  # README has three install options: A = MCP-only via npm, B = Codex plugin, C = Claude skill.
+  # All must be documented so users see the right entry-point for their use case.
   grep -q '^### Option A' "${REPO_ROOT}/README.md"
   grep -q '^### Option B' "${REPO_ROOT}/README.md"
+  grep -q '^### Option C' "${REPO_ROOT}/README.md"
   grep -q 'npx -y browser-automation-skill' "${REPO_ROOT}/README.md"
+  grep -q 'codex mcp add browser-skill' "${REPO_ROOT}/README.md"
+  grep -q 'codex plugin add browser-automation-skill@browser-automation-skill' "${REPO_ROOT}/README.md"
   grep -q '/browser doctor' "${REPO_ROOT}/README.md"
 }

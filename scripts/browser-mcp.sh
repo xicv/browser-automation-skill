@@ -10,7 +10,8 @@
 # by '\n'. Matches the framing of our existing chrome-devtools-bridge.mjs
 # CLIENT so the codebase converges on one wire shape.
 #
-# Tools exposed (Stage 1): browser_open, browser_snapshot. See
+# Tools exposed: browser_open, browser_snapshot, browser_click, browser_fill,
+# browser_extract, browser_list-sites. See
 # scripts/lib/node/mcp-server.mjs::TOOLS for the live registry.
 #
 # Phase 14 (Proposal 2 from midscene research): lets agent-browser / midscene
@@ -43,13 +44,17 @@ Usage:
   bash scripts/browser-mcp.sh serve   # start JSON-RPC server on stdio
   bash scripts/browser-mcp.sh --help  # this message
 
-Tools exposed (Stage 1):
+Tools exposed:
   browser_open      — open a URL
   browser_snapshot  — capture eN-indexed accessibility snapshot
+  browser_click     — click by eN ref or CSS selector
+  browser_fill      — fill by eN ref or CSS selector
+  browser_extract   — extract text or evaluated JavaScript
+  browser_list-sites — list registered site profiles
 
 Protocol: MCP 2024-11-05, NDJSON over stdio. Spawn this server from any
-MCP-capable client (Claude Code, Continue, Cline, agent-browser, midscene,
-etc.) to drive our cache + telemetry without re-implementing it.
+MCP-capable client (Claude Code, OpenAI Codex, Continue, Cline, agent-browser,
+midscene, etc.) to drive our cache + telemetry without re-implementing it.
 
 Smoke test (manual):
   printf '%s\n' \

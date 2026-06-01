@@ -2,7 +2,7 @@
 
 `scripts/browser-mcp.sh serve` starts an MCP (Model Context Protocol) server
 that exposes our verbs as MCP tools. Spawn it from any MCP-capable client
-(Claude Code, Continue, Cline, agent-browser, midscene, Stagehand,
+(Claude Code, OpenAI Codex, Continue, Cline, agent-browser, midscene, Stagehand,
 browser-use, etc.) to drive our cache + telemetry + secrets vault without
 re-implementing them.
 
@@ -17,7 +17,7 @@ into the shared middleware browser agents delegate to.
 - Protocol: MCP 2024-11-05 (matches our existing chrome-devtools-bridge client)
 - Envelope: JSON-RPC 2.0
 
-## Tools exposed (Stage 1 + Stage 2)
+## Tools exposed
 
 | Tool | Wraps | Required inputs | Optional |
 |---|---|---|---|
@@ -26,6 +26,7 @@ into the shared middleware browser agents delegate to.
 | `browser_click`    | `scripts/browser-click.sh`    | one of `ref` / `selector` | `site`, `tool` |
 | `browser_fill`     | `scripts/browser-fill.sh`     | `text` + one of `ref` / `selector` | `site`, `tool` |
 | `browser_extract`  | `scripts/browser-extract.sh`  | one of `selector` / `eval` | `site`, `tool` |
+| `browser_list-sites` | `scripts/browser-list-sites.sh` | _none_ | `format` |
 
 Each `tools/call` response carries `content: [{type: "text", text: "<summary JSON>"}]`
 where `<summary JSON>` is the verb's last stdout line (per the token-efficient
@@ -75,7 +76,8 @@ printf '%s\n%s\n' \
 
 Expected output (two NDJSON lines): an `initialize` reply with
 `protocolVersion: "2024-11-05"` + a `tools/list` reply enumerating
-`browser_open` and `browser_snapshot`.
+`browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`,
+`browser_extract`, and `browser_list-sites`.
 
 ## Wiring from Claude Code
 
@@ -92,10 +94,28 @@ Add to `~/.claude/config.json` (or per-project):
 }
 ```
 
-After Claude Code restart, the `browser_open` / `browser_snapshot` tools
-appear in the tool list. They run against the same `~/.browser-skill/` state
-(sites, sessions, captures, memory) as the bash entry points — one cache,
-two surfaces.
+After Claude Code restart, the six `browser_*` tools appear in the tool list.
+They run against the same `~/.browser-skill/` state (sites, sessions, captures,
+memory) as the bash entry points — one cache, two surfaces.
+
+## Wiring from OpenAI Codex
+
+MCP-only install:
+
+```bash
+codex mcp add browser-skill -- npx -y browser-automation-skill@latest serve
+codex mcp list
+```
+
+Full plugin install from GitHub:
+
+```bash
+codex plugin marketplace add xicv/browser-automation-skill
+codex plugin add browser-automation-skill@browser-automation-skill
+```
+
+Codex stores MCP and plugin enablement in `~/.codex/config.toml`; the Codex CLI
+and app/IDE share that configuration.
 
 ## Why this exists
 
@@ -111,7 +131,7 @@ two surfaces.
 
 ## Limitations (Stage 1 + 2)
 
-- 5 verbs exposed (open + snapshot + click + fill + extract). The other ~37
+- 6 verbs exposed (open + snapshot + click + fill + extract + list-sites). The other ~38
   verbs (site / session / credential management, flow runner, capture mgmt,
   stats, baseline, schema migration) are reachable only via direct bash.
   Stage 3 candidates: `browser_wait`, `browser_press`, `browser_select`,

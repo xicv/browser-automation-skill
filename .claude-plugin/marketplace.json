@@ -1,0 +1,14 @@
+{
+  "name": "browser-automation-skill",
+  "description": "Browser Automation Skill for Claude Code, OpenAI Codex, and MCP-aware agents.",
+  "owner": {
+    "name": "Nick Cao"
+  },
+  "plugins": [
+    {
+      "name": "browser-automation-skill",
+      "source": "./plugins/browser-automation-skill",
+      "description": "Drive real browsers through a bundled Codex plugin, MCP server, and local browser automation CLI."
+    }
+  ]
+}

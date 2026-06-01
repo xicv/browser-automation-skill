@@ -7,11 +7,12 @@
 // wire format across the codebase.
 //
 // Why: lets agent-browser / midscene / Stagehand / browser-use / Claude Code
-// reuse our cache + telemetry + secrets vault without re-implementing them.
+// / OpenAI Codex reuse our cache + telemetry + secrets vault without
+// re-implementing them.
 // We become the SHARED MIDDLEWARE other browser agents delegate to.
 //
-// Stage 1 surface: browser_open + browser_snapshot.
-// Stage 2 surface (Phase 14 bundle): browser_click, browser_fill, browser_extract.
+// Surface: browser_open, browser_snapshot, browser_click, browser_fill,
+// browser_extract, browser_list-sites.
 // Each tool spawns the matching scripts/browser-<verb>.sh and returns the
 // verb's single-line summary JSON as MCP `content[0].text`.
 //
@@ -39,6 +40,8 @@ const ADAPTERS_DIR = join(HERE, '..', 'tool');
 const MCP_TOOLS_JSON = process.env.BROWSER_SKILL_MCP_TOOLS_JSON
   || join(HERE, 'mcp-tools.json');
 const MCP_PROTOCOL_VERSION = '2024-11-05';
+const SERVER_INSTRUCTIONS =
+  'Use browser-skill for real browser automation. Prefer browser_open, browser_snapshot, browser_click, browser_fill, browser_extract, and browser_list-sites before shell fallbacks. Use eN refs from snapshots when possible, falling back to selectors only when needed. Never pass secrets through MCP arguments; use local credential/session workflows.';
 
 // --- Auto-discovery (Phase 14+ A1) ---
 //
@@ -456,6 +459,7 @@ function handleInitialize(id /* , params */) {
   reply(id, {
     protocolVersion: MCP_PROTOCOL_VERSION,
     capabilities: { tools: {} },
+    instructions: SERVER_INSTRUCTIONS,
     serverInfo: {
       name: 'browser-skill',
       version: '0.1.0',
