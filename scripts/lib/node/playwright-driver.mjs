@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { execSync, spawn } from 'node:child_process';
 import { homedir } from 'node:os';
+import { writeRegistryEntry, removeRegistryEntry, readRegistry } from './daemon-registry.mjs';
 
 const argv = process.argv.slice(2);
 
@@ -88,6 +89,8 @@ async function realDispatch(args) {
       return await runLogin(flags);
     case 'auto-relogin':
       return await runAutoRelogin(flags);
+    case 'registry-status':
+      return runRegistryStatus();
     default:
       process.stderr.write(`playwright-driver.mjs: unknown verb '${verb}'\n`);
       process.exit(2);
@@ -100,7 +103,7 @@ async function realDispatch(args) {
 // internally and exposes verb operations over a Unix socket. Verb processes
 // here are thin clients: send one JSON line, read one JSON line, exit.
 
-async function runSnapshot(flags) {
+async function runSnapshot() {
   const reply = await ipcCall({ verb: 'snapshot' });
   emitDaemonReply(reply);
   process.exit(reply.event === 'error' ? 30 : 0);
@@ -717,10 +720,43 @@ async function daemonChildMain(flags) {
   let page = null;
   let refMap = null;
 
+  // In-process last_used_at: updated on every IPC call, flushed at most every 30s
+  // to avoid per-call read-prune-rewrite churn.
+  let _lastUsedAt = new Date().toISOString();
+  let _lastUsedFlushTimer = null;
+  function _scheduleLastUsedFlush() {
+    _lastUsedAt = new Date().toISOString();
+    if (_lastUsedFlushTimer) return;
+    _lastUsedFlushTimer = setTimeout(() => {
+      _lastUsedFlushTimer = null;
+      try {
+        const reg = readRegistry();
+        const existing = reg[sessionName];
+        if (existing) writeRegistryEntry(sessionName, { ...existing, last_used_at: _lastUsedAt });
+      } catch (_) { /* non-fatal */ }
+    }, 30000);
+    if (_lastUsedFlushTimer.unref) _lastUsedFlushTimer.unref();
+  }
+
   // IPC over TCP loopback (not Unix socket) — Unix-socket sun_path is capped
   // at 104 chars on macOS; bats temp paths exceed it. Loopback + random port
   // sidesteps the limit cleanly and matches Playwright's own launchServer
   // which uses ws://localhost:PORT.
+  // Idle TTL: daemon self-shuts-down after BROWSER_SKILL_DAEMON_IDLE_TTL seconds
+  // (default 900) without IPC requests. Timer resets on every IPC call.
+  const idleTtlMs = parseInt(process.env.BROWSER_SKILL_DAEMON_IDLE_TTL || '900', 10) * 1000;
+  const sessionName = process.env.BROWSER_SKILL_SESSION_NAME || 'default';
+  let idleTimer;
+  function resetIdleTimer() {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      process.stderr.write('playwright-driver.mjs: idle TTL reached, shutting down daemon\n');
+      cleanup();
+    }, idleTtlMs);
+    // Allow process to exit when only this timer remains.
+    if (idleTimer.unref) idleTimer.unref();
+  }
+
   const ipcServer = createServer((conn) => {
     let buf = '';
     conn.setEncoding('utf-8');
@@ -731,6 +767,7 @@ async function daemonChildMain(flags) {
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
         if (!line) continue;
+        resetIdleTimer();
         let reply;
         try {
           const msg = JSON.parse(line);
@@ -745,6 +782,10 @@ async function daemonChildMain(flags) {
   });
 
   async function dispatch(msg) {
+    // Debounced last_used_at refresh — flushes at most every 30s to avoid
+    // per-call read-prune-rewrite churn on every IPC request.
+    _scheduleLastUsedFlush();
+
     switch (msg.verb) {
       case 'open': {
         if (!page) page = context.pages()[0] || await context.newPage();
@@ -901,8 +942,24 @@ async function daemonChildMain(flags) {
   writeFileSync(stateFile, JSON.stringify(state, null, 2));
   chmodSync(stateFile, 0o600);
 
+  // Write page-ownership registry entry.
+  try {
+    writeRegistryEntry(sessionName, {
+      adapter: 'playwright-lib',
+      pid: state.pid,
+      ipc_port: state.ipc_port,
+      cdp_endpoint: state.cdp_endpoint,
+      started_at: state.started_at,
+      last_used_at: state.started_at,
+    });
+  } catch (_) { /* non-fatal */ }
+
   const cleanup = async () => {
-    try { await ipcServer.close(); } catch (_) {}
+    clearTimeout(idleTimer);
+    clearTimeout(_lastUsedFlushTimer);
+    _lastUsedFlushTimer = null;
+    try { removeRegistryEntry(sessionName); } catch (_) {}
+    try { ipcServer.close(); } catch (_) {}
     try { await context.close(); } catch (_) {}   // closes the persistent browser
     try { unlinkSync(stateFile); } catch (_) {}
     process.exit(0);
@@ -910,7 +967,10 @@ async function daemonChildMain(flags) {
   process.on('SIGTERM', cleanup);
   process.on('SIGINT', cleanup);
 
-  // Block forever (until signal).
+  // Start idle TTL countdown.
+  resetIdleTimer();
+
+  // Block forever (until signal or idle TTL).
   await new Promise(() => {});
 }
 
@@ -993,6 +1053,12 @@ function runDaemonStatus() {
     process.exit(0);
   }
   process.stdout.write('{"event":"daemon-not-running"}\n');
+  process.exit(0);
+}
+
+function runRegistryStatus() {
+  const entries = readRegistry();
+  process.stdout.write(JSON.stringify({ event: 'registry-status', entries }) + '\n');
   process.exit(0);
 }
 

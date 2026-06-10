@@ -157,6 +157,8 @@ esac
 
 cli_var_overrides=()
 dry_run=0
+continue_on_error=0
+check_only=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --var)
@@ -166,6 +168,14 @@ while [ "$#" -gt 0 ]; do
       ;;
     --dry-run)
       dry_run=1
+      shift
+      ;;
+    --continue-on-error)
+      continue_on_error=1
+      shift
+      ;;
+    --check)
+      check_only=1
       shift
       ;;
     *)
@@ -207,6 +217,36 @@ done
 steps_jsonl="$(printf '%s\n' "${parsed}" | jq -c 'select(._kind=="step")')"
 step_count=$(printf '%s\n' "${steps_jsonl}" | grep -c '^.' || printf '0')
 
+# Pre-flight: validate every step verb against existing browser-<verb>.sh scripts
+# BEFORE executing step 1 (P0b fix). Unknown verb → EXIT_USAGE_ERROR with the
+# step index, bad verb, and the valid verb list.
+_flow_valid_verbs() {
+  local scripts_dir="${SCRIPTS_DIR:-${REPO_ROOT:-.}/scripts}"
+  local verbs=() f verb
+  for f in "${scripts_dir}"/browser-*.sh; do
+    [ -f "${f}" ] || continue
+    verb="$(basename "${f}" .sh)"
+    verb="${verb#browser-}"
+    case "${verb}" in
+      flow) continue ;;  # exclude flow itself
+    esac
+    verbs+=("${verb}")
+  done
+  printf '%s\n' "${verbs[@]}" | sort
+}
+
+while IFS= read -r _pf_step; do
+  [ -z "${_pf_step}" ] && continue
+  _pf_verb="$(printf '%s' "${_pf_step}" | jq -r '.verb')"
+  _pf_idx="$(printf '%s' "${_pf_step}" | jq -r '.step_index')"
+  _pf_script="${SCRIPTS_DIR:-${REPO_ROOT:-.}/scripts}/browser-${_pf_verb}.sh"
+  if [ ! -f "${_pf_script}" ]; then
+    _valid_verbs="$(_flow_valid_verbs | tr '\n' ' ')"
+    die "${EXIT_USAGE_ERROR}" \
+      "flow preflight: step ${_pf_idx} uses unknown verb '${_pf_verb}' (valid: ${_valid_verbs})"
+  fi
+done <<< "${steps_jsonl}"
+
 if [ "${dry_run}" = "1" ]; then
   # Dry-run pre-pass: substitute vars (with refs-mode=skip since no snapshot
   # has actually run); print the planned step list. Per Phase 9 part 1-ii:
@@ -218,6 +258,15 @@ if [ "${dry_run}" = "1" ]; then
   done <<< "${steps_jsonl}"
   emit_summary verb=flow tool=none why=dry-run status=ok mode=run \
     flow_name="${FLOW_NAME}" step_count="${step_count}" dry_run=true
+  exit 0
+fi
+
+# --check: parse + preflight (already done above) + print normalized step plan
+# then exit 0 without executing anything (P0b fix).
+if [ "${check_only}" = "1" ]; then
+  printf '%s\n' "${steps_jsonl}"
+  emit_summary verb=flow tool=none why=check status=ok mode=run \
+    flow_name="${FLOW_NAME}" step_count="${step_count}"
   exit 0
 fi
 
@@ -270,6 +319,11 @@ while IFS= read -r step_line; do
   else
     failed_steps=$((failed_steps + 1))
     last_exit="$(printf '%s' "${evt}" | jq -r '.exit_code')"
+    [ "${last_exit}" = "null" ] || [ -z "${last_exit}" ] && last_exit="${EXIT_GENERIC_ERROR}"
+    # Abort on first failure unless --continue-on-error is set (P0b fix).
+    if [ "${continue_on_error}" = "0" ]; then
+      break
+    fi
   fi
 
   # Phase 9 part 1-ii: harvest step.refs into FLOW_REFS (latest-wins).

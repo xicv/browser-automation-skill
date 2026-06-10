@@ -11,6 +11,12 @@ Every entry has a tag in `[brackets]`:
 - `[internal]` lint, tests, CI — no user-visible change
 - `[docs]` README / SKILL.md / references / examples
 
+## [Unreleased]
+
+- [feat] flow fail-fast preflight: unknown verbs rejected before browser launch; `--check` flag emits step plan + summary without executing; `--continue-on-error` flag overrides default abort-on-first-failure behavior.
+- [feat] real YAML flow parsing via vendored js-yaml 4.2.0 (fixes quoted attribute selectors with inner escaped quotes, e.g. `input[name="qual_file"]`); collision-resistant sentinel substitution for `${var}` placeholders; object keys now also restored through sentinel pass.
+- [feat] implicit session-scoped playwright-lib daemon auto-start with configurable idle TTL and page-ownership registry; registry writes are atomic (tmp+rename, mode 0600) with advisory lockfile to minimize concurrent-start races; `last_used_at` refreshed via debounced in-process flush (at most every 30 s).
+
 - [fix] Codex plugin manifests (`.codex-plugin/plugin.json` version + bundled `.mcp.json` pinned package) are version-synced in lockstep with `package.json`; the 0.74.0 npm artifact shipped a stale `@0.73.2` MCP pin.
 - [feat] persistent-CDP shared browser (Phase 16): one Chrome per session via Playwright `launchPersistentContext` exposing a real CDP endpoint (`--remote-debugging-port`); every adapter attaches over CDP so state (cookies / DOM / open page) persists across verbs AND across adapters. The playwright-lib daemon auto-starts when a `--site` session is active; chrome-devtools-mcp attaches to the same Chrome via `--browser-url`.
 - [feat] per-session profile isolation keyed by the captured storageState identity; the daemon restarts on a session change (re-login / different `--as`) so a stale or previous-user profile is never reused. Per-open `--viewport` / `--user-agent` are honored in daemon mode; `BROWSER_SKILL_HEADED=1` launches the autostarted daemon headed.

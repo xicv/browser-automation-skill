@@ -25,6 +25,7 @@ ROUTING_RULES=(
   rule_inspect_default
   rule_scrape_flag
   rule_stealth_flag
+  rule_daemon_registry
   rule_extract_default
   rule_press_default
   rule_select_default
@@ -158,6 +159,38 @@ rule_stealth_flag() {
   if _has_flag --stealth "$@"; then
     printf 'obscura\t%s\n' "--stealth requested (only obscura declares stealth backend)"
   fi
+}
+
+# _registry_has_live_daemon_router SESSION_NAME — returns 0 if the page-
+# ownership registry shows a live playwright-lib daemon for SESSION_NAME.
+# Reads $BROWSER_SKILL_HOME/runtime/registry.json; uses kill -0 to validate pid.
+# Self-contained in router.sh to avoid circular dep with verb_helpers.sh.
+_registry_has_live_daemon_router() {
+  local session_name="${1:-default}"
+  local reg_file="${BROWSER_SKILL_HOME}/runtime/registry.json"
+  [ -f "${reg_file}" ] || return 1
+  local pid
+  pid="$(jq -r --arg s "${session_name}" '.[$s].pid // empty' "${reg_file}" 2>/dev/null)"
+  [ -n "${pid}" ] || return 1
+  kill -0 "${pid}" 2>/dev/null
+}
+
+# P0a: Route stateful verbs to playwright-lib when the page-ownership registry
+# shows a live daemon for the resolved session. Only verbs playwright-lib
+# declares in tool_capabilities (open/click/fill/snapshot) are included here;
+# extract is NOT listed because playwright-lib does not declare extract — use
+# the rule_session_required path (BROWSER_SKILL_STORAGE_STATE) for extract.
+# --tool override wins (handled by pick_tool before rules are walked).
+rule_daemon_registry() {
+  local verb="$1"
+  case "${verb}" in
+    open|snapshot|click|fill)
+      local session_name="${BROWSER_SKILL_SESSION_NAME:-default}"
+      if _registry_has_live_daemon_router "${session_name}"; then
+        printf 'playwright-lib\t%s\n' "live daemon in registry for session=${session_name}"
+      fi
+      ;;
+  esac
 }
 
 # Default tool for `extract` per parent spec Appendix B — chrome-devtools-mcp

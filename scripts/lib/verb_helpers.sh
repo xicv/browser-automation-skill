@@ -120,6 +120,22 @@ resolve_session_storage_state() {
 
   BROWSER_SKILL_STORAGE_STATE="${SESSIONS_DIR}/${session_name}.json"
   export BROWSER_SKILL_STORAGE_STATE
+  BROWSER_SKILL_SESSION_NAME="${session_name}"
+  export BROWSER_SKILL_SESSION_NAME
+}
+
+# _registry_has_live_daemon SESSION_NAME — returns 0 if the page-ownership
+# registry has a live playwright-lib daemon entry for SESSION_NAME. Reads
+# $BROWSER_SKILL_HOME/runtime/registry.json; treats pid dead as stale (prunes
+# are done by the Node module on next read). Portable jq + kill -0 check.
+_registry_has_live_daemon() {
+  local session_name="${1:-default}"
+  local reg_file="${BROWSER_SKILL_HOME}/runtime/registry.json"
+  [ -f "${reg_file}" ] || return 1
+  local pid
+  pid="$(jq -r --arg s "${session_name}" '.[$s].pid // empty' "${reg_file}" 2>/dev/null)"
+  [ -n "${pid}" ] || return 1
+  kill -0 "${pid}" 2>/dev/null
 }
 
 # --- Phase 5 part 3-ii: transparent verb-retry on EXIT_SESSION_EXPIRED -------
@@ -151,7 +167,47 @@ _seed_key() {
 # don't fail with "requires running daemon". No-op without a session or when
 # BROWSER_SKILL_AUTOSTART_DAEMON=0. --headed honored via BROWSER_SKILL_HEADED=1.
 _ensure_session_cdp_endpoint() {
-  [ -n "${BROWSER_SKILL_STORAGE_STATE:-}" ] || return 0
+  # BROWSER_SKILL_AUTO_DAEMON=0 disables all auto-start (even session-based).
+  [ "${BROWSER_SKILL_AUTO_DAEMON:-}" != "0" ] || return 0
+
+  # Sessionless path: only auto-start if BROWSER_SKILL_AUTO_DAEMON=1 explicitly.
+  if [ -z "${BROWSER_SKILL_STORAGE_STATE:-}" ]; then
+    [ "${BROWSER_SKILL_AUTO_DAEMON:-}" = "1" ] || return 0
+    # Sessionless auto-start: use "default" session name.
+    export BROWSER_SKILL_SESSION_NAME="${BROWSER_SKILL_SESSION_NAME:-default}"
+    local node_bin driver headed_flag state pid ep
+    node_bin="${BROWSER_SKILL_NODE_BIN:-node}"
+    driver="$(dirname "${BASH_SOURCE[0]}")/node/playwright-driver.mjs"
+    state="${BROWSER_SKILL_HOME}/playwright-lib-daemon.json"
+    headed_flag=""
+    [ "${BROWSER_SKILL_HEADED:-0}" = "1" ] && headed_flag="--headed"
+    pid=""
+    if [ -f "${state}" ]; then
+      pid="$(jq -r '.pid // empty' "${state}" 2>/dev/null)"
+    fi
+    if [ -z "${pid}" ] || ! kill -0 "${pid}" 2>/dev/null; then
+      "${node_bin}" "${driver}" daemon-start ${headed_flag} >/dev/null 2>&1 || return 0
+      # Poll for state file (pid + cdp_endpoint) up to ~10s — mirrors session path.
+      local _poll_i=0
+      while [ "${_poll_i}" -lt 100 ]; do
+        if [ -f "${state}" ]; then
+          local _poll_pid _poll_ep
+          _poll_pid="$(jq -r '.pid // empty' "${state}" 2>/dev/null)"
+          _poll_ep="$(jq -r '.cdp_endpoint // empty' "${state}" 2>/dev/null)"
+          [ -n "${_poll_pid}" ] && [ -n "${_poll_ep}" ] && break
+        fi
+        sleep 0.1
+        _poll_i=$((_poll_i + 1))
+      done
+    fi
+    if [ -f "${state}" ]; then
+      ep="$(jq -r '.cdp_endpoint // empty' "${state}" 2>/dev/null)"
+      [ -n "${ep}" ] && export BROWSER_SKILL_CDP_ENDPOINT="${ep}"
+    fi
+    return 0
+  fi
+
+  # Legacy session-based gate (preserve existing BROWSER_SKILL_AUTOSTART_DAEMON behavior).
   [ "${BROWSER_SKILL_AUTOSTART_DAEMON:-1}" != "0" ] || return 0
   local node_bin driver cdt_bridge state pid ep cur_key run_key active_tool headed_flag
   node_bin="${BROWSER_SKILL_NODE_BIN:-node}"

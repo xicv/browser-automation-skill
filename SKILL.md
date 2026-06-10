@@ -82,7 +82,7 @@ Multi-step work on a logged-in site shares **one** persistent Chrome held by the
 
 | Verb | What it does | Example |
 |---|---|---|
-| `flow run`      | Execute a `.flow.yaml` file (declarative steps; `${var}` + `${refs.NAME}` templating; whole-flow capture) | `… flow run task.flow.yaml --var url_path=/users` |
+| `flow run`      | Execute a `.flow.yaml` file (declarative steps; `${var}` + `${refs.NAME}` templating; whole-flow capture); `--check` validates + prints plan without executing; `--continue-on-error` continues past failed steps (default: abort on first failure) | `… flow run task.flow.yaml --var url_path=/users` · `… flow run task.flow.yaml --check` |
 | `flow record`   | Wrap `playwright codegen`; emit `.flow.yaml`; password-canary write-side | `… flow record --site prod --out task.flow.yaml` |
 | `replay`        | Re-execute a capture's steps; structured per-step diff | `… replay 042 --strict` |
 | `history list`  | Enumerate captures (newest first) | `… history list --limit 10` |
