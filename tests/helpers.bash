@@ -19,6 +19,19 @@ setup_temp_home() {
   TEST_HOME="$(mktemp -d "${TMPDIR:-/tmp}/browser-skill-test.XXXXXX")"
   export BROWSER_SKILL_HOME="${TEST_HOME}/.browser-skill"
   export HOME="${TEST_HOME}"
+
+  # Tests must not inherit opt-in browser-do rescue settings from a user's
+  # shell. Individual Path 3 tests set these explicitly when needed.
+  unset BROWSER_SKILL_VISION_FALLBACK
+  unset BROWSER_SKILL_VISUAL_RESCUE_CMD
+  unset BROWSER_SKILL_SCRIPTS_DIR
+  unset BROWSER_SKILL_VLM_HOST
+  unset BROWSER_SKILL_VLM_PORT
+  unset BROWSER_SKILL_VLM_RESCUE_MODEL
+  unset BROWSER_SKILL_VLM_RESCUE_TIMEOUT
+  unset BROWSER_SKILL_RESCUE_SNAPSHOT_BYTES
+  export BROWSER_SKILL_LAZY_START=0
+  export BROWSER_SKILL_LAZY_START_TIMEOUT=1
 }
 
 teardown_temp_home() {
