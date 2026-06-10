@@ -4,7 +4,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "browser-automation-skill@0.73.2",
+        "browser-automation-skill@0.74.0",
         "serve"
       ],
       "startup_timeout_sec": 20,
