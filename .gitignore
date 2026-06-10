@@ -11,10 +11,14 @@
 .browser-skill/sessions/
 .browser-skill/credentials/
 .browser-skill/captures/
+.browser-skill/profiles/
 .browser-skill/current
+.browser-skill/playwright-lib-daemon.json
+.browser-skill/playwright-lib-daemon.log
 sessions/
 credentials/
 captures/
+profiles/
 *.creds.json
 *.session.json
 
@@ -82,3 +86,4 @@ core
 core.*
 *.pid
 node_modules/
+AGENTS.md

@@ -29,6 +29,17 @@ while IFS= read -r f; do
   done
 done < <(git diff --cached --name-only --diff-filter=ACMR)
 
+# 1b. Path-based: $HOME/.browser-skill local state (profiles / sessions /
+# credentials / captures) holds live cookies + tokens. Never stage it, even if a
+# dev points BROWSER_SKILL_HOME at a repo-local .browser-skill/.
+while IFS= read -r f; do
+  [ -z "${f}" ] && continue
+  case "${f}" in
+    .browser-skill/*|*/.browser-skill/*)
+      leaked+=("${f}") ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR)
+
 if [ "${#leaked[@]}" -gt 0 ]; then
   red "rejected: staged files match credential-shaped patterns:"
   for f in "${leaked[@]}"; do red "  - ${f}"; done
