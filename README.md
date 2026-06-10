@@ -143,9 +143,10 @@ Expected: exit 0; final line is a JSON summary with `"status":"ok"`. Doctor also
 ```
 /mcp
 /skills
+codex plugin list
 ```
 
-Expected: `/mcp` shows the `browser-skill` MCP server and `/skills` lists `browser-automation-skill` when the plugin is enabled.
+Expected: `/mcp` shows the `browser-skill` MCP server and `codex plugin list` shows `browser-automation-skill@browser-automation-skill` as installed and enabled. In `/skills`, Codex may list the bundled skill as `browser-automation-skill` or with its plugin-qualified name, `browser-automation-skill:browser-automation-skill`; it will not necessarily appear as a standalone directory under `~/.codex/skills`.
 
 ## Quickstart
 

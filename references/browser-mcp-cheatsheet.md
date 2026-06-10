@@ -117,6 +117,11 @@ codex plugin add browser-automation-skill@browser-automation-skill
 Codex stores MCP and plugin enablement in `~/.codex/config.toml`; the Codex CLI
 and app/IDE share that configuration.
 
+Verify with `codex plugin list` and `/mcp`. The bundled skill may appear in
+`/skills` as `browser-automation-skill` or as the plugin-qualified
+`browser-automation-skill:browser-automation-skill`; plugin skills do not have
+to exist as standalone entries under `~/.codex/skills`.
+
 ## Why this exists
 
 - **Cache reuse**: `browser-do` archetype cache + Phase 13 fingerprint rescue
