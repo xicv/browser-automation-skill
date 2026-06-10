@@ -11,6 +11,11 @@ Every entry has a tag in `[brackets]`:
 - `[internal]` lint, tests, CI — no user-visible change
 - `[docs]` README / SKILL.md / references / examples
 
+- [feat] persistent-CDP shared browser (Phase 16): one Chrome per session via Playwright `launchPersistentContext` exposing a real CDP endpoint (`--remote-debugging-port`); every adapter attaches over CDP so state (cookies / DOM / open page) persists across verbs AND across adapters. The playwright-lib daemon auto-starts when a `--site` session is active; chrome-devtools-mcp attaches to the same Chrome via `--browser-url`.
+- [feat] per-session profile isolation keyed by the captured storageState identity; the daemon restarts on a session change (re-login / different `--as`) so a stale or previous-user profile is never reused. Per-open `--viewport` / `--user-agent` are honored in daemon mode; `BROWSER_SKILL_HEADED=1` launches the autostarted daemon headed.
+- [fix] flow inline-map parser splits only on top-level commas (not inside quotes / brackets), so values like `{ selector: "a, b" }` parse instead of erroring.
+- [security] `$HOME/.browser-skill` local state (profiles / sessions / credentials / captures) is blocked from git via `.gitignore` plus a path-based pre-commit blocker — persistent browser profiles hold live cookies / localStorage.
+- [docs] SKILL.md documents the stateful-session workflow and the honest cross-adapter ref-namespace caveat (playwright-lib `eN` vs chrome-devtools-mcp `uid`).
 - [feat] browser-delegate verb (Phase 15 Path-A, ship-dark, opt-in): delegates a whole multi-step web task to Webwright driven by a secondary LLM (GLM), offloading the agent-loop token cost off Claude Code's context. No-auth only; refuses credentialed sites; privacy-canary gate; emits offloaded_* telemetry to stats.jsonl. Router never auto-selects it.
 - [feat] browser-delegate config sub-mode: per-user opt-in delegation policy in config.json (.delegate.mode = off|ask|auto, default off). `config get`/`config set`; governs when Claude defaults to delegation. SKILL.md documents the decision policy.
 
