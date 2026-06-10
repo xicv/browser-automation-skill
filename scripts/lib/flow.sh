@@ -174,6 +174,29 @@ _flow_strip_indent() {
   printf '%s' "${v}"
 }
 
+# _flow_split_top_commas <body> — emit one element per line, splitting only on
+# commas that are NOT inside quotes ('/"), brackets [], parens (), or braces {}.
+# Lets values carry commas (CSS multi-selectors like "a, b", attribute selectors).
+_flow_split_top_commas() {
+  local s="$1" out="" i ch q="" depth=0 n=${#1}
+  for (( i = 0; i < n; i++ )); do
+    ch="${s:i:1}"
+    if [ -n "${q}" ]; then
+      out+="${ch}"
+      [ "${ch}" = "${q}" ] && q=""
+      continue
+    fi
+    case "${ch}" in
+      '"'|"'") q="${ch}"; out+="${ch}" ;;
+      '['|'('|'{') depth=$((depth + 1)); out+="${ch}" ;;
+      ']'|')'|'}') [ "${depth}" -gt 0 ] && depth=$((depth - 1)); out+="${ch}" ;;
+      ',') if [ "${depth}" -eq 0 ]; then out+=$'\n'; else out+="${ch}"; fi ;;
+      *) out+="${ch}" ;;
+    esac
+  done
+  printf '%s' "${out}"
+}
+
 # _flow_inline_to_json <yaml-flow-style> → JSON object on stdout.
 # Handles {} (empty), { k: v }, { k1: v1, k2: v2 }.
 # Values are coerced to JSON: "true"/"false"/"null"/numbers as JSON; else
@@ -197,17 +220,12 @@ _flow_inline_to_json() {
   # [A-Za-z_][A-Za-z0-9_]*). Field names go through jq's bracket-string
   # accessor `.["dry-run"]` for the same reason.
   local jq_args=() jq_filter='. = {}'
-  local IFS_orig="${IFS}"
-  IFS=','
-  local pair
-  local idx=0
-  for pair in ${raw}; do
-    IFS="${IFS_orig}"
+  local pair idx=0
+  while IFS= read -r pair; do
     pair="$(_flow_strip_value "${pair}")"
     [ -z "${pair}" ] && continue
     case "${pair}" in
-      *': '*) ;;
-      *':'*)  ;;
+      *':'*) ;;
       *) return 1 ;;
     esac
     local k v key_jstr
@@ -228,9 +246,9 @@ _flow_inline_to_json() {
     key_jstr="$(printf '%s' "${k}" | jq -Rs .)"
     jq_filter="${jq_filter} | .[${key_jstr}] = \$_k${idx}"
     idx=$((idx + 1))
-    IFS=','
-  done
-  IFS="${IFS_orig}"
+  done <<EOF
+$(_flow_split_top_commas "${raw}")
+EOF
   jq -nc "${jq_args[@]}" "${jq_filter}"
 }
 
