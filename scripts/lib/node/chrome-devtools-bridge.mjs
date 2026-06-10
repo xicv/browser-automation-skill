@@ -677,7 +677,14 @@ async function withMcpClient(fn) {
 // or automating user-data-dir creation is out of scope.
 function mcpSpawnArgs() {
   const args = [];
-  if (process.env.CHROME_USER_DATA_DIR) {
+  if (process.env.BROWSER_SKILL_CDP_ENDPOINT) {
+    // Attach to the shared persistent Chrome started by the playwright-lib
+    // daemon (set by verb_helpers _ensure_session_cdp_endpoint) instead of
+    // launching a separate browser. Same Chrome => cdt verbs (upload / extract
+    // / press / select / hover / drag) act on the live page playwright-lib
+    // opened. Mutually exclusive with --user-data-dir (browser-url wins).
+    args.push('--browser-url', process.env.BROWSER_SKILL_CDP_ENDPOINT);
+  } else if (process.env.CHROME_USER_DATA_DIR) {
     args.push('--user-data-dir', process.env.CHROME_USER_DATA_DIR);
   }
   return args;

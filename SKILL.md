@@ -55,6 +55,18 @@ Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp
 | `tab-switch`    | Switch active tab | `… tab-switch --to tab2` |
 | `tab-close`     | Close a tab | `… tab-close --to tab2` |
 
+### Stateful sessions — one persistent browser across verbs *and* adapters
+
+Multi-step work on a logged-in site shares **one** persistent Chrome held by the playwright-lib daemon. Cookies, the DOM, and the open page survive across verbs — and across adapters: a `chrome-devtools-mcp` verb (`extract --eval`, `upload`, `press`, …) acts on the **same live page** a `playwright-lib` verb (`open`, `click`, `fill`) opened, because every adapter attaches to the daemon's Chrome over CDP.
+
+- **Auto-start.** When a verb runs with a `--site` session active, the daemon starts automatically and its CDP endpoint is exported to every adapter — no manual step. Opt out with `BROWSER_SKILL_AUTOSTART_DAEMON=0`; start by hand with `daemon-start`.
+- **Per-session isolation.** Each session (and each re-login) gets its own browser profile, keyed by the captured storageState — switching `--as` or re-logging in never reuses another session's cookies/localStorage.
+- **Headed autostart.** The auto-started daemon is headless by default; set `BROWSER_SKILL_HEADED=1` to launch it headed.
+- **Just run verbs in sequence** — each sees the prior step's state. No `flow` and no `curl` needed.
+- **Never replay session cookies outside the browser** (e.g. `curl`). Captured cookies are bound to the browser context; out-of-browser replay bounces to the login page. Drive the live browser instead.
+- **Cross-adapter refs (caveat).** `playwright-lib` (`eN`) and `chrome-devtools-mcp` (`uid`) use different ref namespaces. Selector/eval-based cdt verbs and one-shot cdt verbs attach to the shared browser automatically, but a `snapshot` taken by one adapter does **not** produce refs the other can use. For ref-based cdt verbs (`upload`/`select`/`hover`/`drag` by `--ref`), take the `snapshot` with the same adapter (`--tool chrome-devtools-mcp`) so the refs match, or use the selector/path form.
+- One active session/daemon at a time (v1).
+
 ### Capture + extract + audit
 
 | Verb | What it does | Example |
@@ -65,6 +77,8 @@ Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp
 | `assert`        | Assertion — `--selector` + `--text-contains` predicate | `… assert --selector .toast-success --text-contains "Saved"` |
 
 ### Flow runner
+
+> Optional. With stateful sessions (see *Stateful sessions* above) sequential verbs already share one browser, so most flows are unnecessary — reach for `flow` only to declaratively replay/diff a recorded sequence.
 
 | Verb | What it does | Example |
 |---|---|---|
@@ -143,6 +157,17 @@ See [`references/recipes/agent-workflows/`](references/recipes/agent-workflows/R
 
 For pattern recipes (codified discipline: privacy-canary, path-security, cache-write-security, etc.) see [`references/recipes/`](references/recipes/).
 
+**Stateful logged-in session — attach, interact, extract, all on one browser:**
+
+```
+# session already captured via `login`
+… open    --site example-site --as example--admin --url https://app.example.com/dashboard
+… fill    --site example-site --selector '#search' --text widget
+… click   --site example-site --selector 'button[type=submit]'
+… extract --site example-site --eval 'document.querySelector(".result-count")?.textContent'
+# extract (chrome-devtools-mcp) reads the same page open/fill/click (playwright-lib) drove
+```
+
 ## Tools
 
 The skill routes verbs to one of these underlying tools (precedence is decided
@@ -191,6 +216,8 @@ $ bash scripts/browser-doctor.sh | tail -1 | jq .
 ├── config.json                          # mode 0600; retention thresholds
 ├── current                              # current site name (mode 0600, [personal])
 ├── baselines.json                       # mode 0600; named baseline registry (Phase 9)
+├── playwright-lib-daemon.json           # running session daemon's pid + CDP endpoint
+├── profiles/default/                    # persistent browser profile (cookies + localStorage) for the session daemon
 ├── sites/    <name>.json + .meta.json   # mode 0600 ([shareable])
 ├── sessions/ <name>.json + .meta.json   # mode 0600 ([PERSONAL — gitignored])
 ├── credentials/                         # Phase 5 (keychain / libsecret / plaintext)

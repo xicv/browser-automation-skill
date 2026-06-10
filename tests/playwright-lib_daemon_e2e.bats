@@ -35,7 +35,7 @@ teardown() {
 
   run node scripts/lib/node/playwright-driver.mjs daemon-start
   assert_status 0
-  printf '%s' "${output}" | jq -e '.event == "daemon-started" and (.pid | type == "number") and (.ws_endpoint | startswith("ws://"))' >/dev/null
+  printf '%s' "${output}" | jq -e '.event == "daemon-started" and (.pid | type == "number") and (.cdp_endpoint | startswith("http://"))' >/dev/null
 
   run node scripts/lib/node/playwright-driver.mjs daemon-status
   assert_status 0

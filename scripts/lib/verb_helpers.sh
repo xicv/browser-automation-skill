@@ -131,6 +131,68 @@ resolve_session_storage_state() {
 # retry, exactly one attempt. Wires into one verb (snapshot) in this PR;
 # remaining verbs in follow-ups.
 
+# _seed_key FILE — stable identity of a storageState file (path:mtime:size),
+# portable across BSD/GNU stat (GNU -c first; GNU's `stat -f` does not fail, so
+# the order matters). Empty when the file is missing.
+_seed_key() {
+  local f="$1" m z
+  [ -n "${f}" ] && [ -f "${f}" ] || { printf ''; return 0; }
+  m="$(stat -c '%Y' "${f}" 2>/dev/null || stat -f '%m' "${f}" 2>/dev/null || printf '0')"
+  z="$(stat -c '%s' "${f}" 2>/dev/null || stat -f '%z' "${f}" 2>/dev/null || printf '0')"
+  printf '%s:%s:%s' "${f}" "${m}" "${z}"
+}
+
+# _ensure_session_cdp_endpoint — when a session is active, ensure a persistent
+# browser daemon bound to THIS session is running, and export its CDP endpoint so
+# every adapter attaches to the same Chrome. Restarts the daemon when the session
+# (storageState identity) changes so a stale/previous-user profile is never
+# reused. Also brings up the chrome-devtools-mcp daemon (attached to the same
+# Chrome) when the active verb is routed to that adapter, so cdt stateful verbs
+# don't fail with "requires running daemon". No-op without a session or when
+# BROWSER_SKILL_AUTOSTART_DAEMON=0. --headed honored via BROWSER_SKILL_HEADED=1.
+_ensure_session_cdp_endpoint() {
+  [ -n "${BROWSER_SKILL_STORAGE_STATE:-}" ] || return 0
+  [ "${BROWSER_SKILL_AUTOSTART_DAEMON:-1}" != "0" ] || return 0
+  local node_bin driver cdt_bridge state pid ep cur_key run_key active_tool headed_flag
+  node_bin="${BROWSER_SKILL_NODE_BIN:-node}"
+  driver="$(dirname "${BASH_SOURCE[0]}")/node/playwright-driver.mjs"
+  cdt_bridge="$(dirname "${BASH_SOURCE[0]}")/node/chrome-devtools-bridge.mjs"
+  state="${BROWSER_SKILL_HOME}/playwright-lib-daemon.json"
+  headed_flag=""
+  [ "${BROWSER_SKILL_HEADED:-0}" = "1" ] && headed_flag="--headed"
+
+  # Seed identity binds the daemon to one session; a change must spawn a fresh
+  # profile (the node side keys profiles/<hash> off BROWSER_SKILL_SEED_KEY).
+  cur_key="$(_seed_key "${BROWSER_SKILL_STORAGE_STATE}")"
+  export BROWSER_SKILL_SEED_KEY="${cur_key}"
+
+  pid=""; run_key=""
+  if [ -f "${state}" ]; then
+    pid="$(jq -r '.pid // empty' "${state}" 2>/dev/null)"
+    run_key="$(jq -r '.seed_key // empty' "${state}" 2>/dev/null)"
+  fi
+  if [ -z "${pid}" ] || ! kill -0 "${pid}" 2>/dev/null; then
+    # absent or crashed daemon — (re)start; daemon-start clears stale state.
+    "${node_bin}" "${driver}" daemon-start ${headed_flag} >/dev/null 2>&1 || return 0
+  elif [ "${run_key}" != "${cur_key}" ]; then
+    # alive but bound to a DIFFERENT session — restart on the new profile.
+    "${node_bin}" "${driver}" daemon-stop  >/dev/null 2>&1 || true
+    "${node_bin}" "${driver}" daemon-start ${headed_flag} >/dev/null 2>&1 || return 0
+  fi
+  if [ -f "${state}" ]; then
+    ep="$(jq -r '.cdp_endpoint // empty' "${state}" 2>/dev/null)"
+    [ -n "${ep}" ] && export BROWSER_SKILL_CDP_ENDPOINT="${ep}"
+  fi
+
+  # cdt stateful verbs run through the cdt bridge's own daemon; start it attached
+  # to the same Chrome when THIS verb is routed to chrome-devtools-mcp.
+  active_tool="$(tool_metadata 2>/dev/null | jq -r '.name // empty' 2>/dev/null || true)"
+  if [ "${active_tool}" = "chrome-devtools-mcp" ] && [ -n "${BROWSER_SKILL_CDP_ENDPOINT:-}" ]; then
+    "${node_bin}" "${cdt_bridge}" daemon-start >/dev/null 2>&1 || true
+  fi
+  return 0
+}
+
 # invoke_with_retry VERB ARGS... — runs tool_${VERB} ARGS, returning its
 # stdout + exit code. On EXIT_SESSION_EXPIRED (22), if a credential with
 # auto_relogin: true exists for the resolved site/cred, runs login --auto
@@ -138,6 +200,8 @@ resolve_session_storage_state() {
 invoke_with_retry() {
   local verb="$1"
   shift
+
+  _ensure_session_cdp_endpoint
 
   local out rc
   set +e
@@ -160,6 +224,7 @@ invoke_with_retry() {
 
   # Re-resolve session storage state so the retry picks up the fresh file.
   resolve_session_storage_state
+  _ensure_session_cdp_endpoint
 
   set +e
   out="$(tool_"${verb}" "$@")"

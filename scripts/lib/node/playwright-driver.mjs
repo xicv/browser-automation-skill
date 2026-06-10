@@ -634,17 +634,86 @@ async function runDaemonStart(flags) {
   process.exit(30);
 }
 
+async function readDevToolsPort(userDataDir, deadlineMs = 10000) {
+  const portFile = join(userDataDir, 'DevToolsActivePort');
+  const deadline = Date.now() + deadlineMs;
+  while (Date.now() < deadline) {
+    try {
+      const first = readFileSync(portFile, 'utf-8').split('\n')[0].trim();
+      if (first) return parseInt(first, 10);
+    } catch (_) { /* not written yet */ }
+    await sleep(100);
+  }
+  throw new Error('DevToolsActivePort not written within deadline');
+}
+
 async function daemonChildMain(flags) {
   const { chromium } = loadPlaywright();
   const headless = !flags.headed;
-  const server = await chromium.launchServer({ headless });
-  const wsEndpoint = server.wsEndpoint();
+  // Isolate each session's profile by seed identity (set by verb_helpers
+  // _ensure_session_cdp_endpoint from the storageState path+mtime+size). A new
+  // session / re-login gets a FRESH profile dir, so the persistent profile can
+  // never carry a previous user's or expired cookies/localStorage.
+  const seedKey = process.env.BROWSER_SKILL_SEED_KEY || '';
+  const profileSlug = seedKey
+    ? createHash('sha1').update(seedKey).digest('hex').slice(0, 16)
+    : 'default';
+  const userDataDir = join(browserSkillHome(), 'profiles', profileSlug);
+  mkdirSync(userDataDir, { recursive: true, mode: 0o700 });
+  // Persistent context exposes a REAL CDP endpoint (via
+  // --remote-debugging-port) so other adapters (e.g. chrome-devtools-mcp
+  // --browser-url) attach to the SAME Chrome and share the live page.
+  // Playwright drives this context in-process; the TCP CDP listener
+  // coexists with Playwright's pipe transport (verified: a second
+  // connectOverCDP client sees the same page/title).
+  const context = await chromium.launchPersistentContext(userDataDir, {
+    headless,
+    viewport: { width: 1280, height: 800 },
+    args: ['--remote-debugging-port=0'],
+  });
+  const cdpPort = await readDevToolsPort(userDataDir);
+  const cdpEndpoint = `http://127.0.0.1:${cdpPort}`;
+
+  const seededOrigins = new Set();
+  // Seed cookies + localStorage from a captured storageState into the persistent
+  // profile so ANY attaching adapter (incl. chrome-devtools-mcp --browser-url and
+  // cdt-first flows) lands authenticated. Cookies via addCookies; localStorage via
+  // a per-origin init script (no network round-trip, guarded so it never clobbers
+  // app-written values). Origins are deduped across daemon-start + per-open seeding.
+  // Restores SPA / token auth that lives in localStorage, not just cookies.
+  async function seedStorageState(path) {
+    let seeded;
+    try { seeded = JSON.parse(readFileSync(path, 'utf-8')); }
+    catch (_) { return; }
+    if (Array.isArray(seeded.cookies) && seeded.cookies.length) {
+      try { await context.addCookies(seeded.cookies); } catch (_) {}
+    }
+    if (Array.isArray(seeded.origins)) {
+      for (const o of seeded.origins) {
+        if (!o || !o.origin || seededOrigins.has(o.origin)) continue;
+        if (!Array.isArray(o.localStorage) || !o.localStorage.length) continue;
+        seededOrigins.add(o.origin);
+        try {
+          await context.addInitScript(({ origin, items }) => {
+            if (window.location.origin !== origin) return;
+            for (const it of items) {
+              try {
+                if (window.localStorage.getItem(it.name) === null) {
+                  window.localStorage.setItem(it.name, it.value);
+                }
+              } catch (_) {}
+            }
+          }, { origin: o.origin, items: o.localStorage });
+        } catch (_) {}
+      }
+    }
+  }
+  const seedPath = process.env.BROWSER_SKILL_STORAGE_STATE;
+  if (seedPath) await seedStorageState(seedPath);
 
   // The daemon HOLDS the browser handle + current context + current page.
   // Verb clients send commands; the daemon mutates this state and replies.
   // This sidesteps the chromium.connect cross-process state-sharing limit.
-  const browser = await chromium.connect(wsEndpoint);
-  let context = null;
   let page = null;
   let refMap = null;
 
@@ -678,13 +747,19 @@ async function daemonChildMain(flags) {
   async function dispatch(msg) {
     switch (msg.verb) {
       case 'open': {
-        if (context) { try { await context.close(); } catch (_) {} }
-        const opts = { viewport: { width: 1280, height: 800 } };
-        if (msg.viewport)        opts.viewport     = msg.viewport;
-        if (msg.storage_state)   opts.storageState = msg.storage_state;
-        if (msg.user_agent)      opts.userAgent    = msg.user_agent;
-        context = await browser.newContext(opts);
-        page = await context.newPage();
+        if (!page) page = context.pages()[0] || await context.newPage();
+        if (msg.viewport) {
+          try { await page.setViewportSize(msg.viewport); } catch (_) {}
+        }
+        if (msg.user_agent) {
+          // Persistent context UA is fixed at launch; override per-page via CDP
+          // so session opens that pass --user-agent are honored in daemon mode.
+          try {
+            const uaCdp = await context.newCDPSession(page);
+            await uaCdp.send('Network.setUserAgentOverride', { userAgent: msg.user_agent });
+          } catch (_) {}
+        }
+        if (msg.storage_state) await seedStorageState(msg.storage_state);
         const resp = await page.goto(msg.url, { waitUntil: 'domcontentloaded' });
         return {
           event: 'navigated',
@@ -810,9 +885,12 @@ async function daemonChildMain(flags) {
 
   const state = {
     pid: process.pid,
-    ws_endpoint: wsEndpoint,
+    cdp_endpoint: cdpEndpoint,
     ipc_host: '127.0.0.1',
     ipc_port: ipcPort,
+    user_data_dir: userDataDir,
+    seed_key: seedKey || null,
+    profile_slug: profileSlug,
     started_at: new Date().toISOString(),
     browser: 'chromium',
     headless,
@@ -825,9 +903,7 @@ async function daemonChildMain(flags) {
 
   const cleanup = async () => {
     try { await ipcServer.close(); } catch (_) {}
-    try { if (context) await context.close(); } catch (_) {}
-    try { await browser.close(); } catch (_) {}
-    try { await server.close(); } catch (_) {}
+    try { await context.close(); } catch (_) {}   // closes the persistent browser
     try { unlinkSync(stateFile); } catch (_) {}
     process.exit(0);
   };
