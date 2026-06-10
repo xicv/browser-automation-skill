@@ -1,6 +1,6 @@
 {
   "name": "browser-automation-skill",
-  "version": "0.74.0",
+  "version": "0.74.1",
   "description": "Drive real browsers from OpenAI Codex through a bundled MCP server and Codex skill.",
   "author": {
     "name": "Nick Cao",

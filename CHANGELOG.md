@@ -11,6 +11,7 @@ Every entry has a tag in `[brackets]`:
 - `[internal]` lint, tests, CI — no user-visible change
 - `[docs]` README / SKILL.md / references / examples
 
+- [fix] Codex plugin manifests (`.codex-plugin/plugin.json` version + bundled `.mcp.json` pinned package) are version-synced in lockstep with `package.json`; the 0.74.0 npm artifact shipped a stale `@0.73.2` MCP pin.
 - [feat] persistent-CDP shared browser (Phase 16): one Chrome per session via Playwright `launchPersistentContext` exposing a real CDP endpoint (`--remote-debugging-port`); every adapter attaches over CDP so state (cookies / DOM / open page) persists across verbs AND across adapters. The playwright-lib daemon auto-starts when a `--site` session is active; chrome-devtools-mcp attaches to the same Chrome via `--browser-url`.
 - [feat] per-session profile isolation keyed by the captured storageState identity; the daemon restarts on a session change (re-login / different `--as`) so a stale or previous-user profile is never reused. Per-open `--viewport` / `--user-agent` are honored in daemon mode; `BROWSER_SKILL_HEADED=1` launches the autostarted daemon headed.
 - [fix] flow inline-map parser splits only on top-level commas (not inside quotes / brackets), so values like `{ selector: "a, b" }` parse instead of erroring.
