@@ -71,3 +71,12 @@ The delegated run's workspace (screenshots, logs, raw responses) is scanned for
 a canary sentinel before any result is surfaced; a hit refuses the result. Until
 the credential bridge ships (phase 2), keep delegated tasks to public, no-auth
 pages.
+
+## Auth bridge status
+
+Authenticated delegation is not implemented. The bridge design is pinned in
+`references/browser-delegate-auth-bridge.md`; the key rule is that Webwright may
+only receive a one-run copy of a validated Playwright `storageState`, never raw
+passwords, TOTP secrets, or credential backend payloads. Until that contract is
+implemented, `browser-delegate --site SITE` refuses any site with stored
+credentials.

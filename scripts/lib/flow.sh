@@ -36,6 +36,7 @@ readonly BROWSER_SKILL_FLOW_LOADED=1
 
 # Globals set by flow_parse:
 #   FLOW_NAME       — string
+#   FLOW_SITE       — string (may be empty)
 #   FLOW_SESSION    — string (may be empty)
 #   FLOW_VARS       — assoc array {key: value}
 #
@@ -50,6 +51,7 @@ flow_parse() {
   # called WITHOUT command substitution; the `_meta` JSON line on stdout is
   # the authoritative path for subshell-captured callers like browser-flow.sh).
   FLOW_NAME=""
+  FLOW_SITE=""
   FLOW_SESSION=""
   declare -gA FLOW_VARS=()
 
@@ -74,6 +76,7 @@ flow_parse() {
   meta_line="$(printf '%s\n' "${parsed_out}" | grep '"_kind":"meta"' | head -1)"
   if [ -n "${meta_line}" ]; then
     FLOW_NAME="$(printf '%s' "${meta_line}" | jq -r '.name')"
+    FLOW_SITE="$(printf '%s' "${meta_line}" | jq -r '.site // ""')"
     FLOW_SESSION="$(printf '%s' "${meta_line}" | jq -r '.session // ""')"
     while IFS=$'\t' read -r k v; do
       [ -z "${k}" ] && continue
@@ -259,6 +262,15 @@ flow_dispatch() {
   step_index="$(printf '%s' "${step}" | jq -r '.step_index')"
   verb="$(printf '%s' "${step}" | jq -r '.verb')"
   args_obj="$(printf '%s' "${step}" | jq -c '.args')"
+
+  if [ -n "${FLOW_SITE:-}" ]; then
+    assert_safe_name "${FLOW_SITE}" "flow site"
+    args_obj="$(printf '%s' "${args_obj}" | jq -c --arg site "${FLOW_SITE}" 'if has("site") then . else .site = $site end')"
+  fi
+  if [ -n "${FLOW_SITE:-}" ] && [ -n "${FLOW_SESSION:-}" ]; then
+    assert_safe_name "${FLOW_SESSION}" "flow session"
+    args_obj="$(printf '%s' "${args_obj}" | jq -c --arg session "${FLOW_SESSION}" 'if has("as") then . else .as = $session end')"
+  fi
 
   local script="${SCRIPTS_DIR:-${REPO_ROOT:-.}/scripts}/browser-${verb}.sh"
   if [ ! -f "${script}" ]; then

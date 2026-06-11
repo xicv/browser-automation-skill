@@ -1,7 +1,7 @@
 {
   "name": "browser-automation-skill",
-  "version": "0.74.1",
-  "description": "MCP server + bash CLI that drives a real browser from Claude Code, OpenAI Codex, and other MCP clients by routing across chrome-devtools-mcp, playwright-cli, playwright-lib, and obscura adapters. 42 verbs covering site/session/credential management, snapshot+ref interaction, capture pipelines, declarative flows, and a per-archetype memory cache.",
+  "version": "0.75.0",
+  "description": "MCP server + bash CLI that drives a real browser from Claude Code, OpenAI Codex, and other MCP clients by routing across chrome-devtools-mcp, playwright-cli, playwright-lib, and obscura adapters. 45 verbs covering site/session/credential management, snapshot+ref interaction, capture pipelines, declarative flows, Webwright delegation, and a per-archetype memory cache.",
   "keywords": [
     "claude-code",
     "openai-codex",

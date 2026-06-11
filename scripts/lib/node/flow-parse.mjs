@@ -5,7 +5,7 @@
 // validates required fields, and emits the same normalized JSON shape that the
 // original hand-rolled flow_parse produced on stdout:
 //
-//   {"_kind":"meta","name":"...","session":"...","vars":{...}}
+//   {"_kind":"meta","name":"...","site":"...","session":"...","vars":{...}}
 //   {"_kind":"step","step_index":0,"verb":"snapshot","args":{...}}
 //   {"_kind":"step","step_index":1,"verb":"fill","args":{...}}
 //   ...
@@ -122,6 +122,7 @@ if (doc.vars && typeof doc.vars === 'object' && !Array.isArray(doc.vars)) {
 const meta = {
   _kind: 'meta',
   name: doc.name,
+  site: typeof doc.site === 'string' ? doc.site : '',
   session: typeof doc.session === 'string' ? doc.session : '',
   vars,
 };

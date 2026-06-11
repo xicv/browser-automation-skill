@@ -31,6 +31,9 @@ source "${SCRIPT_DIR}/lib/output.sh"
 # shellcheck source=lib/stats.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/stats.sh"
+# shellcheck source=lib/credential.sh
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib/credential.sh"
 
 init_paths
 SUMMARY_T0="$(now_ms)"
@@ -45,6 +48,36 @@ readonly _DELEGATE_CANARY_SENTINEL='PASSWORD-CANARY'
 # users without Webwright/GLM see zero behavior change.
 readonly _DELEGATE_DEFAULT_MODE="off"
 readonly _DELEGATE_MODES="off ask auto"
+
+_delegate_webwright_env_file() {
+  if [ -n "${MSWEBA_GLOBAL_CONFIG_DIR:-}" ]; then
+    printf '%s/.env' "${MSWEBA_GLOBAL_CONFIG_DIR}"
+    return 0
+  fi
+  case "$(uname -s)" in
+    Darwin) printf '%s/Library/Application Support/webwright/.env' "${HOME}" ;;
+    *)      printf '%s/.config/webwright/.env' "${HOME}" ;;
+  esac
+}
+
+_delegate_env_has_key() {
+  local env_file
+  env_file="$(_delegate_webwright_env_file)"
+  [ -f "${env_file}" ] || return 1
+  grep -Eq '^[[:space:]]*ANTHROPIC_API_KEY=[^[:space:]]+' "${env_file}" 2>/dev/null
+}
+
+_delegate_site_has_credentials() {
+  local site="$1" name meta cred_site
+  [ -d "${CREDENTIALS_DIR}" ] || return 1
+  [ -f "${CREDENTIALS_DIR}/${site}.json" ] && return 0
+  for name in $(credential_list_names); do
+    meta="$(credential_load "${name}" 2>/dev/null)" || continue
+    cred_site="$(printf '%s' "${meta}" | jq -r '.site // ""' 2>/dev/null || printf '')"
+    [ "${cred_site}" = "${site}" ] && return 0
+  done
+  return 1
+}
 
 usage() {
   cat <<'USAGE'
@@ -73,7 +106,7 @@ USAGE
 _delegate_backend_available() {
   local ww="${BROWSER_SKILL_WEBWRIGHT_DIR:-${_DELEGATE_WEBWRIGHT_DIR_DEFAULT}}"
   [ -n "${BROWSER_DELEGATE_RUNNER_CMD:-}" ] && return 0
-  [ -d "${ww}" ] && [ -f "${ww}/.venv/bin/activate" ]
+  [ -d "${ww}" ] && [ -f "${ww}/.venv/bin/activate" ] && _delegate_env_has_key
 }
 
 _delegate_config_get() {
@@ -82,10 +115,13 @@ _delegate_config_get() {
   local avail=false
   _delegate_backend_available && avail=true
   local ww="${BROWSER_SKILL_WEBWRIGHT_DIR:-${_DELEGATE_WEBWRIGHT_DIR_DEFAULT}}"
+  local env_file
+  env_file="$(_delegate_webwright_env_file)"
   printf '%s' "${cfg}" | jq -c \
     --arg defmode "${_DELEGATE_DEFAULT_MODE}" \
     --argjson avail "${avail}" \
-    --arg ww "${ww}" '
+    --arg ww "${ww}" \
+    --arg env_file "${env_file}" '
     (.delegate // {}) as $d
     | { _kind:"delegate_policy",
         mode: ($d.mode // $defmode),
@@ -93,7 +129,8 @@ _delegate_config_get() {
         min_steps: ($d.min_steps // 3),
         auto_exclude: ($d.auto_exclude // ["auth"]),
         available: $avail,
-        webwright_dir: $ww }'
+        webwright_dir: $ww,
+        webwright_env_file: $env_file }'
   emit_summary verb=delegate tool=config why="resolved delegation policy" status=ok
 }
 
@@ -206,7 +243,7 @@ assert_safe_name "${task_id}" "task-id"
 # --- Phase 1 no-auth guard: refuse credentialed sites (spec §5) ---
 if [ -n "${arg_site}" ]; then
   assert_safe_name "${arg_site}" "site-name"
-  if [ -f "${CREDENTIALS_DIR}/${arg_site}.json" ]; then
+  if _delegate_site_has_credentials "${arg_site}"; then
     die "${EXIT_BLOCKLIST_REJECTED}" "browser-delegate: refused — site '${arg_site}' has stored credentials; phase 1 is NO-AUTH only (credential bridge deferred, spec §5). Run an anonymous task or omit --site."
   fi
 fi
@@ -215,7 +252,7 @@ ww_dir="${BROWSER_SKILL_WEBWRIGHT_DIR:-${_DELEGATE_WEBWRIGHT_DIR_DEFAULT}}"
 runner_override="${BROWSER_DELEGATE_RUNNER_CMD:-}"
 out_dir="${BROWSER_SKILL_HOME}/delegate"
 
-real_cmd_str="(cd '${ww_dir}' && source .venv/bin/activate && python -m webwright.run.cli -c base.yaml -c model_claude.yaml -t <task> --start-url '${arg_start_url}' --task-id '${task_id}' -o '${out_dir}')"
+real_cmd_str="(cd '${ww_dir}' && source .venv/bin/activate && python <task-file-runner> --start-url '${arg_start_url}' --task-id '${task_id}' -o '${out_dir}')"
 
 # --- dry-run: print resolved plan, spawn nothing ---
 if [ "${arg_dry_run}" = "true" ]; then
@@ -235,26 +272,45 @@ if [ -z "${runner_override}" ]; then
   if [ ! -d "${ww_dir}" ] || [ ! -f "${ww_dir}/.venv/bin/activate" ]; then
     die "${EXIT_TOOL_MISSING}" "browser-delegate: Webwright not found at '${ww_dir}'. Setup guide: references/webwright-setup.md (clone + venv + pip install -e . + playwright install + GLM key). Or set BROWSER_SKILL_WEBWRIGHT_DIR to an existing install."
   fi
+  if ! _delegate_env_has_key; then
+    die "${EXIT_PREFLIGHT_FAILED}" "browser-delegate: ANTHROPIC_API_KEY not found in '$(_delegate_webwright_env_file)' (required by Webwright model_claude.yaml for GLM/Anthropic-compatible delegation)"
+  fi
 fi
+
+task_file="$(mktemp "${out_dir}/${task_id}.task.XXXXXX")"
+printf '%s' "${arg_task}" > "${task_file}"
+chmod 600 "${task_file}" 2>/dev/null || true
 
 # Real backend invocation, isolated so the SC1091 (can't follow venv activate)
 # disable is scoped tightly. Reads outer vars by dynamic scope.
 _delegate_run_real() {
   # shellcheck disable=SC1091
   cd "${ww_dir}" && source .venv/bin/activate \
-    && python -m webwright.run.cli \
-         -c base.yaml -c model_claude.yaml \
-         -t "${arg_task}" --start-url "${arg_start_url}" \
-         --task-id "${task_id}" -o "${out_dir}"
+    && python - "${task_file}" "${arg_start_url}" "${task_id}" "${out_dir}" <<'PY'
+from pathlib import Path
+import sys
+
+from webwright.run.cli import run_one
+
+task_path, start_url, task_id, out_dir = sys.argv[1:5]
+run_one(
+    task=Path(task_path).read_text(encoding="utf-8"),
+    task_id=task_id,
+    start_url=start_url,
+    config_spec=["base.yaml", "model_claude.yaml"],
+    output_dir=Path(out_dir),
+)
+PY
 }
 
 # Capture stdout (the final answer) so the canary scan runs BEFORE we surface it.
 runner_rc=0
 if [ -n "${runner_override}" ]; then
-  runner_stdout="$("${runner_override}" "${arg_task}" "${arg_start_url}" "${task_id}" "${out_dir}" 2>/dev/null)" || runner_rc=$?
+  runner_stdout="$("${runner_override}" "${task_file}" "${arg_start_url}" "${task_id}" "${out_dir}" 2>/dev/null)" || runner_rc=$?
 else
   runner_stdout="$(_delegate_run_real 2>/dev/null)" || runner_rc=$?
 fi
+rm -f "${task_file}" 2>/dev/null || true
 
 # Locate the run directory the backend created (newest lexical match = newest ts).
 run_dir=""
@@ -304,6 +360,16 @@ if [ "${runner_rc}" -eq 0 ]; then
 else
   status="error"; outcome="fail"; exit_code="${EXIT_TOOL_CRASHED}"
 fi
+duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
+delegate_stdout_bytes=0
+_saved_lc="${LC_ALL-}"
+LC_ALL=C
+delegate_stdout_bytes=${#runner_stdout}
+if [ -z "${_saved_lc}" ]; then
+  unset LC_ALL
+else
+  LC_ALL="${_saved_lc}"
+fi
 
 # --- Telemetry: delegate event with OFFLOADED token fields, kept distinct from
 # gen_ai_usage_* (Claude-context tokens). spec §7. Best-effort. ---
@@ -318,6 +384,8 @@ if [ -n "${_span_id}" ] && [ -n "${_ts}" ]; then
     --arg backend "${arg_backend}" \
     --arg model "${backend_model}" \
     --arg site "${arg_site}" \
+    --argjson duration_ms "${duration_ms}" \
+    --argjson stdout_bytes "${delegate_stdout_bytes}" \
     --argjson rc "${runner_rc}" \
     --arg outcome "${outcome}" \
     --argjson steps "${steps}" \
@@ -335,6 +403,12 @@ if [ -n "${_span_id}" ] && [ -n "${_ts}" ]; then
       delegate_model: ($model | select(. != "" and . != "unknown") // null),
       delegate_steps: $steps,
       site: ($site | select(. != "") // null),
+      selector_kind: "none",
+      selector_value: null,
+      duration_ms: $duration_ms,
+      argv_bytes: 0,
+      stdout_bytes: $stdout_bytes,
+      stderr_bytes: 0,
       rc: $rc, outcome: $outcome, failure_mode: null,
       offloaded_input_tokens: $off_in,
       offloaded_output_tokens: $off_out,
@@ -343,22 +417,39 @@ if [ -n "${_span_id}" ] && [ -n "${_ts}" ]; then
   [ -n "${_ev}" ] && stats_emit_event "${_ev}" 2>/dev/null || true
 fi
 
-# --- Surface the COMPACT result (final answer + workspace), never the trajectory ---
-jq -nc \
-  --arg fr "${runner_stdout}" \
-  --arg ws "${run_dir}" \
-  --arg backend "${arg_backend}" \
-  --arg model "${backend_model}" \
-  --argjson steps "${steps}" \
-  --argjson off_in "${offloaded_in}" \
-  --argjson off_out "${offloaded_out}" '
-  {_kind:"delegate_result", backend:$backend,
-   model:($model|select(.!="" and .!="unknown")//null),
-   workspace:($ws|select(.!="")//null), steps:$steps,
-   offloaded_input_tokens:$off_in, offloaded_output_tokens:$off_out,
-   final_response:$fr}'
+# --- Surface the COMPACT result (final answer + workspace), never the trajectory.
+# Failure output is intentionally withheld: failed delegated runs can print
+# partial page text, prompts, or model diagnostics that have not passed the
+# success-path contract.
+if [ "${runner_rc}" -eq 0 ]; then
+  jq -nc \
+    --arg fr "${runner_stdout}" \
+    --arg ws "${run_dir}" \
+    --arg backend "${arg_backend}" \
+    --arg model "${backend_model}" \
+    --argjson steps "${steps}" \
+    --argjson off_in "${offloaded_in}" \
+    --argjson off_out "${offloaded_out}" '
+    {_kind:"delegate_result", backend:$backend,
+     model:($model|select(.!="" and .!="unknown")//null),
+     workspace:($ws|select(.!="")//null), steps:$steps,
+     offloaded_input_tokens:$off_in, offloaded_output_tokens:$off_out,
+     final_response:$fr}'
+else
+  jq -nc \
+    --arg ws "${run_dir}" \
+    --arg backend "${arg_backend}" \
+    --arg model "${backend_model}" \
+    --argjson steps "${steps}" \
+    --argjson rc "${runner_rc}" \
+    --argjson off_in "${offloaded_in}" \
+    --argjson off_out "${offloaded_out}" '
+    {_kind:"delegate_error", backend:$backend,
+     model:($model|select(.!="" and .!="unknown")//null),
+     workspace:($ws|select(.!="")//null), steps:$steps, runner_rc:$rc,
+     offloaded_input_tokens:$off_in, offloaded_output_tokens:$off_out}'
+fi
 
-duration_ms=$(( $(now_ms) - SUMMARY_T0 ))
 emit_summary verb=delegate tool="${arg_backend}" why="delegated agent loop on secondary LLM; tokens offloaded off Claude context" \
   status="${status}" task_id="${task_id}" steps="${steps}" \
   offloaded_input_tokens="${offloaded_in}" offloaded_output_tokens="${offloaded_out}" \

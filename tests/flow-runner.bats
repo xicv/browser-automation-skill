@@ -63,6 +63,57 @@ teardown() { teardown_temp_home; }
   [ "${step_count}" = "3" ] || fail "expected 3 step lines, got ${step_count}"
 }
 
+@test "flow_parse: top-level site is emitted in _meta" {
+  local flow_file="${TEST_HOME}/with-site.flow.yaml"
+  printf '%s\n' \
+    'name: with-site' \
+    'site: app' \
+    'session: task-1' \
+    'steps:' \
+    '  - snapshot: {}' \
+    > "${flow_file}"
+
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/flow.sh'
+    flow_parse '${flow_file}'
+  "
+  assert_status 0
+  printf '%s\n' "${output}" | jq -e -s \
+    'map(select(._kind=="meta")) | .[0].site == "app" and .[0].session == "task-1"' \
+    >/dev/null
+}
+
+@test "browser-flow.sh (P1b): unsafe top-level site is rejected" {
+  local flow_file="${TEST_HOME}/unsafe-site.flow.yaml"
+  printf '%s\n' \
+    'name: unsafe-site' \
+    'site: ../app' \
+    'session: task-1' \
+    'steps:' \
+    '  - snapshot: {}' \
+    > "${flow_file}"
+
+  run bash "${SCRIPTS_DIR}/browser-flow.sh" run "${flow_file}" --check
+  assert_status "${EXIT_USAGE_ERROR}"
+  assert_output_contains "flow site"
+}
+
+@test "browser-flow.sh (P1b): unsafe top-level session is rejected" {
+  local flow_file="${TEST_HOME}/unsafe-session.flow.yaml"
+  printf '%s\n' \
+    'name: unsafe-session' \
+    'site: app' \
+    'session: ../task-1' \
+    'steps:' \
+    '  - snapshot: {}' \
+    > "${flow_file}"
+
+  run bash "${SCRIPTS_DIR}/browser-flow.sh" run "${flow_file}" --check
+  assert_status "${EXIT_USAGE_ERROR}"
+  assert_output_contains "flow session"
+}
+
 # --- flow_apply_vars ---
 
 @test "flow_apply_vars: substitutes \${var} in step args" {
@@ -192,6 +243,73 @@ teardown() { teardown_temp_home; }
   printf '%s' "${output}" | jq -e '.summary.verb == "snapshot"' >/dev/null
 }
 
+@test "flow_dispatch (P1b): top-level site/session become per-step globals" {
+  local scripts_dir="${TEST_HOME}/flow-scripts"
+  mkdir -p "${scripts_dir}"
+  cat > "${scripts_dir}/browser-snapshot.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "${BROWSER_SKILL_HOME}/snapshot-argv.log"
+printf '%s\n' '{"verb":"snapshot","tool":"stub","why":"test","status":"ok"}'
+STUB
+  chmod +x "${scripts_dir}/browser-snapshot.sh"
+
+  step_in='{"step_index": 0, "verb": "snapshot", "args": {}}'
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    export SCRIPTS_DIR='${scripts_dir}'
+    source '${LIB_DIR}/flow.sh'
+    FLOW_SITE=app
+    FLOW_SESSION=task-1
+    flow_dispatch '${step_in}'
+  "
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.args.site == "app" and .args.as == "task-1"' >/dev/null
+  argv="$(tr '\n' ' ' < "${BROWSER_SKILL_HOME}/snapshot-argv.log")"
+  case "${argv}" in
+    *"--site app"*);;
+    *) fail "expected --site app in argv, got: ${argv}" ;;
+  esac
+  case "${argv}" in
+    *"--as task-1"*);;
+    *) fail "expected --as task-1 in argv, got: ${argv}" ;;
+  esac
+}
+
+@test "flow_dispatch (P1b): step-level site/as overrides flow defaults" {
+  local scripts_dir="${TEST_HOME}/flow-scripts"
+  mkdir -p "${scripts_dir}"
+  cat > "${scripts_dir}/browser-snapshot.sh" <<'STUB'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "${BROWSER_SKILL_HOME}/snapshot-argv.log"
+printf '%s\n' '{"verb":"snapshot","tool":"stub","why":"test","status":"ok"}'
+STUB
+  chmod +x "${scripts_dir}/browser-snapshot.sh"
+
+  step_in='{"step_index": 0, "verb": "snapshot", "args": {"site":"other","as":"other-session"}}'
+  run bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    export SCRIPTS_DIR='${scripts_dir}'
+    source '${LIB_DIR}/flow.sh'
+    FLOW_SITE=app
+    FLOW_SESSION=task-1
+    flow_dispatch '${step_in}'
+  "
+  assert_status 0
+  printf '%s' "${output}" | jq -e '.args.site == "other" and .args.as == "other-session"' >/dev/null
+  argv="$(tr '\n' ' ' < "${BROWSER_SKILL_HOME}/snapshot-argv.log")"
+  case "${argv}" in
+    *"--site other"*);;
+    *) fail "expected --site other in argv, got: ${argv}" ;;
+  esac
+  case "${argv}" in
+    *"--as other-session"*);;
+    *) fail "expected --as other-session in argv, got: ${argv}" ;;
+  esac
+  case "${argv}" in
+    *"task-1"*|*"--site app"*) fail "flow defaults should not override step args; got: ${argv}" ;;
+  esac
+}
+
 @test "flow_dispatch: unknown verb returns 41 (UNSUPPORTED_OP) in step-event status" {
   step_in='{"step_index": 0, "verb": "ghostverb", "args": {}}'
   run bash -c "
@@ -233,6 +351,34 @@ teardown() { teardown_temp_home; }
   # steps.jsonl: 3 lines.
   step_count="$(wc -l < "${capture_dir}steps.jsonl" | tr -d ' ')"
   [ "${step_count}" = "3" ] || fail "expected 3 step lines in steps.jsonl, got ${step_count}"
+}
+
+@test "browser-flow.sh (P1b): top-level site/session resolves storageState for each step" {
+  bash -c "
+    source '${LIB_DIR}/common.sh'; init_paths
+    source '${LIB_DIR}/site.sh'
+    source '${LIB_DIR}/session.sh'
+    site_save app '{\"schema_version\":1,\"name\":\"app\",\"url\":\"https://example.com\",\"label\":\"App\",\"default_session\":null,\"default_tool\":null,\"viewport\":{\"width\":1280,\"height\":720}}' '{}'
+    session_save task-1 '{\"cookies\":[],\"origins\":[{\"origin\":\"https://example.com\",\"localStorage\":[]}]}' '{\"site\":\"app\",\"origin\":\"https://example.com\"}'
+  "
+
+  local flow_file="${TEST_HOME}/p1b-site-session.flow.yaml"
+  printf '%s\n' \
+    'name: p1b-site-session' \
+    'site: app' \
+    'session: task-1' \
+    'steps:' \
+    '  - snapshot: { dry-run: true }' \
+    > "${flow_file}"
+
+  run bash "${SCRIPTS_DIR}/browser-flow.sh" run "${flow_file}"
+  assert_status 0
+  capture_dir="$(ls -d "${BROWSER_SKILL_HOME}/captures/"*/ 2>/dev/null | head -1)"
+  [ -d "${capture_dir}" ] || fail "no capture dir created"
+  step0="$(sed -n '1p' "${capture_dir}steps.jsonl")"
+  printf '%s' "${step0}" | jq -e \
+    '.args.site == "app" and .args.as == "task-1" and .args["dry-run"] == "true" and .status == "ok"' \
+    >/dev/null || fail "expected resolved flow globals in step args; got: ${step0}"
 }
 
 @test "browser-flow.sh: --var override overrides vars: defaults" {

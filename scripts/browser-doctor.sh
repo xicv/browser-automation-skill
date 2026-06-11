@@ -27,6 +27,7 @@ check_cmd() {
 # Advisory check: prints status but does NOT increment problems. Use for tools
 # that are required by later phases but optional in the current phase, OR for
 # tools that the user will install when they actually need them.
+# shellcheck disable=SC2329  # kept for near-future optional tool checks
 check_cmd_advisory() {
   local cmd="$1" hint="$2"
   if command -v "${cmd}" >/dev/null 2>&1; then
@@ -334,6 +335,105 @@ else
 fi
 jq -nc --arg endpoint "${vlm_endpoint}" --argjson reachable "${vlm_reachable}" \
   '{check:"local_vlm", endpoint:$endpoint, reachable:$reachable}'
+
+# --- Phase 15: Webwright delegation readiness (advisory, never fails doctor) ---
+# `browser-delegate` is not a primitive adapter and is ship-dark by default, but
+# users need a quick way to see why GLM/Webwright offload is or is not available.
+webwright_env_file() {
+  if [ -n "${MSWEBA_GLOBAL_CONFIG_DIR:-}" ]; then
+    printf '%s/.env' "${MSWEBA_GLOBAL_CONFIG_DIR}"
+    return 0
+  fi
+  case "$(uname -s)" in
+    Darwin) printf '%s/Library/Application Support/webwright/.env' "${HOME}" ;;
+    *)      printf '%s/.config/webwright/.env' "${HOME}" ;;
+  esac
+}
+
+webwright_yaml_value() {
+  local file="$1" key="$2"
+  [ -f "${file}" ] || return 0
+  grep -E "^[[:space:]]*${key}[[:space:]]*:" "${file}" 2>/dev/null \
+    | head -1 \
+    | cut -d: -f2- \
+    | sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//; s/^"//; s/"$//'
+}
+
+webwright_dir="${BROWSER_SKILL_WEBWRIGHT_DIR:-${HOME}/tools/Webwright}"
+webwright_venv="${webwright_dir}/.venv/bin/activate"
+webwright_config="${webwright_dir}/src/webwright/config/model_claude.yaml"
+webwright_env="$(webwright_env_file)"
+webwright_dir_present=false
+webwright_venv_present=false
+webwright_env_present=false
+webwright_key_present=false
+webwright_config_present=false
+webwright_available=false
+webwright_env_mode=""
+webwright_model=""
+webwright_endpoint=""
+
+[ -d "${webwright_dir}" ] && webwright_dir_present=true
+[ -f "${webwright_venv}" ] && webwright_venv_present=true
+if [ -f "${webwright_env}" ]; then
+  webwright_env_present=true
+  webwright_env_mode="$(file_mode "${webwright_env}")"
+  if grep -Eq '^[[:space:]]*ANTHROPIC_API_KEY=[^[:space:]]+' "${webwright_env}" 2>/dev/null; then
+    webwright_key_present=true
+  fi
+fi
+if [ -f "${webwright_config}" ]; then
+  webwright_config_present=true
+  webwright_model="$(webwright_yaml_value "${webwright_config}" model_name)"
+  webwright_endpoint="$(webwright_yaml_value "${webwright_config}" anthropic_endpoint)"
+fi
+
+if [ "${webwright_dir_present}" = "true" ] \
+  && [ "${webwright_venv_present}" = "true" ] \
+  && [ "${webwright_key_present}" = "true" ]; then
+  webwright_available=true
+fi
+
+if [ "${webwright_available}" = "true" ]; then
+  ok "Webwright delegate: available (dir: ${webwright_dir}, model: ${webwright_model:-unknown})"
+else
+  warn "Webwright delegate: unavailable (advisory — browser-delegate remains optional)"
+fi
+[ "${webwright_dir_present}" = "true" ] \
+  || warn "  Webwright dir missing: ${webwright_dir} (set BROWSER_SKILL_WEBWRIGHT_DIR or follow references/webwright-setup.md)"
+[ "${webwright_venv_present}" = "true" ] \
+  || warn "  Webwright venv missing: ${webwright_venv}"
+[ "${webwright_env_present}" = "true" ] \
+  || warn "  Webwright env file missing: ${webwright_env}"
+[ "${webwright_key_present}" = "true" ] \
+  || warn "  ANTHROPIC_API_KEY missing from Webwright env file (do not put keys on argv)"
+if [ "${webwright_env_present}" = "true" ] && [ "${webwright_env_mode}" != "600" ]; then
+  warn "  Webwright env file mode ${webwright_env_mode:-?}, expected 600"
+fi
+[ "${webwright_config_present}" = "true" ] \
+  || warn "  Webwright model config missing: ${webwright_config}"
+
+jq -nc \
+  --arg dir "${webwright_dir}" \
+  --arg env_file "${webwright_env}" \
+  --arg env_mode "${webwright_env_mode}" \
+  --arg config_file "${webwright_config}" \
+  --arg model "${webwright_model}" \
+  --arg endpoint "${webwright_endpoint}" \
+  --argjson available "${webwright_available}" \
+  --argjson dir_present "${webwright_dir_present}" \
+  --argjson venv_present "${webwright_venv_present}" \
+  --argjson env_present "${webwright_env_present}" \
+  --argjson key_present "${webwright_key_present}" \
+  --argjson config_present "${webwright_config_present}" \
+  '{check:"webwright_delegate", available:$available,
+    dir:$dir, dir_present:$dir_present,
+    venv_present:$venv_present,
+    env_file:$env_file, env_present:$env_present, env_mode:($env_mode | select(. != "") // null),
+    key_present:$key_present,
+    config_file:$config_file, config_present:$config_present,
+    model:($model | select(. != "") // null),
+    anthropic_endpoint:($endpoint | select(. != "") // null)}'
 
 duration_ms=$(( $(now_ms) - started_at_ms ))
 

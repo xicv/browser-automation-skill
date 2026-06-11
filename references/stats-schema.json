@@ -26,12 +26,12 @@
     "parent_span_id":      {"type": ["string", "null"]},
     "session_id":          {"type": ["string", "null"], "description": "$CLAUDE_SESSION_ID if injected."},
 
-    "gen_ai_operation_name": {"type": "string", "const": "execute_tool"},
+    "gen_ai_operation_name": {"type": "string", "enum": ["execute_tool", "invoke_agent"]},
     "gen_ai_tool_name":      {"type": "string", "description": "e.g. 'chrome-devtools-mcp.click'. OTel-compliant."},
     "gen_ai_tool_type":      {"type": "string", "enum": ["function", "extension", "datastore"]},
 
     "verb":                {"type": "string", "description": "browser-* verb (open, click, fill, extract, ...)."},
-    "adapter_route":       {"type": "string", "enum": ["chrome-devtools-mcp", "playwright-cli", "playwright-lib", "obscura"]},
+    "adapter_route":       {"type": "string", "enum": ["chrome-devtools-mcp", "playwright-cli", "playwright-lib", "obscura", "browser-delegate"]},
     "site":                {"type": ["string", "null"]},
 
     "selector_kind":       {"type": "string", "enum": ["a11y_ref", "css", "xpath", "role", "text", "none"]},
@@ -63,6 +63,13 @@
     "gen_ai_usage_output_tokens":              {"type": ["integer", "null"], "minimum": 0},
     "gen_ai_usage_cache_read_input_tokens":    {"type": ["integer", "null"], "minimum": 0},
     "gen_ai_usage_cache_creation_input_tokens":{"type": ["integer", "null"], "minimum": 0},
+
+    "delegate_backend":                  {"type": ["string", "null"], "description": "Secondary browser-agent backend, e.g. webwright. Present only for adapter_route=browser-delegate."},
+    "delegate_model":                    {"type": ["string", "null"], "description": "Secondary LLM model name reported by the delegated backend."},
+    "delegate_steps":                    {"type": ["integer", "null"], "minimum": 0},
+    "offloaded_input_tokens":            {"type": ["integer", "null"], "minimum": 0, "description": "Input tokens billed to the secondary LLM, kept distinct from gen_ai_usage_* host-context tokens."},
+    "offloaded_output_tokens":           {"type": ["integer", "null"], "minimum": 0},
+    "offloaded_cached_input_tokens":     {"type": ["integer", "null"], "minimum": 0},
 
     "post_condition_target_type":  {"type": ["string", "null"], "enum": [null, "url", "element_path", "element_value"]},
     "post_condition_matcher":      {"type": ["string", "null"], "enum": [null, "exact", "include", "semantic"]},

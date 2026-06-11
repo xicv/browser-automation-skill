@@ -381,6 +381,64 @@ EOF
     || fail "expected {check:local_vlm,reachable:true} JSON line; got:\n${output}"
 }
 
+# --- Phase 15: Webwright delegation readiness probe (advisory; never fails doctor) ---
+
+@test "doctor: Webwright delegate missing install → unavailable advisory + JSON available:false" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  BROWSER_SKILL_WEBWRIGHT_DIR="${TEST_HOME}/no-webwright" \
+  MSWEBA_GLOBAL_CONFIG_DIR="${TEST_HOME}/webwright-config" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "Webwright delegate: unavailable"
+  assert_output_contains "Webwright dir missing"
+  printf '%s\n' "${lines[@]}" | grep '^{' | jq -e '
+    select(.check == "webwright_delegate"
+      and .available == false
+      and .dir_present == false
+      and .venv_present == false
+      and .key_present == false)
+  ' >/dev/null || fail "expected unavailable webwright_delegate JSON line; got:\n${output}"
+}
+
+@test "doctor: Webwright delegate configured → available true without leaking key" {
+  setup_temp_home
+  mkdir -p "${BROWSER_SKILL_HOME}"
+  chmod 700 "${BROWSER_SKILL_HOME}"
+  ww="${TEST_HOME}/Webwright"
+  cfg="${TEST_HOME}/webwright-config"
+  mkdir -p "${ww}/.venv/bin" "${ww}/src/webwright/config" "${cfg}"
+  touch "${ww}/.venv/bin/activate"
+  cat > "${ww}/src/webwright/config/model_claude.yaml" <<'EOF'
+model:
+  model_class: anthropic
+  model_name: glm-test
+  anthropic_endpoint: https://api.z.ai/api/anthropic/v1/messages
+EOF
+  printf 'ANTHROPIC_API_KEY=test-secret-canary\n' > "${cfg}/.env"
+  chmod 600 "${cfg}/.env"
+  BROWSER_SKILL_WEBWRIGHT_DIR="${ww}" \
+  MSWEBA_GLOBAL_CONFIG_DIR="${cfg}" \
+    run bash "${SCRIPTS_DIR}/browser-doctor.sh"
+  teardown_temp_home
+  assert_status 0
+  assert_output_contains "Webwright delegate: available"
+  assert_output_contains "glm-test"
+  assert_output_not_contains "test-secret-canary"
+  printf '%s\n' "${lines[@]}" | grep '^{' | jq -e '
+    select(.check == "webwright_delegate"
+      and .available == true
+      and .dir_present == true
+      and .venv_present == true
+      and .env_present == true
+      and .key_present == true
+      and .config_present == true
+      and .model == "glm-test")
+  ' >/dev/null || fail "expected available webwright_delegate JSON line; got:\n${output}"
+}
+
 # ---------- Phase 14+ doctor surface for stats-driven prune ----------
 
 @test "doctor: emits 'cache archetype(s) with ≥3 oblivious_success' warn when above threshold" {

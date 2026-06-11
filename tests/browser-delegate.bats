@@ -16,7 +16,7 @@ teardown() { teardown_temp_home; }
     --dry-run --task "do a thing" --start-url https://example.com --task-id dr1
   assert_status 0
   assert_output_contains '"_kind":"dry_run"'
-  assert_output_contains 'webwright.run.cli'
+  assert_output_contains 'task-file-runner'
   assert_output_contains 'example.com'
   [ ! -d "${BROWSER_SKILL_HOME}/delegate/dr1_stub" ] || fail "dry-run spawned a run dir"
   last="$(printf '%s\n' "${lines[@]}" | tail -1)"
@@ -35,6 +35,39 @@ teardown() { teardown_temp_home; }
   assert_output_not_contains 'cumulative_response'
 }
 
+@test "browser-delegate: task text is passed via private file, not runner argv" {
+  local marker="SENSITIVE-TASK-CANARY-argv"
+  local argv_log="${BROWSER_SKILL_HOME}/delegate-argv.log"
+  BROWSER_DELEGATE_STUB_ARGV_LOG="${argv_log}" \
+  BROWSER_DELEGATE_RUNNER_CMD="${RUNNER}" \
+    run bash "${SCRIPTS_DIR}/browser-delegate.sh" \
+      --task "collect ${marker}" --start-url https://example.com --task-id argv1
+  assert_status 0
+  [ -f "${argv_log}" ] || fail "stub argv log missing"
+  assert_output_contains "STUB-FINAL-ANSWER for: collect ${marker}"
+  if grep -qF "${marker}" "${argv_log}"; then
+    fail "task marker leaked through runner argv: $(cat "${argv_log}")"
+  fi
+  task_arg="$(sed -n '1p' "${argv_log}")"
+  if [ -f "${task_arg}" ]; then
+    fail "task file should be deleted after runner returns: ${task_arg}"
+  fi
+}
+
+@test "browser-delegate: failed run withholds final_response" {
+  STUB_EXIT=42 BROWSER_DELEGATE_RUNNER_CMD="${RUNNER}" \
+    run bash "${SCRIPTS_DIR}/browser-delegate.sh" \
+      --task "failure path" --start-url https://example.com --task-id fail1
+  assert_status "${EXIT_TOOL_CRASHED}"
+  assert_output_contains '"_kind":"delegate_error"'
+  assert_output_not_contains '"_kind":"delegate_result"'
+  assert_output_not_contains 'final_response'
+  assert_output_not_contains 'STUB-FINAL-ANSWER'
+  last="$(printf '%s\n' "${lines[@]}" | tail -1)"
+  printf '%s' "${last}" | jq -e '.verb=="delegate" and .status=="error"' >/dev/null \
+    || fail "summary wrong: ${last}"
+}
+
 @test "browser-delegate: emits stats event with offloaded token fields" {
   BROWSER_DELEGATE_RUNNER_CMD="${RUNNER}" \
     run bash "${SCRIPTS_DIR}/browser-delegate.sh" \
@@ -44,7 +77,7 @@ teardown() { teardown_temp_home; }
   [ -f "${stats}" ] || fail "no stats.jsonl written"
   line="$(grep '"verb":"delegate"' "${stats}" | tail -1)"
   [ -n "${line}" ] || fail "no delegate event in stats.jsonl"
-  printf '%s' "${line}" | jq -e '.adapter_route=="browser-delegate" and .offloaded_input_tokens==1234 and .offloaded_output_tokens==56 and .delegate_steps==2 and .delegate_backend=="webwright"' >/dev/null \
+  printf '%s' "${line}" | jq -e '.adapter_route=="browser-delegate" and .offloaded_input_tokens==1234 and .offloaded_output_tokens==56 and .delegate_steps==2 and .delegate_backend=="webwright" and .duration_ms >= 0 and .stdout_bytes > 0 and .stderr_bytes == 0' >/dev/null \
     || fail "stats event wrong: ${line}"
 }
 
@@ -58,10 +91,32 @@ teardown() { teardown_temp_home; }
 
 @test "browser-delegate: --site with stored creds -> refused (exit 28)" {
   mkdir -p "${BROWSER_SKILL_HOME}/credentials"
-  printf '{"backend":"plaintext"}\n' > "${BROWSER_SKILL_HOME}/credentials/app.json"
+  jq -nc '{schema_version:1,name:"app",site:"app",account:"a@example.com",backend:"plaintext",created_at:"2026-06-11T00:00:00Z"}' \
+    > "${BROWSER_SKILL_HOME}/credentials/app.json"
   BROWSER_DELEGATE_RUNNER_CMD="${RUNNER}" \
     run bash "${SCRIPTS_DIR}/browser-delegate.sh" \
       --task "x" --start-url https://example.com --task-id cs1 --site app
+  assert_status 28
+  assert_output_contains 'NO-AUTH'
+}
+
+@test "browser-delegate: --site with legacy exact-name creds -> refused (exit 28)" {
+  mkdir -p "${BROWSER_SKILL_HOME}/credentials"
+  printf '{"backend":"plaintext"}\n' > "${BROWSER_SKILL_HOME}/credentials/app.json"
+  BROWSER_DELEGATE_RUNNER_CMD="${RUNNER}" \
+    run bash "${SCRIPTS_DIR}/browser-delegate.sh" \
+      --task "x" --start-url https://example.com --task-id cs1-legacy --site app
+  assert_status 28
+  assert_output_contains 'NO-AUTH'
+}
+
+@test "browser-delegate: --site with role-named stored creds -> refused (exit 28)" {
+  mkdir -p "${BROWSER_SKILL_HOME}/credentials"
+  jq -nc '{schema_version:1,name:"app--admin",site:"app",account:"a@example.com",backend:"plaintext",created_at:"2026-06-11T00:00:00Z"}' \
+    > "${BROWSER_SKILL_HOME}/credentials/app--admin.json"
+  BROWSER_DELEGATE_RUNNER_CMD="${RUNNER}" \
+    run bash "${SCRIPTS_DIR}/browser-delegate.sh" \
+      --task "x" --start-url https://example.com --task-id cs2 --site app
   assert_status 28
   assert_output_contains 'NO-AUTH'
 }
@@ -105,4 +160,31 @@ teardown() { teardown_temp_home; }
   assert_status 0
   printf '%s\n' "${lines[@]}" | jq -se 'map(select(._kind=="delegate_policy"))[0].available == true' >/dev/null \
     || fail "expected available:true under runner override; output: ${output}"
+}
+
+@test "browser-delegate config get: Webwright venv without key is unavailable" {
+  ww="${BROWSER_SKILL_HOME}/fake-webwright"
+  mkdir -p "${ww}/.venv/bin" "${BROWSER_SKILL_HOME}/empty-config"
+  touch "${ww}/.venv/bin/activate"
+  MSWEBA_GLOBAL_CONFIG_DIR="${BROWSER_SKILL_HOME}/empty-config" \
+  BROWSER_SKILL_WEBWRIGHT_DIR="${ww}" \
+    run bash "${SCRIPTS_DIR}/browser-delegate.sh" config get
+  assert_status 0
+  printf '%s\n' "${lines[@]}" | jq -se 'map(select(._kind=="delegate_policy"))[0].available == false' >/dev/null \
+    || fail "expected available:false without ANTHROPIC_API_KEY; output: ${output}"
+}
+
+@test "browser-delegate config get: Webwright venv plus key is available" {
+  ww="${BROWSER_SKILL_HOME}/fake-webwright"
+  cfg="${BROWSER_SKILL_HOME}/webwright-config"
+  mkdir -p "${ww}/.venv/bin" "${cfg}"
+  touch "${ww}/.venv/bin/activate"
+  printf 'ANTHROPIC_API_KEY=test-key\n' > "${cfg}/.env"
+  chmod 600 "${cfg}/.env"
+  MSWEBA_GLOBAL_CONFIG_DIR="${cfg}" \
+  BROWSER_SKILL_WEBWRIGHT_DIR="${ww}" \
+    run bash "${SCRIPTS_DIR}/browser-delegate.sh" config get
+  assert_status 0
+  printf '%s\n' "${lines[@]}" | jq -se 'map(select(._kind=="delegate_policy"))[0].available == true' >/dev/null \
+    || fail "expected available:true with ANTHROPIC_API_KEY; output: ${output}"
 }

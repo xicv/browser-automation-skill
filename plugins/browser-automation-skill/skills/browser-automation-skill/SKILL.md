@@ -26,6 +26,11 @@ Never pass passwords, API keys, tokens, or other secrets through MCP tool argume
 
 Browser state, sessions, credentials, captures, flows, and telemetry are local. The canonical state directory is `~/.browser-skill/`.
 
+Authenticated delegation is not implemented. `browser-delegate` may only be used
+for no-auth tasks today; the future bridge must reuse a validated Playwright
+`storageState` only and must never pass passwords, TOTP secrets, or credential
+backend payloads to Webwright.
+
 ## Full CLI surface
 
 The MCP surface is intentionally curated. For workflows outside the MCP tools, use a repository checkout and run the scripts directly from the repo root, for example:
@@ -39,3 +44,7 @@ bash scripts/browser-snapshot.sh
 ```
 
 Every CLI verb prints zero or more streaming JSON lines, then a final single-line JSON summary. Route on `.status` and inspect `.problems`, `.why`, or adapter-specific fields for recovery.
+
+Flows may set top-level `site:` plus `session:` in `.flow.yaml`; `flow run`
+injects those as per-step `--site` / `--as` for storageState validation and
+daemon routing unless a step overrides them.

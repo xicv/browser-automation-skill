@@ -74,3 +74,29 @@ load helpers
   grep -q 'memory cache hit rate' "${dir}/cache-driven-bulk-operation.md" \
     || fail "cache-driven-bulk-operation.md missing doctor cache-hit-rate reference"
 }
+
+# ---------- Phase 15: browser-delegate auth bridge design guard ----------
+
+@test "Phase 15: auth bridge design pins storageState-only credential contract" {
+  local bridge="${REPO_ROOT}/references/browser-delegate-auth-bridge.md"
+  [ -f "${bridge}" ] || fail "browser-delegate auth bridge design is missing"
+  grep -q 'Status: design only' "${bridge}" \
+    || fail "auth bridge doc must state design-only status"
+  grep -q 'storageState' "${bridge}" \
+    || fail "auth bridge doc must mention Playwright storageState"
+  grep -q 'credential_get_secret' "${bridge}" \
+    || fail "auth bridge doc must forbid credential_get_secret"
+  grep -q 'storage_state_path' "${bridge}" \
+    || fail "auth bridge doc must pin current Webwright storage_state_path gap"
+  grep -q 'Do not implement a password-form replay workaround' "${bridge}" \
+    || fail "auth bridge doc must forbid password-form replay workaround"
+}
+
+@test "Phase 15: prompt-visible docs keep authenticated delegation disabled" {
+  grep -q 'Authenticated delegation is not implemented' "${REPO_ROOT}/SKILL.md" \
+    || fail "SKILL.md must keep auth delegation disabled until bridge ships"
+  grep -q 'references/browser-delegate-auth-bridge.md' "${REPO_ROOT}/SKILL.md" \
+    || fail "SKILL.md must link the auth bridge design"
+  grep -q 'Authenticated delegation is not implemented' "${REPO_ROOT}/references/browser-delegate-cheatsheet.md" \
+    || fail "browser-delegate cheatsheet must keep auth delegation disabled"
+}

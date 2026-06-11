@@ -188,6 +188,7 @@ done
 declare -gA FLOW_VARS=()
 declare -gA FLOW_REFS=()
 FLOW_NAME=""
+FLOW_SITE=""
 FLOW_SESSION=""
 
 # Parse the flow file → captures _meta line + per-step lines on stdout.
@@ -197,7 +198,10 @@ parsed="$(flow_parse "${flow_file_abs}")"
 meta_line="$(printf '%s\n' "${parsed}" | jq -c -s 'map(select(._kind=="meta")) | .[0]' 2>/dev/null || printf 'null')"
 [ "${meta_line}" = "null" ] && die "${EXIT_GENERIC_ERROR}" "flow_parse: missing _meta line in output"
 FLOW_NAME="$(printf '%s' "${meta_line}" | jq -r '.name')"
+FLOW_SITE="$(printf '%s' "${meta_line}" | jq -r '.site // ""')"
 FLOW_SESSION="$(printf '%s' "${meta_line}" | jq -r '.session // ""')"
+[ -z "${FLOW_SITE}" ] || assert_safe_name "${FLOW_SITE}" "flow site"
+[ -z "${FLOW_SESSION}" ] || assert_safe_name "${FLOW_SESSION}" "flow session"
 
 # Hydrate FLOW_VARS from _meta.vars (file-defined defaults).
 while IFS=$'\t' read -r k v; do

@@ -13,6 +13,8 @@ Every entry has a tag in `[brackets]`:
 
 ## [Unreleased]
 
+## [v0.75.0-p0-webwright-delegate-hardening] - 2026-06-11
+
 - [feat] flow fail-fast preflight: unknown verbs rejected before browser launch; `--check` flag emits step plan + summary without executing; `--continue-on-error` flag overrides default abort-on-first-failure behavior.
 - [feat] real YAML flow parsing via vendored js-yaml 4.2.0 (fixes quoted attribute selectors with inner escaped quotes, e.g. `input[name="qual_file"]`); collision-resistant sentinel substitution for `${var}` placeholders; object keys now also restored through sentinel pass.
 - [feat] implicit session-scoped playwright-lib daemon auto-start with configurable idle TTL and page-ownership registry; registry writes are atomic (tmp+rename, mode 0600) with advisory lockfile to minimize concurrent-start races; `last_used_at` refreshed via debounced in-process flush (at most every 30 s).
@@ -25,6 +27,11 @@ Every entry has a tag in `[brackets]`:
 - [docs] SKILL.md documents the stateful-session workflow and the honest cross-adapter ref-namespace caveat (playwright-lib `eN` vs chrome-devtools-mcp `uid`).
 - [feat] browser-delegate verb (Phase 15 Path-A, ship-dark, opt-in): delegates a whole multi-step web task to Webwright driven by a secondary LLM (GLM), offloading the agent-loop token cost off Claude Code's context. No-auth only; refuses credentialed sites; privacy-canary gate; emits offloaded_* telemetry to stats.jsonl. Router never auto-selects it.
 - [feat] browser-delegate config sub-mode: per-user opt-in delegation policy in config.json (.delegate.mode = off|ask|auto, default off). `config get`/`config set`; governs when Claude defaults to delegation. SKILL.md documents the decision policy.
+- [fix] Webwright delegate hardening: require install + venv + env key readiness, pass task text via a mode-0600 task file instead of argv, withhold final responses on delegate failures, and surface doctor advisories without failing normal health checks.
+- [feat] flow top-level `site:` + `session:` metadata now propagates to per-step `--site` / `--as` arguments, with safe-name validation and session storageState resolution.
+- [schema] browser-stats indexes delegate/offloaded token fields and hardens JSONL rebuild numeric coercion/filter quoting before inserting into SQLite.
+- [security] authenticated delegation remains disabled; `references/browser-delegate-auth-bridge.md` pins the future storageState-only bridge and forbids password/TOTP/credential replay.
+- [docs] README refreshed for v0.75.0, including Webwright setup, offload telemetry, flow session propagation, and local Codex/plugin update commands.
 
 ## [v0.72.0-phase-12-toon-output-mode] - 2026-05-22
 

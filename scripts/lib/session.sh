@@ -137,6 +137,24 @@ session_origin_check() {
   fi
 }
 
+# session_expired_by_ttl NAME
+# Returns 0 when captured_at + expires_in_hours is in the past, 1 otherwise.
+# Missing TTL metadata means "unknown", not expired, for backward compatibility
+# with older sidecars.
+session_expired_by_ttl() {
+  local name="$1" meta
+  meta="$(session_meta_load "${name}")"
+  printf '%s' "${meta}" | jq -e '
+    (.captured_at // "") as $captured
+    | ((.expires_in_hours // null) | try tonumber catch null) as $hours
+    | if ($captured == "" or $hours == null) then
+        false
+      else
+        (((try ($captured | fromdateiso8601) catch 0) + ($hours * 3600)) <= now)
+      end
+  ' >/dev/null
+}
+
 # session_expiry_summary NAME → emits a single-line JSON object:
 #   {"session": NAME, "captured_at": ..., "expires_in_hours": ..., "origin": ...}
 # Used by login + later phases' relogin / doctor to surface session staleness.

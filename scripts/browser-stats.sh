@@ -50,6 +50,18 @@ require_sqlite3() {
     || die "${EXIT_PREFLIGHT_FAILED}" "browser-stats: sqlite3 not installed"
 }
 
+stats_sql_quote() {
+  local v="$1"
+  v="${v//\'/\'\'}"
+  printf "'%s'" "${v}"
+}
+
+stats_require_nonnegative_int() {
+  local value="$1" label="$2"
+  [[ "${value}" =~ ^[0-9]+$ ]] \
+    || die "${EXIT_USAGE_ERROR}" "${label} must be a non-negative integer"
+}
+
 # stats_db_init — create schema if absent (idempotent).
 stats_db_init() {
   require_sqlite3
@@ -82,6 +94,12 @@ CREATE TABLE IF NOT EXISTS stats_events (
   output_tokens               INTEGER,
   cache_read_tokens           INTEGER,
   cache_create_tokens         INTEGER,
+  delegate_backend            TEXT,
+  delegate_model              TEXT,
+  delegate_steps              INTEGER,
+  offloaded_input_tokens      INTEGER,
+  offloaded_output_tokens     INTEGER,
+  offloaded_cached_input_tokens INTEGER,
   post_condition_target_type  TEXT,
   post_condition_matcher      TEXT,
   post_condition_hit          INTEGER,
@@ -108,6 +126,21 @@ CREATE TABLE IF NOT EXISTS stats_overrides (
 );
 PRAGMA user_version = 1;
 SQL
+  local col name type exists
+  for col in \
+    "delegate_backend|TEXT" \
+    "delegate_model|TEXT" \
+    "delegate_steps|INTEGER" \
+    "offloaded_input_tokens|INTEGER" \
+    "offloaded_output_tokens|INTEGER" \
+    "offloaded_cached_input_tokens|INTEGER"; do
+    name="${col%%|*}"
+    type="${col#*|}"
+    exists="$(sqlite3 "${STATS_DB}" "SELECT COUNT(*) FROM pragma_table_info('stats_events') WHERE name='${name}';")"
+    if [ "${exists}" = "0" ]; then
+      sqlite3 "${STATS_DB}" "ALTER TABLE stats_events ADD COLUMN ${name} ${type};"
+    fi
+  done
   chmod 600 "${STATS_DB}" 2>/dev/null || true
 }
 
@@ -134,8 +167,12 @@ stats_rebuild() {
     printf 'BEGIN;\n'
     tail -n "${new_lines}" "${STATS_JSONL}" | jq -r '
       def q: tostring | gsub("'"'"'"; "'"'"''"'"'");
+      def sql_int_or_null:
+        if type == "number" and floor == . and . >= 0 then tostring
+        elif type == "string" and test("^[0-9]+$") then .
+        else "NULL" end;
       [
-        (.schema_version // 1 | tostring),
+        (.schema_version // 1 | sql_int_or_null),
         ("'"'"'" + (.ts // "" | q) + "'"'"'"),
         ("'"'"'" + (.trace_id // "" | q) + "'"'"'"),
         ("'"'"'" + (.span_id // "" | q) + "'"'"'"),
@@ -147,26 +184,38 @@ stats_rebuild() {
         (if .site then ("'"'"'" + (.site | q) + "'"'"'") else "NULL" end),
         (if .selector_kind then ("'"'"'" + (.selector_kind | q) + "'"'"'") else "NULL" end),
         (if .selector_value then ("'"'"'" + (.selector_value | q) + "'"'"'") else "NULL" end),
-        (.duration_ms // 0 | tostring),
-        (.argv_bytes // 0 | tostring),
-        (.stdout_bytes // 0 | tostring),
-        (.stderr_bytes // 0 | tostring),
-        (.rc // 0 | tostring),
+        (.duration_ms // 0 | sql_int_or_null),
+        (.argv_bytes // 0 | sql_int_or_null),
+        (.stdout_bytes // 0 | sql_int_or_null),
+        (.stderr_bytes // 0 | sql_int_or_null),
+        (.rc // 0 | sql_int_or_null),
         ("'"'"'" + (.outcome // "" | q) + "'"'"'"),
         (if .failure_mode then ("'"'"'" + (.failure_mode | q) + "'"'"'") else "NULL" end),
         (if .model then ("'"'"'" + (.model | q) + "'"'"'") else "NULL" end),
         (if .service_tier then ("'"'"'" + (.service_tier | q) + "'"'"'") else "NULL" end),
-        (if .gen_ai_usage_input_tokens  then (.gen_ai_usage_input_tokens | tostring) else "NULL" end),
-        (if .gen_ai_usage_output_tokens then (.gen_ai_usage_output_tokens | tostring) else "NULL" end),
-        (if .gen_ai_usage_cache_read_input_tokens     then (.gen_ai_usage_cache_read_input_tokens | tostring) else "NULL" end),
-        (if .gen_ai_usage_cache_creation_input_tokens then (.gen_ai_usage_cache_creation_input_tokens | tostring) else "NULL" end),
+        (.gen_ai_usage_input_tokens | sql_int_or_null),
+        (.gen_ai_usage_output_tokens | sql_int_or_null),
+        (.gen_ai_usage_cache_read_input_tokens | sql_int_or_null),
+        (.gen_ai_usage_cache_creation_input_tokens | sql_int_or_null),
         (if .post_condition_target_type then ("'"'"'" + (.post_condition_target_type | q) + "'"'"'") else "NULL" end),
         (if .post_condition_matcher     then ("'"'"'" + (.post_condition_matcher | q) + "'"'"'") else "NULL" end),
         (if .post_condition_hit == true then "1" elif .post_condition_hit == false then "0" else "NULL" end),
         (if .post_condition_expected then ("'"'"'" + (.post_condition_expected | q) + "'"'"'") else "NULL" end),
         (if .post_condition_observed then ("'"'"'" + (.post_condition_observed | q) + "'"'"'") else "NULL" end),
-        ("'"'"'" + (. | tostring | q) + "'"'"'")
-      ] | "INSERT OR IGNORE INTO stats_events VALUES (NULL," + join(",") + ");"
+        ("'"'"'" + (. | tostring | q) + "'"'"'"),
+        (if .delegate_backend then ("'"'"'" + (.delegate_backend | q) + "'"'"'") else "NULL" end),
+        (if .delegate_model then ("'"'"'" + (.delegate_model | q) + "'"'"'") else "NULL" end),
+        (.delegate_steps | sql_int_or_null),
+        (.offloaded_input_tokens | sql_int_or_null),
+        (.offloaded_output_tokens | sql_int_or_null),
+        (.offloaded_cached_input_tokens | sql_int_or_null)
+      ] | "INSERT OR IGNORE INTO stats_events (" +
+        "schema_version,ts,trace_id,span_id,parent_span_id,session_id,gen_ai_tool_name," +
+        "verb,adapter_route,site,selector_kind,selector_value,duration_ms,argv_bytes,stdout_bytes,stderr_bytes,rc,outcome,failure_mode," +
+        "model,service_tier,input_tokens,output_tokens,cache_read_tokens,cache_create_tokens," +
+        "post_condition_target_type,post_condition_matcher,post_condition_hit,post_condition_expected,post_condition_observed,raw_json," +
+        "delegate_backend,delegate_model,delegate_steps,offloaded_input_tokens,offloaded_output_tokens,offloaded_cached_input_tokens" +
+        ") VALUES (" + join(",") + ");"
     '
     printf "INSERT INTO stats_cursor(source,last_line,last_ts) VALUES('stats.jsonl',%d,datetime('now')) ON CONFLICT(source) DO UPDATE SET last_line=excluded.last_line,last_ts=excluded.last_ts;\n" "${cur}"
     printf 'COMMIT;\n'
@@ -199,10 +248,11 @@ stats_report() {
       *) die "${EXIT_USAGE_ERROR}" "report: unknown flag '$1'" ;;
     esac
   done
+  stats_require_nonnegative_int "${days}" "--days"
 
   local where="WHERE ts >= datetime('now', '-${days} days')"
-  [ -n "${route_filter}" ] && where="${where} AND adapter_route='${route_filter}'"
-  [ -n "${verb_filter}" ]  && where="${where} AND verb='${verb_filter}'"
+  [ -n "${route_filter}" ] && where="${where} AND adapter_route=$(stats_sql_quote "${route_filter}")"
+  [ -n "${verb_filter}" ]  && where="${where} AND verb=$(stats_sql_quote "${verb_filter}")"
 
   stats_load_prices
 
@@ -259,6 +309,45 @@ stats_report() {
     SELECT COUNT(*) FROM stats_events ${where}
     AND failure_mode='oblivious_success';")
   printf '\n  ⚠ oblivious_success: %s (adapter said ok but post-condition failed)\n' "${obliv}" >&2
+
+  local delegate_events offloaded_total_tokens
+  delegate_events="$(sqlite3 "${STATS_DB}" "
+    SELECT COUNT(*) FROM stats_events ${where}
+    AND adapter_route='browser-delegate';")"
+  offloaded_total_tokens="$(sqlite3 "${STATS_DB}" "
+    SELECT COALESCE(SUM(
+      COALESCE(offloaded_input_tokens, CAST(json_extract(raw_json, '$.offloaded_input_tokens') AS INTEGER), 0) +
+      COALESCE(offloaded_output_tokens, CAST(json_extract(raw_json, '$.offloaded_output_tokens') AS INTEGER), 0) +
+      COALESCE(offloaded_cached_input_tokens, CAST(json_extract(raw_json, '$.offloaded_cached_input_tokens') AS INTEGER), 0)
+    ), 0)
+    FROM stats_events ${where}
+    AND adapter_route='browser-delegate';")"
+
+  if [ "${delegate_events}" != "0" ]; then
+    printf '\nDelegation offload (secondary LLM):\n' >&2
+    sqlite3 -separator $'\t' "${STATS_DB}" "
+      SELECT
+        COALESCE(delegate_backend, json_extract(raw_json, '$.delegate_backend'), '(unknown)') AS backend,
+        COALESCE(delegate_model, json_extract(raw_json, '$.delegate_model'), model, '(unknown)') AS model_name,
+        COUNT(*) AS n,
+        SUM(CASE WHEN outcome='success' THEN 1 ELSE 0 END) AS ok,
+        CAST(AVG(duration_ms) AS INTEGER) AS avg_ms,
+        CAST(AVG(COALESCE(delegate_steps, CAST(json_extract(raw_json, '$.delegate_steps') AS INTEGER), 0)) AS INTEGER) AS avg_steps,
+        COALESCE(SUM(COALESCE(offloaded_input_tokens, CAST(json_extract(raw_json, '$.offloaded_input_tokens') AS INTEGER), 0)), 0) AS in_tok,
+        COALESCE(SUM(COALESCE(offloaded_output_tokens, CAST(json_extract(raw_json, '$.offloaded_output_tokens') AS INTEGER), 0)), 0) AS out_tok,
+        COALESCE(SUM(COALESCE(offloaded_cached_input_tokens, CAST(json_extract(raw_json, '$.offloaded_cached_input_tokens') AS INTEGER), 0)), 0) AS cached_tok,
+        COALESCE(SUM(
+          COALESCE(offloaded_input_tokens, CAST(json_extract(raw_json, '$.offloaded_input_tokens') AS INTEGER), 0) +
+          COALESCE(offloaded_output_tokens, CAST(json_extract(raw_json, '$.offloaded_output_tokens') AS INTEGER), 0) +
+          COALESCE(offloaded_cached_input_tokens, CAST(json_extract(raw_json, '$.offloaded_cached_input_tokens') AS INTEGER), 0)
+        ), 0) AS total_tok
+      FROM stats_events ${where}
+      AND adapter_route='browser-delegate'
+      GROUP BY backend, model_name
+      ORDER BY total_tok DESC, n DESC;" \
+      | awk -F'\t' 'BEGIN{printf "  %-14s %-22s %6s %6s %8s %9s %10s %10s %10s %10s\n","backend","model","n","ok","avg_ms","avg_step","input","output","cached","total"}
+                    {printf "  %-14s %-22s %6s %6s %8s %9s %10s %10s %10s %10s\n",$1,$2,$3,$4,$5,$6,$7,$8,$9,$10}' >&2
+  fi
 
   # Token + cost rollup if prices available.
   if [ "${PRICES_AVAILABLE}" = "1" ]; then
@@ -332,7 +421,8 @@ stats_report() {
                     {printf "  %-22s %8s %10.2f %12s\n",$1,$2,$3,$4}' >&2
   fi
 
-  emit_summary verb=stats tool=none why=report status=ok events="${total}" days="${days}"
+  emit_summary verb=stats tool=none why=report status=ok events="${total}" days="${days}" \
+    delegate_events="${delegate_events}" offloaded_total_tokens="${offloaded_total_tokens}"
 }
 
 # stats_mark — record a user override for one span_id.
@@ -375,8 +465,9 @@ stats_tune() {
       *) die "${EXIT_USAGE_ERROR}" "tune: unknown flag '$1'" ;;
     esac
   done
+  stats_require_nonnegative_int "${days}" "--days"
   local where="WHERE ts >= datetime('now', '-${days} days')"
-  [ -n "${route_filter}" ] && where="${where} AND adapter_route='${route_filter}'"
+  [ -n "${route_filter}" ] && where="${where} AND adapter_route=$(stats_sql_quote "${route_filter}")"
 
   printf '\n=== browser-stats tune (last %s day(s)) ===\n\n' "${days}" >&2
   printf 'Worst-performing (verb,route) by success rate (min 10 events):\n' >&2
@@ -449,8 +540,10 @@ PRUNEUSAGE
       *) die "${EXIT_USAGE_ERROR}" "prune: unknown flag '$1'" ;;
     esac
   done
+  stats_require_nonnegative_int "${days}" "--days"
+  stats_require_nonnegative_int "${threshold}" "--threshold"
   local where="WHERE failure_mode='oblivious_success' AND ts >= datetime('now', '-${days} days') AND site IS NOT NULL AND selector_value IS NOT NULL"
-  [ -n "${site_filter}" ] && where="${where} AND site='${site_filter}'"
+  [ -n "${site_filter}" ] && where="${where} AND site=$(stats_sql_quote "${site_filter}")"
 
   local candidates
   candidates="$(sqlite3 -separator $'\t' "${STATS_DB}" "

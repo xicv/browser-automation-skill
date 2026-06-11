@@ -125,6 +125,18 @@ teardown() { teardown_temp_home; }
   printf '%s' "${output}" | jq -e '.expires_in_hours == null' >/dev/null
 }
 
+@test "session.sh: session_expired_by_ttl returns 0 for expired metadata" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://x.test\",\"captured_at\":\"2000-01-01T00:00:00Z\",\"expires_in_hours\":1,\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_expired_by_ttl x"
+  assert_status 0
+}
+
+@test "session.sh: session_expired_by_ttl returns 1 when TTL metadata is absent" {
+  bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_save x '{\"cookies\":[],\"origins\":[]}' '{\"name\":\"x\",\"origin\":\"https://x.test\",\"schema_version\":1}'"
+  run bash -c "source '${LIB_DIR}/common.sh'; init_paths; source '${LIB_DIR}/session.sh'; session_expired_by_ttl x"
+  assert_status 1
+}
+
 @test "session.sh: session_delete removes both .json + .meta.json" {
   setup_temp_home
   run bash -c "

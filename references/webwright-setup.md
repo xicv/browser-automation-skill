@@ -70,6 +70,7 @@ See the **Delegation policy** section in `SKILL.md` for how Claude decides what'
 
 ## Security / limits (phase 1)
 - **No-auth only.** A credentialed `--site` is refused — Webwright persists screenshots + logs in plaintext, so don't run logged-in tasks until the credential bridge ships. Keep tasks to public pages.
+- **Auth bridge is design-only.** See `references/browser-delegate-auth-bridge.md`; future auth must reuse `storageState`, never raw passwords or TOTP secrets.
 - **Privacy canary.** The delegated trajectory is scanned before any result is surfaced; a sentinel hit withholds the result.
 - **Rotate leaked keys.** If a key ever lands in a transcript or log, revoke it immediately.
 

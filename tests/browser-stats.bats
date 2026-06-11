@@ -257,6 +257,132 @@ teardown() {
   ' >/dev/null
 }
 
+@test "browser-stats report: rejects non-integer --days" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" report --days "1'); DROP TABLE stats_events;--"
+  [ "${status}" -eq "${EXIT_USAGE_ERROR}" ]
+  assert_output_contains "--days must be a non-negative integer"
+}
+
+@test "browser-stats report: quotes route and verb filters" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 700 "${BROWSER_SKILL_HOME}/memory"
+  jq -nc \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" '
+    {schema_version:1, ts:$ts,
+     span_id:"1111111111111111", trace_id:"1111111111111111",
+     parent_span_id:null, session_id:null,
+     gen_ai_operation_name:"execute_tool",
+     gen_ai_tool_name:"odd.click",
+     gen_ai_tool_type:"function",
+     verb:"click'\''odd", adapter_route:"route'\''odd",
+     site:null, selector_kind:"none", selector_value:null,
+     duration_ms:1, argv_bytes:0, stdout_bytes:0, stderr_bytes:0,
+     rc:0, outcome:"success", failure_mode:null}' \
+    > "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" report --days 30 --route "route'odd" --verb "click'odd"
+  [ "${status}" -eq 0 ] || fail "report failed: ${output}"
+  summary="$(printf '%s\n' "${output}" | tail -1)"
+  printf '%s' "${summary}" | jq -e '.verb == "stats" and .status == "ok" and .events == 1' >/dev/null \
+    || fail "summary wrong: ${summary}"
+}
+
+@test "browser-stats rebuild: numeric fields are sanitized before SQL import" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 700 "${BROWSER_SKILL_HOME}/memory"
+  jq -nc \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+    --arg bad "0); DROP TABLE stats_events;--" '
+    {schema_version:1, ts:$ts,
+     span_id:"2222222222222222", trace_id:"2222222222222222",
+     parent_span_id:null, session_id:null,
+     gen_ai_operation_name:"invoke_agent",
+     gen_ai_tool_name:"browser-delegate.webwright",
+     gen_ai_tool_type:"function",
+     verb:"delegate", adapter_route:"browser-delegate",
+     delegate_backend:"webwright", delegate_model:"glm-5.1",
+     delegate_steps:$bad,
+     site:null, selector_kind:"none", selector_value:null,
+     duration_ms:$bad, argv_bytes:"12", stdout_bytes:"nope", stderr_bytes:0,
+     rc:0, outcome:"success", failure_mode:null,
+     offloaded_input_tokens:"5",
+     offloaded_output_tokens:$bad,
+     offloaded_cached_input_tokens:"7"}' \
+    > "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" rebuild
+  [ "${status}" -eq 0 ] || fail "rebuild failed: ${output}"
+  table_count="$(sqlite3 "${BROWSER_SKILL_HOME}/memory/stats.db" \
+    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='stats_events';")"
+  [ "${table_count}" = "1" ] || fail "stats_events table missing after rebuild"
+  row="$(sqlite3 "${BROWSER_SKILL_HOME}/memory/stats.db" "
+    SELECT
+      (duration_ms IS NULL) || '|' ||
+      argv_bytes || '|' ||
+      (stdout_bytes IS NULL) || '|' ||
+      rc || '|' ||
+      (delegate_steps IS NULL) || '|' ||
+      offloaded_input_tokens || '|' ||
+      (offloaded_output_tokens IS NULL) || '|' ||
+      offloaded_cached_input_tokens
+    FROM stats_events WHERE span_id='2222222222222222';")"
+  [ "${row}" = "1|12|1|0|1|5|1|7" ] \
+    || fail "numeric sanitization row wrong: ${row}"
+}
+
+@test "browser-stats rebuild + report: indexes delegate offloaded token fields" {
+  command -v sqlite3 >/dev/null 2>&1 || skip "sqlite3 not available"
+  sqlite3 :memory: "SELECT json_extract('{\"a\":1}', '$.a');" >/dev/null 2>&1 \
+    || skip "sqlite3 JSON functions not available"
+  mkdir -p "${BROWSER_SKILL_HOME}/memory"
+  chmod 700 "${BROWSER_SKILL_HOME}/memory"
+  jq -nc \
+    --arg ts "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" '
+    {schema_version:1, ts:$ts,
+     span_id:"0000000000000001", trace_id:"0000000000000001",
+     parent_span_id:null, session_id:null,
+     gen_ai_operation_name:"invoke_agent",
+     gen_ai_tool_name:"browser-delegate.webwright",
+     gen_ai_tool_type:"function",
+     verb:"delegate", adapter_route:"browser-delegate",
+     delegate_backend:"webwright", delegate_model:"glm-4.5",
+     delegate_steps:3,
+     site:null, selector_kind:"none", selector_value:null,
+     duration_ms:4200, argv_bytes:0, stdout_bytes:18, stderr_bytes:0,
+     rc:0, outcome:"success", failure_mode:null,
+     offloaded_input_tokens:1000,
+     offloaded_output_tokens:200,
+     offloaded_cached_input_tokens:300}' \
+    > "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+  chmod 600 "${BROWSER_SKILL_HOME}/memory/stats.jsonl"
+
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" rebuild
+  [ "${status}" -eq 0 ] || fail "rebuild failed: ${output}"
+  row="$(sqlite3 "${BROWSER_SKILL_HOME}/memory/stats.db" \
+    "SELECT delegate_backend || '|' || delegate_model || '|' || delegate_steps || '|' || offloaded_input_tokens || '|' || offloaded_output_tokens || '|' || offloaded_cached_input_tokens FROM stats_events WHERE adapter_route='browser-delegate';")"
+  [ "${row}" = "webwright|glm-4.5|3|1000|200|300" ] \
+    || fail "delegate columns not indexed correctly: ${row}"
+
+  run bash "${SCRIPTS_DIR}/browser-stats.sh" report --days 30
+  [ "${status}" -eq 0 ] || fail "report failed: ${output}"
+  assert_output_contains "Delegation offload"
+  assert_output_contains "webwright"
+  assert_output_contains "glm-4.5"
+  summary="$(printf '%s\n' "${output}" | tail -1)"
+  printf '%s' "${summary}" | jq -e '
+    .verb == "stats"
+    and .status == "ok"
+    and .events == 1
+    and .delegate_events == 1
+    and .offloaded_total_tokens == 1500
+  ' >/dev/null || fail "summary wrong: ${summary}"
+}
+
 # --- Integration: mark override ----------------------------------------
 
 @test "browser-stats mark: records user override for known span_id" {

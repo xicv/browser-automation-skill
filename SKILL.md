@@ -10,7 +10,7 @@ effort: low
 
 # browser-automation-skill
 
-Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura). 42 verbs covering site/session/credential management, navigation, snapshot+ref-based interaction, capture pipelines (console/network/screenshot/Lighthouse), declarative flow runner with replay+diff, a per-archetype memory cache (`browser-do`) that lets agents skip LLM ref-resolution on repeat actions, and per-schema state migration tooling (`browser-migrate`).
+Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura). 45 verbs covering site/session/credential management, navigation, snapshot+ref-based interaction, capture pipelines (console/network/screenshot/Lighthouse), declarative flow runner with replay+diff, Webwright delegation, a per-archetype memory cache (`browser-do`) that lets agents skip LLM ref-resolution on repeat actions, and per-schema state migration tooling (`browser-migrate`).
 
 ## Verbs
 
@@ -79,6 +79,7 @@ Multi-step work on a logged-in site shares **one** persistent Chrome held by the
 ### Flow runner
 
 > Optional. With stateful sessions (see *Stateful sessions* above) sequential verbs already share one browser, so most flows are unnecessary — reach for `flow` only to declaratively replay/diff a recorded sequence.
+> A `.flow.yaml` may set top-level `site:` plus `session:`; `flow run` injects those as per-step `--site/--as` for storageState validation and daemon routing unless a step overrides them.
 
 | Verb | What it does | Example |
 |---|---|---|
@@ -250,6 +251,11 @@ Modes govern when **Claude** reaches for delegation (the CLI always works when i
 - `mode:"auto"` + task *suitable* → delegate.
 - **Suitable** = novel (not a cached/replayable flow) AND multi-step (≳ `min_steps`) AND no-auth (delegate hard-refuses credentialed sites) AND not in `auto_exclude`.
 - Otherwise (single-step, repeatable, or auth) → primitive/cached verbs (`open/click/fill/snapshot/do/replay`).
+
+Authenticated delegation is not implemented. The deferred bridge must reuse a
+validated Playwright `storageState` only; it must never pass passwords, TOTP
+secrets, or credential backend payloads to Webwright. See
+`references/browser-delegate-auth-bridge.md`.
 
 ## Roadmap
 

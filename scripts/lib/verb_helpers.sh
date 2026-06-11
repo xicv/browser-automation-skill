@@ -118,6 +118,19 @@ resolve_session_storage_state() {
     die "${EXIT_SESSION_EXPIRED}" "session '${session_name}' origins do not match site '${ARG_SITE}' (URL ${site_url}); re-login required"
   fi
 
+  if session_expired_by_ttl "${session_name}"; then
+    if _can_auto_relogin && _silent_relogin >/dev/null 2>&1; then
+      if ! session_exists "${session_name}"; then
+        die "${EXIT_SESSION_EXPIRED}" "session '${session_name}' expired by TTL and auto re-login did not create a replacement"
+      fi
+      if session_expired_by_ttl "${session_name}"; then
+        die "${EXIT_SESSION_EXPIRED}" "session '${session_name}' expired by TTL after auto re-login; re-login required"
+      fi
+    else
+      die "${EXIT_SESSION_EXPIRED}" "session '${session_name}' expired by TTL (captured_at + expires_in_hours); re-login required"
+    fi
+  fi
+
   BROWSER_SKILL_STORAGE_STATE="${SESSIONS_DIR}/${session_name}.json"
   export BROWSER_SKILL_STORAGE_STATE
   BROWSER_SKILL_SESSION_NAME="${session_name}"

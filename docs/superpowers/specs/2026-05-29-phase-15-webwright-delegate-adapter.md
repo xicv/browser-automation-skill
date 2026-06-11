@@ -74,11 +74,34 @@ Webwright is an external install (`$HOME/tools/Webwright` venv + Playwright brow
 
 ## 5. Credential / session bridge — security crux
 
-Webwright spawns its OWN Playwright browser with a fresh profile and persists ALL intermediate logs + screenshots. Our credentials live under `$HOME/.browser-skill` (0700 dir / 0600 files), never on argv, never in the transcript.
+Detailed contract: `references/browser-delegate-auth-bridge.md`.
 
-Phase 1 (this spec): **no-auth tasks only.** `browser-delegate` refuses (exit non-zero) if `--site` resolves to a site requiring stored credentials, with a message pointing here. This avoids leaking secrets into Webwright's plaintext workspace before the bridge exists.
+Webwright spawns its OWN Playwright browser and persists intermediate logs,
+screenshots, generated code, and model responses. Our credentials live under
+`$HOME/.browser-skill` (0700 dir / 0600 files), never on argv, never in the
+transcript. Therefore phase 1 remains **no-auth tasks only**:
+`browser-delegate` refuses credentialed `--site` requests until the bridge is
+implemented and tested.
 
-Phase 2 (deferred): bridge our stored `storage_state` (cookies, not raw passwords) into the Webwright run start so a logged-in session is reused WITHOUT typing secrets into a form (which would land in screenshots/logs). Passwords are never handed to Webwright. Secrets that must pass go via stdin only (AP-7). Webwright's own API key already lives off-argv in its global `.env` (good).
+Phase 2 must reuse a validated Playwright `storageState` only. It must never
+hand Webwright a raw password, TOTP secret, or credential backend payload.
+Before copying any session state it must run the same site/session checks as
+primitive verbs: site exists, session exists, origins match, TTL is fresh, and
+auto-relogin is attempted in the parent skill process when available.
+
+The session file under `$BROWSER_SKILL_HOME/sessions/` must not be passed
+directly to Webwright. The bridge creates a one-run mode-`0600` copy under
+`$BROWSER_SKILL_HOME/runtime/delegate-auth/<task-id>/`, launches Webwright with
+a config pointing to that copy, and deletes the auth bundle after the run by
+default. Stats/summaries may record `auth_bridge:true`, site, and session name;
+they must not record cookies or localStorage values.
+
+Important current constraint: local Webwright does not expose a
+`storage_state_path` CLI/config field today. Do not fake authenticated
+delegation by telling the secondary LLM to type secrets into forms. The first
+implementation step is adding or requiring Webwright support for
+`environment.storage_state_path` so Playwright opens the context with the copied
+storageState before `start_url`.
 
 ## 6. Privacy-canary gate
 

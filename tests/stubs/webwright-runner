@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # Test stub for browser-delegate's BROWSER_DELEGATE_RUNNER_CMD seam.
-# Args: TASK START_URL TASK_ID OUT_DIR
+# Args: TASK_FILE START_URL TASK_ID OUT_DIR
 # Writes a canned Webwright-shaped run dir + trajectory.json and prints a final
 # answer to stdout. Honors STUB_INJECT_CANARY=1 to embed the privacy sentinel
 # into the trajectory, and STUB_EXIT to force a non-zero backend exit.
 set -euo pipefail
-task="${1:-}"; task_id="${3:-}"; out_dir="${4:-}"
+task_file="${1:-}"; task_id="${3:-}"; out_dir="${4:-}"
 : "${2:-}"  # start_url (arg 2) accepted for contract parity; unused by the stub
+if [ -n "${BROWSER_DELEGATE_STUB_ARGV_LOG:-}" ]; then
+  printf '%s\n' "$@" > "${BROWSER_DELEGATE_STUB_ARGV_LOG}"
+fi
+task="$(cat "${task_file}")"
 
 run_dir="${out_dir}/${task_id}_stub"
 mkdir -p "${run_dir}/debug/steps"
