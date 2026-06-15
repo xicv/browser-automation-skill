@@ -230,9 +230,22 @@ if [ "${arg_backend}" != "webwright" ]; then
   die "${EXIT_USAGE_ERROR}" "browser-delegate: --backend '${arg_backend}' unsupported (phase 1: webwright only)"
 fi
 
-# Quiet shellcheck: --max-steps is accepted now, forwarded to the backend in a
-# later phase (budget plumbing). Referenced here so it is not "unused".
-: "${arg_max_steps:=}"
+if [ -n "${arg_max_steps}" ] && ! [[ "${arg_max_steps}" =~ ^[1-9][0-9]*$ ]]; then
+  die "${EXIT_USAGE_ERROR}" "browser-delegate: --max-steps must be a positive integer"
+fi
+
+# Step budget is plumbed by INJECTING the hard cap into the delegated task text:
+# the Webwright CLI exposes no stable --max-steps flag, so the secondary LLM is
+# instructed directly. The value is also surfaced in dry-run/result/telemetry so
+# downstream audit tooling sees the budget. max_steps_json is the JSON-safe form
+# (validated positive int, else literal null) reused by every jq emission below.
+max_steps_json="null"
+if [ -n "${arg_max_steps}" ]; then
+  max_steps_json="${arg_max_steps}"
+  arg_task="${arg_task}
+
+Constraint: complete this task in at most ${arg_max_steps} browser steps. If you cannot finish within ${arg_max_steps} steps, stop and report partial progress."
+fi
 
 task_id="${arg_task_id}"
 if [ -z "${task_id}" ]; then
@@ -257,8 +270,8 @@ real_cmd_str="(cd '${ww_dir}' && source .venv/bin/activate && python <task-file-
 # --- dry-run: print resolved plan, spawn nothing ---
 if [ "${arg_dry_run}" = "true" ]; then
   jq -nc --arg cmd "${real_cmd_str}" --arg out "${out_dir}" --arg ww "${ww_dir}" \
-    --arg backend "${arg_backend}" --arg sid "${task_id}" \
-    '{_kind:"dry_run", backend:$backend, task_id:$sid, webwright_dir:$ww, output_dir:$out, command:$cmd}'
+    --arg backend "${arg_backend}" --arg sid "${task_id}" --argjson max_steps "${max_steps_json}" \
+    '{_kind:"dry_run", backend:$backend, task_id:$sid, max_steps:$max_steps, webwright_dir:$ww, output_dir:$out, command:$cmd}'
   emit_summary verb=delegate tool="${arg_backend}" why="dry-run (no spawn)" \
     status=ok task_id="${task_id}" dry_run=true
   exit 0
@@ -391,7 +404,8 @@ if [ -n "${_span_id}" ] && [ -n "${_ts}" ]; then
     --argjson steps "${steps}" \
     --argjson off_in "${offloaded_in}" \
     --argjson off_out "${offloaded_out}" \
-    --argjson off_cached "${offloaded_cached}" '
+    --argjson off_cached "${offloaded_cached}" \
+    --argjson max_steps "${max_steps_json}" '
     { schema_version: $schema_version, ts: $ts, span_id: $span_id, trace_id: $trace_id,
       parent_span_id: null, session_id: null,
       gen_ai_operation_name: "invoke_agent",
@@ -402,6 +416,7 @@ if [ -n "${_span_id}" ] && [ -n "${_ts}" ]; then
       delegate_backend: $backend,
       delegate_model: ($model | select(. != "" and . != "unknown") // null),
       delegate_steps: $steps,
+      delegate_max_steps: $max_steps,
       site: ($site | select(. != "") // null),
       selector_kind: "none",
       selector_value: null,
@@ -429,10 +444,11 @@ if [ "${runner_rc}" -eq 0 ]; then
     --arg model "${backend_model}" \
     --argjson steps "${steps}" \
     --argjson off_in "${offloaded_in}" \
-    --argjson off_out "${offloaded_out}" '
+    --argjson off_out "${offloaded_out}" \
+    --argjson max_steps "${max_steps_json}" '
     {_kind:"delegate_result", backend:$backend,
      model:($model|select(.!="" and .!="unknown")//null),
-     workspace:($ws|select(.!="")//null), steps:$steps,
+     workspace:($ws|select(.!="")//null), steps:$steps, max_steps:$max_steps,
      offloaded_input_tokens:$off_in, offloaded_output_tokens:$off_out,
      final_response:$fr}'
 else
@@ -443,10 +459,11 @@ else
     --argjson steps "${steps}" \
     --argjson rc "${runner_rc}" \
     --argjson off_in "${offloaded_in}" \
-    --argjson off_out "${offloaded_out}" '
+    --argjson off_out "${offloaded_out}" \
+    --argjson max_steps "${max_steps_json}" '
     {_kind:"delegate_error", backend:$backend,
      model:($model|select(.!="" and .!="unknown")//null),
-     workspace:($ws|select(.!="")//null), steps:$steps, runner_rc:$rc,
+     workspace:($ws|select(.!="")//null), steps:$steps, max_steps:$max_steps, runner_rc:$rc,
      offloaded_input_tokens:$off_in, offloaded_output_tokens:$off_out}'
 fi
 
