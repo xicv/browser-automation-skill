@@ -4,84 +4,129 @@
 [![license](https://img.shields.io/npm/l/browser-automation-skill.svg)](LICENSE)
 [![node](https://img.shields.io/node/v/browser-automation-skill.svg)](package.json)
 
-A [Claude Code](https://claude.com/claude-code) skill, OpenAI Codex plugin, **and MCP server** for driving real browsers from an LLM. **45 verbs + Webwright delegation + a per-action audit surface** routed across four primitive tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura), with a 5-tier cache defense chain (cached selector -> fingerprint rescue -> local-VLM rescue -> cloud LLM -> user fixup) that lets agents skip LLM ref-resolution on repeat actions and per-schema state migration tooling. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
+**Drive a real browser from an AI coding agent — and turn flaky one-off automation into repeatable, auditable daily jobs.**
 
-> **Status:** v0.75.0 current. Phases 1-16 plus P0 multi-step orchestration hardening shipped: stateful sessions, persistent CDP, real YAML flows, Webwright delegation, delegate offload telemetry, session TTL auto-relogin, and doctor/readiness checks. `scripts/lib/node/mcp-server.mjs` publishes 6 verbs (open/snapshot/click/fill/extract/list-sites) over JSON-RPC NDJSON for external agents; full CLI remains available from the repo checkout. Full bats: 1202/1202 green. Architecture map: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). New contributors: [`CONTRIBUTING.md`](CONTRIBUTING.md).
->
-> **One-command enable Path 3 cache rescue:** `bash scripts/browser-vlm.sh install-env` (idempotent — appends env exports to `~/.zshrc`; lazy auto-start handles the rest).
+Works as a [Claude Code](https://claude.com/claude-code) skill, an OpenAI Codex plugin, or a standalone **MCP server** for any MCP-aware client. Under the hood it routes **45 verbs** (open, click, fill, snapshot, extract, audit, flow, …) across four browser backends — **chrome-devtools-mcp**, **playwright-cli**, **playwright-lib**, and **obscura** — and picks the cheapest one that supports each action. Credentials and sessions stay strictly local under `$HOME/.browser-skill/`.
 
-## What it does
+> **Status — v0.75.0.** Stateful sessions, persistent CDP, real YAML flows, a per-archetype selector cache, full per-action telemetry, opt-in Webwright delegation, and doctor/readiness checks have all shipped. The bundled MCP server exposes 6 verbs over JSON-RPC; the full 45-verb CLI ships in the repo. 1,202 bats tests, green. Architecture: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-- **Sites + sessions + credentials.** Register sites; capture/restore Playwright `storageState`; store credentials in keychain (macOS) / libsecret (Linux) / plaintext-with-typed-confirmation; rotate TOTP shared secrets.
+---
+
+## Why this exists
+
+Browser agents are expensive and fragile for three structural reasons. This skill is built to attack all three:
+
+| Problem | What usually happens | What this does |
+|---|---|---|
+| **Cost** | Every click re-asks an LLM "which element is this?" | Caches learned selectors per `(site, page-archetype, intent)`. Repeat actions dispatch at **zero LLM tokens**. |
+| **State** | Each call spawns a cold browser; multi-step login → navigate → act falls apart | Persistent login **sessions** + a live browser **daemon** held across steps, so real workflows actually complete. |
+| **Honesty** | "Success" means *the driver returned ok* — even when the page did nothing | Every action emits one telemetry event; the audit flags **`oblivious_success`** (driver ok, but your assertion failed) — the dominant invisible-error class for browser agents. |
+
+The guiding idea: **a daily browser job should get more deterministic every time it runs.** The first run explores. The tenth run reuses a stored session, cached selectors, a replayable flow, and explicit post-conditions — cheap, fast, and verifiable.
+
+## A real daily job
+
+Say you log into an internal app every morning, upload a report, and confirm it landed.
+
+```bash
+# 1. Register the site + capture a logged-in session once
+bash scripts/browser-add-site.sh --name myapp --url 'https://app.example.com'
+bash scripts/browser-use.sh --set myapp
+bash scripts/browser-login.sh --site myapp          # session stored locally, reused next time
+
+# 2. Drive it — snapshot returns an accessibility tree with eN refs
+bash scripts/browser-open.sh --url 'https://app.example.com/reports'
+bash scripts/browser-snapshot.sh                    # → eN refs for click/fill/upload
+bash scripts/browser-upload.sh --selector 'input[type=file]' --file ./report.pdf
+
+# 3. Verify the outcome, not just the click — flips status to error if the toast never shows
+BROWSER_STATS_EXPECT_TYPE=text \
+BROWSER_STATS_EXPECT_MATCH=include \
+BROWSER_STATS_EXPECT_VALUE='Upload complete' \
+  bash scripts/browser-click.sh --selector 'button.submit'
+```
+
+Run it daily and it hardens itself: record the steps once (`browser-do record` / `flow record`), and later runs replay from cache, skip LLM ref-resolution, and assert the same business facts. `browser-stats report --pareto` tells you which steps are still flaky.
+
+## Strategy — the route ladder
+
+Pick the cheapest route that can both **complete** the task and **verify** the outcome. Full reference: [`references/routing-heuristics.md`](references/routing-heuristics.md).
+
+| Task shape | Route | Why |
+|---|---|---|
+| Known, repeated action on a URL archetype | `browser-do` cache / `replay` | Zero-LLM-token dispatch of a learned selector |
+| Known multi-step workflow | `flow run` / `replay` | Deterministic, templated, re-runnable |
+| Simple, no-secret interaction | **MCP tools** | Lightweight; works from any MCP client |
+| Login / secrets / stateful work | **local CLI verbs** | Secrets stay on disk + stdin, never MCP argv |
+| Uncertain / debugging a broken page | `inspect` · `extract` · `audit` | Console + network + screenshot + Lighthouse evidence |
+| Novel, no-auth, long-horizon task | `browser-delegate` (opt-in) | Offloads the agent loop to a secondary LLM, off your context |
+
+Primitive verbs are routed by [`scripts/lib/router.sh`](scripts/lib/router.sh): storage-state work → `playwright-lib`; console/network/Lighthouse → `chrome-devtools-mcp`; multi-URL scrape / stealth → `obscura`; `--tool NAME` always overrides.
+
+## Features
+
+- **Sites · sessions · credentials.** Register sites; capture/restore Playwright `storageState`; store credentials in the macOS Keychain / Linux libsecret / plaintext-with-typed-confirmation; rotate TOTP secrets.
 - **Navigation + interaction.** `open` · `snapshot` (eN-indexed accessibility tree) · `click`/`fill`/`hover`/`press`/`select`/`drag`/`upload` by `--ref eN` or `--selector CSS` · `wait` · `route` (network mock) · multi-tab (`tab-list`/`tab-switch`/`tab-close`).
-- **Capture pipelines.** `inspect` aggregates console + network (sanitized HAR) + screenshot. `audit` runs Lighthouse. All captures persist under `~/.browser-skill/captures/<NNN>/` with `meta.json` + per-aspect files; auto-prune at retention thresholds (default: 500 captures / 14 days; baselines exempt).
-- **Declarative flow runner.** `flow run task.flow.yaml` executes a YAML flow with `${var}` + `${refs.NAME}` templating. Top-level `site:` + `session:` metadata is injected as per-step `--site` / `--as` unless a step overrides it, so storageState validation and daemon routing are inherited. `flow record` wraps `playwright codegen` (password-canary write-side: `/password/i` becomes `${secrets.password}` placeholder; literal dropped). `replay <id>` re-executes a capture's steps + emits structured per-step diff. `history list/show/diff/clear` + `baseline save/list/remove` for managing the capture corpus.
-- **Per-archetype memory cache (Phase 11).** `browser-do --intent "click delete" --pattern '/devices/:id'` looks up cached selector for the `(site, archetype, intent)` triple; on hit, dispatches the existing verb at zero LLM tokens; on miss, emits `cache_miss` event. `browser-do record` for explicit write-back. `browser-do propose` auto-clusters URLs into patterns. Self-heal: 4 consecutive failures disable the cached selector; agent re-resolves + re-records to heal.
-- **Per-action telemetry + balance-triangle audit (Phase 12).** Every adapter call (`open`/`click`/`fill`/`snapshot`/`extract`) emits one OTel-shaped JSONL event to `~/.browser-skill/memory/stats.jsonl` (mode 0600). `browser-delegate` adds secondary-LLM offload fields (`delegate_steps`, `offloaded_input_tokens`, `offloaded_output_tokens`, cached-input tokens, model/backend), and `browser-stats report` separates those from Claude-context token signals. `browser-stats report --pareto` rolls events into a route × verb table: success rate, post-condition hit rate, token-proxy byte counts, p50 duration, $$ cost (when `CLAUDE_USAGE_*` env injected), 14-value failure-mode histogram (Phase-14 added `unknown_failure` catch-all), and **`oblivious_success` detection** (adapter said ok but post-condition assertion failed — the dominant invisible-error class for browser agents). `browser-stats tune` surfaces worst-performing `(verb, route)` candidates for `/autoresearch` handoff. **`browser-stats prune` (Phase 14)** closes the feedback loop: finds (site, selector) tuples with ≥3 `oblivious_success` events; `--apply` disables the matching cache interactions so cloud LLM re-derives. `browser-stats mark <span> success|fail[:reason]` records user overrides. Schema follows OpenInference + OTel GenAI v1.40 naming for forward-compat with Langfuse/Phoenix/Jaeger via OTLP exporter. See [`references/browser-stats-cheatsheet.md`](references/browser-stats-cheatsheet.md).
-- **Local-VLM cache rescue (Phase 14, Path 3).** 5th tier in the cache defense chain — between Phase-13 fingerprint rescue and cloud-LLM fallback. When `BROWSER_SKILL_VISION_FALLBACK=1` + `BROWSER_SKILL_VISUAL_RESCUE_CMD=<path>` set, browser-do invokes an external hook that probes whether the cached element is still semantically present. Bundled canonical probe `scripts/lib/visual-rescue-default.sh` (text-mode v1) reads the accessibility-tree snapshot + asks a local OpenAI-compatible LLM (default `http://127.0.0.1:8080` — matches `bash scripts/browser-vlm.sh start`) yes/no. Smart-skip when `fail_count ≥ 3` (cache likely fundamentally broken; skip the probe). One env var pair via `bash scripts/browser-vlm.sh install-env` enables everything; lazy-start + 10-min idle-stop watchdog manage the llama-server lifecycle. See [`references/recipes/visual-rescue-hook.md`](references/recipes/visual-rescue-hook.md).
-- **MCP server (Phase 14).** `bash scripts/browser-mcp.sh serve` publishes 6 verbs (open / snapshot / click / fill / extract / list-sites) over JSON-RPC NDJSON for external agents (Claude Code, OpenAI Codex, midscene, agent-browser, Stagehand, Continue, Cline). TOOLS auto-discovered from each adapter's `tool_capabilities()` + `scripts/lib/node/mcp-tools.json` allowlist — adding a verb to MCP is a 1-JSON-entry change. Env-var passthrough is whitelisted (AP-7: client's `OPENAI_API_KEY` and other foreign secrets are filtered; only `BROWSER_SKILL_*` / `MIDSCENE_MODEL_*` / `CLAUDE_*` / `PLAYWRIGHT_*` / etc inherit). `browser_fill` has no `secret` field and `additionalProperties: false` — secrets stay on the bash entry point via `--secret-stdin`. See [`references/browser-mcp-cheatsheet.md`](references/browser-mcp-cheatsheet.md).
-- **Webwright delegation (Phase 15, opt-in).** `browser-delegate` can offload a novel no-auth multi-step task to Webwright driven by a secondary LLM such as GLM. Delegation is `off` by default, never router-selected automatically, writes task text through a mode-0600 task file instead of argv, and emits compact summary/offload telemetry back to the main agent. See [`references/browser-delegate-cheatsheet.md`](references/browser-delegate-cheatsheet.md) and [`references/webwright-setup.md`](references/webwright-setup.md).
+- **Capture pipelines.** `inspect` aggregates console + network (sanitized HAR) + screenshot; `audit` runs Lighthouse. Captures persist under `~/.browser-skill/captures/<NNN>/` with auto-prune (default 500 captures / 14 days; baselines exempt).
+- **Declarative flows.** `flow run task.flow.yaml` executes a YAML flow with `${var}` and `${refs.NAME}` templating; top-level `site:`/`session:` is inherited per step. `flow record` wraps `playwright codegen` (passwords become `${secrets.password}` placeholders, never literals). `replay <id>` re-runs a capture and emits a per-step diff.
+- **Per-archetype selector cache.** `browser-do --intent "click delete" --pattern '/devices/:id'` looks up a cached selector for the `(site, archetype, intent)` triple and dispatches at zero LLM tokens on a hit. Self-healing: 4 consecutive failures disable a stale selector so the agent re-resolves and re-records.
+- **5-tier cache rescue chain.** cached selector → fingerprint rescue → **local-VLM rescue** → cloud LLM → user fixup. The local-VLM tier (`bash scripts/browser-vlm.sh install-env`, one idempotent setup) asks a local model whether the cached element is still present before paying for the cloud.
+- **Telemetry + balance-triangle audit.** Every adapter call emits one OTel-shaped JSONL event to `~/.browser-skill/memory/stats.jsonl`. `browser-stats report --pareto` rolls events into a route × verb table — success rate, post-condition hit rate, token-proxy bytes, p50 latency, cost, failure-mode histogram, and `oblivious_success` detection. `browser-stats prune` disables cache entries that keep silently failing; `browser-stats tune` surfaces the worst `(verb, route)` pairs. Schema follows OpenInference + OTel GenAI naming (Langfuse / Phoenix / Jaeger via OTLP). See [`references/browser-stats-cheatsheet.md`](references/browser-stats-cheatsheet.md).
+- **MCP server.** `bash scripts/browser-mcp.sh serve` publishes 6 verbs (`open`/`snapshot`/`click`/`fill`/`extract`/`list-sites`) over JSON-RPC NDJSON (MCP 2024-11-05). Foreign secrets are filtered from env passthrough (AP-7); tabular output auto-flips to TOON (40–65% fewer tokens than JSON). See [`references/browser-mcp-cheatsheet.md`](references/browser-mcp-cheatsheet.md).
+- **Webwright delegation (opt-in).** `browser-delegate` offloads a novel **no-auth** multi-step task to Webwright driven by a secondary LLM (e.g. GLM), so the observe-act-inspect token cost lands off your agent's context. Off by default, never router-selected, task text passed via a mode-0600 file — never argv. Bound runs with `--max-steps`. See [`references/browser-delegate-cheatsheet.md`](references/browser-delegate-cheatsheet.md).
 
-## Security at a glance
+## Security
 
-- Credentials are on disk only at `$HOME/.browser-skill/` (mode 0700 dir, 0600 files).
-- Credentials never appear on argv, in `ps`, in git, or in the agent transcript (AP-7 stdin-only pattern enforced via `tests/argv_leak.bats`).
-- Authenticated delegation is disabled. The future bridge is storageState-only and must never pass passwords, TOTP secrets, or credential backend payloads to Webwright. See [`references/browser-delegate-auth-bridge.md`](references/browser-delegate-auth-bridge.md).
-- Cache writes refuse `PASSWORD-CANARY` sentinel (privacy guard in `browser-do record`).
-- `.gitignore` blocks every credential / session / capture / memory pattern from the repo.
-- `.githooks/pre-commit` rejects any staged file or diff that looks like a credential.
-- See `SECURITY.md` for the full threat model + `references/recipes/{privacy-canary,cache-write-security,path-security}.md` for codified discipline.
+- Credentials and sessions live only at `$HOME/.browser-skill/` (mode `0700` dir, `0600` files).
+- Secrets never appear on argv, in `ps`, in git, or in the agent transcript — stdin-only (AP-7), enforced by `tests/argv_leak.bats`.
+- Delegation is **no-auth only**: `browser-delegate` refuses any site that has stored credentials.
+- Cache and flow writes refuse the `PASSWORD-CANARY` sentinel (privacy guard).
+- `.gitignore` blocks every credential / session / capture / memory pattern; `.githooks/pre-commit` rejects anything that looks like a credential.
+- Full threat model in [`SECURITY.md`](SECURITY.md).
 
 ## Requirements
 
-**Skill itself (always required):**
-- bash **≥ 5.0** (`brew install bash` on macOS — system bash 3.2 is too old; bash 5.0 needed for `$EPOCHREALTIME` fast path used by the Phase-12 telemetry emitter)
-- `jq`
-- `sqlite3` (Phase 12 — lazy-built SQLite mirror at `memory/stats.db`; standard on macOS and most Linux distros)
+**Always:** bash **≥ 5.0** (`brew install bash` — system 3.2 is too old), `jq`, `sqlite3`.
 
-**For real browser flows (install at least one):**
-- **chrome-devtools-mcp** (recommended; most-complete adapter): `npx -y chrome-devtools-mcp@latest`
+**At least one browser backend:**
+- **chrome-devtools-mcp** (recommended, most complete): `npx -y chrome-devtools-mcp@latest`
 - **playwright-cli**: `npm i -g playwright @playwright/test @playwright/cli && playwright install chromium`
-- **playwright-lib**: requires `node` + `npm i -g playwright` (driver lazy-imports)
-- **obscura** (single-binary; scrape + stealth-only): download from https://github.com/h4ckf0r0day/obscura/releases
+- **playwright-lib**: `node` + `npm i -g playwright`
+- **obscura** (single binary; scrape + stealth): [releases](https://github.com/h4ckf0r0day/obscura/releases)
 
-**For tests:** `bats-core` (`brew install bats-core`)
+**Tests:** `bats-core`. **Delegation (optional):** Webwright + an Anthropic-compatible key (e.g. GLM) — see [`references/webwright-setup.md`](references/webwright-setup.md).
 
-**Optional for delegation:** Webwright plus an Anthropic-compatible model key such as GLM. Follow [`references/webwright-setup.md`](references/webwright-setup.md). `browser doctor` reports Webwright readiness as advisory only.
-
-`browser doctor` reports which adapters are present + install hints for missing ones.
+`browser doctor` reports which backends are present and how to install the rest.
 
 ## Install
 
-You can use this project three ways: as an **MCP server** (works with MCP-aware clients such as Claude Code, OpenAI Codex, Continue, Cline, midscene, Stagehand, and agent-browser), as a full **Codex plugin** (bundled skill + MCP server), or as a full **Claude Code skill** (all 44 bash verbs + the cache + audit surface).
+Three ways to use the project, smallest to largest surface:
 
-### Option A — MCP server only (via npm; any MCP client)
-
-Zero-install via `npx`:
+### A — MCP server only (any MCP client, via npm)
 
 ```bash
-# One-off smoke test
+# Smoke test with no install
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
   | npx -y browser-automation-skill@latest serve
 ```
 
-**Wire into Claude Code (user-scope — every project on the machine):**
+Wire into Claude Code (user scope — every project on the machine):
 
 ```bash
 claude mcp add browser-skill --scope user -- npx -y browser-automation-skill@latest serve
 claude mcp list   # → browser-skill: ... ✓ Connected
 ```
 
-**Wire into OpenAI Codex (shared by Codex CLI and the Codex app/IDE):**
+Wire into OpenAI Codex (shared by the Codex CLI and app/IDE):
 
 ```bash
 codex mcp add browser-skill -- npx -y browser-automation-skill@latest serve
 codex mcp list
 ```
 
-Equivalent `~/.codex/config.toml` entry:
+Equivalent `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.browser-skill]
@@ -91,29 +136,18 @@ startup_timeout_sec = 20
 tool_timeout_sec = 60
 ```
 
-6 tools become available: `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`, `browser_list-sites`. Pin a version (`@0.75.0`) for reproducibility, or omit `@latest` to track the registry tip. Phase 12 (v0.72.0+) auto-flips MCP tool output to TOON format for tabular verbs (40-65% token savings vs JSON, +0.4pp LLM parse accuracy; spec: `docs/superpowers/specs/2026-05-22-toon-output-amendment.md`).
+This exposes `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract`, `browser_list-sites`. Pin a version (`@0.75.0`) for reproducibility. Other clients (Continue / Cline / midscene / Stagehand): add a stdio entry pointing at the same `serve` command.
 
-**Other MCP clients (Continue / Cline / midscene / Stagehand):** add a stdio entry pointing at `npx -y browser-automation-skill@latest serve`. Protocol: MCP 2024-11-05, NDJSON over stdio.
+> The MCP surface is a deliberate 6-verb subset. For the full 45-verb CLI + cache + flows + telemetry, install as a skill or plugin below.
 
-Optional global install (skip the `npx` warmup):
-
-```bash
-npm i -g browser-automation-skill
-browser-automation-skill serve   # same as npx form
-```
-
-> **Note:** the MCP surface is intentionally a curated subset (6 verbs). For the full 44-verb CLI + cache + flow runner + telemetry, install as a skill (Option B or Option C).
-
-### Option B — Full Codex plugin (skill + bundled MCP server)
-
-From GitHub:
+### B — Codex plugin (skill + bundled MCP server)
 
 ```bash
 codex plugin marketplace add xicv/browser-automation-skill
 codex plugin add browser-automation-skill@browser-automation-skill
 ```
 
-From a local checkout:
+Or from a local checkout:
 
 ```bash
 git clone https://github.com/xicv/browser-automation-skill ~/Projects/browser-automation-skill
@@ -122,18 +156,9 @@ codex plugin marketplace add .
 codex plugin add browser-automation-skill@browser-automation-skill
 ```
 
-This installs the Codex plugin metadata from `plugins/browser-automation-skill/.codex-plugin/plugin.json`, the bundled skill from `plugins/browser-automation-skill/skills/browser-automation-skill/SKILL.md`, and the bundled MCP server from `plugins/browser-automation-skill/.mcp.json`. Codex stores plugin and MCP enablement in `~/.codex/config.toml`, so the CLI and app/IDE see the same setup.
+Installs the plugin manifest, bundled skill, and MCP entry; Codex records enablement in `~/.codex/config.toml` so CLI and app/IDE share one setup.
 
-To refresh an existing local checkout after a release:
-
-```bash
-git pull --ff-only
-codex plugin marketplace add .
-codex plugin add browser-automation-skill@browser-automation-skill
-codex mcp get browser-skill
-```
-
-### Option C — Full Claude Code skill (one machine, all your projects)
+### C — Claude Code skill (one machine, all your projects)
 
 ```bash
 git clone https://github.com/xicv/browser-automation-skill ~/Projects/browser-automation-skill
@@ -141,105 +166,38 @@ cd ~/Projects/browser-automation-skill
 ./install.sh --with-hooks   # --with-hooks enables the credential-leak pre-commit blocker
 ```
 
-Symlinks `~/.claude/skills/browser-automation-skill` → repo. Creates `~/.browser-skill/` mode 0700. Runs `doctor` at the end.
+Symlinks `~/.claude/skills/browser-automation-skill` → repo, creates `~/.browser-skill/` (mode `0700`), and runs `doctor`.
 
-## Verify (in Claude Code)
+## Verify
 
-```
-/browser doctor
-```
+In Claude Code: `/browser doctor` → exit 0, final line is a JSON summary with `"status":"ok"` and the installed-adapter list.
 
-Expected: exit 0; final line is a JSON summary with `"status":"ok"`. Doctor also enumerates installed adapters.
-
-## Verify (in Codex)
-
-```
-/mcp
-/skills
-codex plugin list
-```
-
-Expected: `/mcp` shows the `browser-skill` MCP server and `codex plugin list` shows `browser-automation-skill@browser-automation-skill` as installed and enabled. In `/skills`, Codex may list the bundled skill as `browser-automation-skill` or with its plugin-qualified name, `browser-automation-skill:browser-automation-skill`; it will not necessarily appear as a standalone directory under `~/.codex/skills`.
-
-## Quickstart
-
-```bash
-# Register your first site
-bash scripts/browser-add-site.sh --name myapp --url 'https://app.example.com'
-bash scripts/browser-use.sh --set myapp
-
-# Open + snapshot (uses chrome-devtools-mcp by default)
-bash scripts/browser-open.sh --url 'https://app.example.com'
-bash scripts/browser-snapshot.sh
-# → emits aria_yaml + eN refs you can pass to click/fill/hover/etc.
-
-# Click a ref
-bash scripts/browser-click.sh --ref e3
-
-# Or click by CSS (cacheable; required for browser-do cache dispatch)
-bash scripts/browser-click.sh --selector 'button.delete'
-
-# Phase 11 cache: record a learned selector once, dispatch zero-LLM-token thereafter
-bash scripts/browser-do.sh record \
-  --site myapp --intent "click delete" \
-  --selector "button.delete" \
-  --url 'https://app.example.com/devices/123'
-
-bash scripts/browser-do.sh \
-  --site myapp --verb click \
-  --intent "click delete" \
-  --pattern '/devices/:id'
-# → cache hit; dispatches click; bumps success_count
-
-# Phase 12 telemetry: every adapter call above emits one stats event automatically.
-# Review the audit:
-bash scripts/browser-stats.sh rebuild
-bash scripts/browser-stats.sh report --days 7 --pareto
-
-# Assert a post-condition so the audit can flag oblivious_success:
-BROWSER_STATS_EXPECT_TYPE=url \
-BROWSER_STATS_EXPECT_MATCH=include \
-BROWSER_STATS_EXPECT_VALUE='/devices/123' \
-  bash scripts/browser-open.sh --url 'https://app.example.com/devices/123'
-```
+In Codex: `/mcp` shows the `browser-skill` server and `codex plugin list` shows the plugin enabled.
 
 ## Output contract
 
-Every verb prints zero or more streaming JSON lines, then ends with a single-line JSON summary. Parse with `jq`; route on `.status` (`ok`, `partial`, `error`, `empty`, `aborted`).
+Every verb prints zero or more streaming JSON lines, then one final single-line JSON summary. Parse with `jq`; route on `.status` (`ok` · `partial` · `error` · `empty` · `aborted`).
 
 ```bash
 $ bash scripts/browser-doctor.sh | tail -1 | jq .
 {"verb":"doctor","tool":"none","why":"health-check","status":"ok","problems":0,"adapters_ok":4,"duration_ms":42}
 ```
 
-## Layout
+## Project layout
 
 ```
-install.sh              # preflight + state dir + symlink + (opt) hooks
-uninstall.sh            # remove symlink (state preserved)
-.agents/plugins/        # repo marketplace entry for Codex plugin install
-.claude-plugin/         # legacy-compatible marketplace entry Codex can import
-plugins/                # Codex plugin wrapper (manifest, skill, MCP entry)
-SKILL.md                # Claude Code skill manifest (verb table; updated at every phase ship)
-SECURITY.md             # threat model + disclosure
-.gitignore              # blocks credential / session / capture / memory patterns
-.githooks/pre-commit    # credential-leak blocker
-scripts/                # 42 verbs + browser-stats + 7 lib/ + 4 lib/tool/ adapters + lib/node/ driver helpers + lib/fingerprint-rescue.js + lib/migrators/{memory,recent_urls,stats}
-tests/                  # 1002 bats (25 new across Phases 12 + 13); runs in <60s
-references/             # routing-heuristics + recipes (incl. fingerprint-rescue.md) + browser-stats-cheatsheet + stats-schema.json + stats-prices.json
-docs/superpowers/       # design specs + per-phase plan-docs + HANDOFF.md
+install.sh / uninstall.sh   # preflight + state dir + symlink (+ opt hooks); state preserved on uninstall
+SKILL.md                    # Claude Code skill manifest (verb table)
+SECURITY.md                 # threat model + disclosure
+scripts/                    # 45 verbs + 4 backend adapters + router + driver helpers + migrators
+plugins/                    # Codex plugin wrapper (manifest, skill, MCP entry)
+references/                 # routing-heuristics, cheatsheets, recipes, stats schema/prices
+tests/                      # 1,202 bats tests; runs in <60s
+docs/                       # architecture, design specs, per-phase plans, HANDOFF
 ```
-
-## Uninstall
-
-```bash
-./uninstall.sh
-```
-
-Removes the `~/.claude/skills/browser-automation-skill` symlink. State at `~/.browser-skill/` is preserved by default.
 
 ## Roadmap
 
-See `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md` for the design and `docs/superpowers/plans/` for executable plans. Current "what's next" lives in `docs/superpowers/HANDOFF.md` (refreshed after every shipped PR).
+Design: `docs/superpowers/specs/2026-04-27-browser-automation-skill-design.md`. Executable plans: `docs/superpowers/plans/`. Current "what's next": `docs/superpowers/HANDOFF.md` (refreshed after every shipped PR).
 
-**v1.2 work ✅ COMPLETE.** Remaining hardening (all opt-in, none blocking): Phase 11 v2 backlog A2-A6 (slug heuristic / `--auto-record` / pattern-equivalence canonicalization / `self_heal_history[]` audit trail / active observation `recent_urls.jsonl`); daemon e2e for playwright-lib selector path; press cache-scope decision codification; Phase 12 backlog (TOON output mode for tabular verbs, plugin-wrapper distribution shape, wire remaining 25 verbs to `stats_run_adapter_emit`); Phase 13 backlog (strong-fingerprint mode that captures dimensions at `browser-do record` time instead of parsing them out of the cached selector string; LLM-judge upgrade for the `semantic` post-condition matcher).
+Core (v1.2) is complete. Remaining work is opt-in hardening: pattern-equivalence canonicalization and `--auto-record` for the cache, playwright-lib selector-path daemon e2e, a strong-fingerprint capture mode, and an LLM-judge upgrade for the `semantic` post-condition matcher.
