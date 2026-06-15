@@ -1,7 +1,7 @@
 ---
 name: browser-automation-skill
-description: Drives a real browser from Claude Code by routing across four backends (chrome-devtools-mcp, playwright-cli, playwright-lib, obscura), so verbs like open/click/fill/scrape/inspect/audit pick the cheapest adapter that supports each operation. Persists credentials, sessions, captures, and per-action telemetry strictly local under $HOME/.browser-skill/ (mode 0700 dir, 0600 files); secrets never appear on argv, in git, or in the Claude transcript. Surfaces a balance-of-tokens-accuracy-latency audit via browser-stats.
-when_to_use: User mentions a browser task — registering a site, capturing a session, verifying a page, filling a form, capturing console errors, running a lighthouse audit, scraping multiple URLs, debugging a UI bug iteratively, replaying a recorded flow, or auditing skill efficiency (browser-stats report/tune).
+description: Drives a real browser from Claude Code, OpenAI Codex, or MCP-aware agents by routing across four backends (chrome-devtools-mcp, playwright-cli, playwright-lib, obscura), so verbs like open/click/fill/scrape/inspect/audit pick the cheapest adapter that supports each operation. Persists credentials, sessions, captures, and per-action telemetry strictly local under $HOME/.browser-skill/ (mode 0700 dir, 0600 files); secrets never appear on argv, in git, or in the agent transcript. Surfaces a balance-of-tokens-accuracy-latency audit via browser-stats.
+when_to_use: User mentions a browser task — registering a site, capturing a session, verifying a page, filling a form, capturing console errors, running a lighthouse audit, scraping multiple URLs, debugging a UI bug iteratively, replaying a recorded flow, running a daily browser job, auditing skill efficiency (browser-stats report/tune), or delegating a novel no-auth multi-step web task.
 argument-hint: [verb] [--site NAME] [--session NAME] [--tool NAME] [--dry-run]
 allowed-tools: Bash(bash *) Bash(jq *) Bash(chmod *) Bash(mkdir *) Bash(stat *) Bash(rm *) Bash(mv *) Bash(cat *) Bash(sqlite3 *) Bash(awk *) Bash(sed *) Bash(grep *) Bash(openssl *) Bash(date *) Bash(wc *) Bash(tr *) Bash(tail *) Bash(head *) Bash(sleep *) Bash(printf *) Bash(python3 *)
 model: sonnet
@@ -10,7 +10,42 @@ effort: low
 
 # browser-automation-skill
 
-Drive a real browser from Claude Code via four routed tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura). 45 verbs covering site/session/credential management, navigation, snapshot+ref-based interaction, capture pipelines (console/network/screenshot/Lighthouse), declarative flow runner with replay+diff, Webwright delegation, a per-archetype memory cache (`browser-do`) that lets agents skip LLM ref-resolution on repeat actions, and per-schema state migration tooling (`browser-migrate`).
+Drive a real browser from Claude Code, OpenAI Codex, or any MCP-aware agent via four routed tools (chrome-devtools-mcp / playwright-cli / playwright-lib / obscura). 45 verbs covering site/session/credential management, navigation, snapshot+ref-based interaction, capture pipelines (console/network/screenshot/Lighthouse), declarative flow runner with replay+diff, Webwright delegation, a per-archetype memory cache (`browser-do`) that lets agents skip LLM ref-resolution on repeat actions, and per-schema state migration tooling (`browser-migrate`).
+
+When running from Claude Code, `${CLAUDE_SKILL_DIR}` points at this skill directory; from a repository checkout or Codex plugin context, use the repository root in its place.
+
+## Operating model
+
+Always choose the cheapest reliable route that can satisfy the task. The core loop is **act → verify → remember → audit** — a browser action is only useful once its post-condition is checked and any failure is visible in telemetry.
+
+1. **Health and setup first.** New machine or site: `doctor`, register the site, capture a session, verify state-dir permissions.
+2. **Cached/replayable paths for known work.** Prefer `browser-do`, `flow run`, or `replay` once a job has been learned.
+3. **Primitive verbs for active work.** `open`, `snapshot`, `click`, `fill`, `extract`, `inspect`, `assert` are the building blocks.
+4. **Capture evidence for uncertain pages.** `inspect --capture-console --capture-network --screenshot`, selector extraction, and post-condition assertions instead of trusting an adapter's `ok`.
+5. **Delegate only for novel no-auth long-horizon work.** `browser-delegate` is opt-in, off by default, and refuses credentialed sites.
+
+## Route ladder
+
+| Situation | Route | Command family |
+|---|---|---|
+| Machine health, state, migrations | CLI | `browser-doctor.sh`, `browser-migrate.sh` |
+| Site, session, credential setup | CLI | `browser-add-site.sh`, `browser-login.sh`, `browser-creds-*.sh` |
+| Simple no-secret page operation | MCP tools | `browser_open`, `browser_snapshot`, `browser_click`, `browser_fill`, `browser_extract` |
+| Known repeated action | Memory cache | `browser-do.sh --intent ... --pattern ...` |
+| Known multi-step flow | Flow/replay | `browser-flow.sh run`, `browser-replay.sh` |
+| UI debugging | Capture/audit | `browser-inspect.sh`, `browser-extract.sh`, `browser-audit.sh` |
+| Novel no-auth multi-step task | Delegation | `browser-delegate.sh` |
+
+Primitive-verb precedence is decided by [router.sh](scripts/lib/router.sh); see [routing heuristics](references/routing-heuristics.md).
+
+## Safety rules
+
+- Never pass passwords, API keys, session cookies, TOTP seeds, or bearer tokens through MCP tool arguments or visible chat text.
+- Use `--secret-stdin`, the local credential commands, or captured sessions for secrets.
+- Never replay session cookies through `curl`; drive the browser context instead.
+- Treat payment, deletion, production-admin, and account/security changes as destructive — require the script's explicit confirmation flags and a clear user instruction.
+- Keep captures and memory local; never copy `~/.browser-skill/` contents into a repository.
+- If a task needs credentials but only an MCP-only route is available, stop and switch to the local CLI credential/session flow.
 
 ## Verbs
 
