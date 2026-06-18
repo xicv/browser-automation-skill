@@ -87,3 +87,4 @@ core.*
 *.pid
 node_modules/
 AGENTS.md
+HANDOFF.md

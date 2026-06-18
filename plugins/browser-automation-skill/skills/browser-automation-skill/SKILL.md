@@ -7,6 +7,16 @@ description: Drive and verify real-browser work from OpenAI Codex using the bund
 
 Use this skill when Codex needs a real browser rather than static HTTP fetching. Start with the bundled MCP tools for simple interactions, then switch to the local CLI surface when the task needs credentials, sessions, flows, cache, telemetry, or stronger safety controls.
 
+## Context isolation
+
+Browser output (snapshots, DOM, console/network captures, Lighthouse) is verbose and
+fills the main context fast. When the host supports a subagent / isolated worker
+(Claude Code ships a bundled `browser-worker` agent for exactly this), run the browser
+task there and surface only a compact summary, so the verbose intermediate output never
+reaches the main thread. With no subagent available (plain Codex), call the verbs
+directly and keep returns terse — reference capture IDs/paths instead of pasting raw
+snapshots or HAR.
+
 ## Preferred route order
 
 1. **MCP tools for simple no-secret interactions.** They are compact and cross-client.

@@ -3,7 +3,7 @@ name: browser-automation-skill
 description: Drives a real browser from Claude Code, OpenAI Codex, or MCP-aware agents by routing across four backends (chrome-devtools-mcp, playwright-cli, playwright-lib, obscura), so verbs like open/click/fill/scrape/inspect/audit pick the cheapest adapter that supports each operation. Persists credentials, sessions, captures, and per-action telemetry strictly local under $HOME/.browser-skill/ (mode 0700 dir, 0600 files); secrets never appear on argv, in git, or in the agent transcript. Surfaces a balance-of-tokens-accuracy-latency audit via browser-stats.
 when_to_use: User mentions a browser task — registering a site, capturing a session, verifying a page, filling a form, capturing console errors, running a lighthouse audit, scraping multiple URLs, debugging a UI bug iteratively, replaying a recorded flow, running a daily browser job, auditing skill efficiency (browser-stats report/tune), or delegating a novel no-auth multi-step web task.
 argument-hint: [verb] [--site NAME] [--session NAME] [--tool NAME] [--dry-run]
-allowed-tools: Bash(bash *) Bash(jq *) Bash(chmod *) Bash(mkdir *) Bash(stat *) Bash(rm *) Bash(mv *) Bash(cat *) Bash(sqlite3 *) Bash(awk *) Bash(sed *) Bash(grep *) Bash(openssl *) Bash(date *) Bash(wc *) Bash(tr *) Bash(tail *) Bash(head *) Bash(sleep *) Bash(printf *) Bash(python3 *)
+allowed-tools: Bash(bash *) Bash(jq *) Bash(chmod *) Bash(mkdir *) Bash(stat *) Bash(rm *) Bash(mv *) Bash(cat *) Bash(sqlite3 *) Bash(awk *) Bash(sed *) Bash(grep *) Bash(openssl *) Bash(date *) Bash(wc *) Bash(tr *) Bash(tail *) Bash(head *) Bash(sleep *) Bash(printf *) Bash(python3 *) Agent(browser-worker) Task(browser-worker)
 model: sonnet
 effort: low
 ---
@@ -23,6 +23,25 @@ Always choose the cheapest reliable route that can satisfy the task. The core lo
 3. **Primitive verbs for active work.** `open`, `snapshot`, `click`, `fill`, `extract`, `inspect`, `assert` are the building blocks.
 4. **Capture evidence for uncertain pages.** `inspect --capture-console --capture-network --screenshot`, selector extraction, and post-condition assertions instead of trusting an adapter's `ok`.
 5. **Delegate only for novel no-auth long-horizon work.** `browser-delegate` is opt-in, off by default, and refuses credentialed sites.
+
+## Context isolation — run browser work in a subagent
+
+Browser tool output is verbose: a single snapshot + DOM extract + console/network
+capture or Lighthouse report easily runs 20k–50k tokens, which rots the main
+thread's context. **When the host supports subagents (e.g. Claude Code), dispatch
+browser tasks to the bundled `browser-worker` subagent via the Agent/Task tool
+instead of calling `browser_*` MCP tools or `scripts/browser-*.sh` on the main
+thread.** The worker does the act → verify → remember → audit loop in its own
+isolated context and returns only a compact structured summary — the snapshots,
+DOM, HAR, and logs never reach the caller. This applies to both the MCP/CLI verbs
+and the delegation path (`browser-delegate.sh`).
+
+- **Dispatch when** a browser task is requested and the host has subagents: hand the
+  whole task (target URL/site, what to do, what to return) to `browser-worker`.
+- **Don't dispatch when** the host has no subagents (call the verbs directly), or for
+  a single trivial verb where the round-trip overhead outweighs the context saved.
+- **One self-contained task per dispatch.** The worker can't see this conversation —
+  give it everything it needs, and let it return the ≤ 2k-token summary.
 
 ## Route ladder
 
